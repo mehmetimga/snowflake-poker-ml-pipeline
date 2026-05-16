@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from xgboost import XGBClassifier
 
@@ -12,6 +14,7 @@ def train_xgboost(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y
         objective="binary:logistic",
         eval_metric="auc",
         tree_method="hist",
+        device=os.environ.get("XGB_DEVICE", "cpu"),
         n_jobs=-1,
         random_state=42,
         verbosity=0,

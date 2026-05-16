@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     warehouse_backend: Literal["duckdb", "snowflake"] = Field("duckdb", alias="WAREHOUSE_BACKEND")
     duckdb_path: Path = Field(Path("./data/parquet/warehouse.duckdb"), alias="DUCKDB_PATH")
+    duckdb_s3_bucket: Optional[str] = Field(None, alias="DUCKDB_S3_BUCKET")
+    duckdb_s3_prefix: str = Field("warehouse/", alias="DUCKDB_S3_PREFIX")
 
     snowflake_account: Optional[str] = Field(None, alias="SNOWFLAKE_ACCOUNT")
     snowflake_user: Optional[str] = Field(None, alias="SNOWFLAKE_USER")

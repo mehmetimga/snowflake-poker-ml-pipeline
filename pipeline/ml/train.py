@@ -18,9 +18,11 @@ from sklearn.model_selection import train_test_split
 from pipeline.config import get_settings
 from pipeline.features.engineer import FEATURE_COLUMNS, prepare_matrix
 from pipeline.ml.evaluation import evaluate_model
-from pipeline.ml.export_onnx import export_all
-from pipeline.ml.trainers import train_catboost, train_lightgbm, train_xgboost
+from pipeline.ml.export_onnx import export_catboost, export_lightgbm, export_xgboost
 from pipeline.warehouse import Warehouse, get_warehouse
+
+
+ALL_MODELS = ("xgboost", "catboost", "lightgbm")
 
 
 def _load_dataset(warehouse: Warehouse) -> pd.DataFrame:
@@ -35,11 +37,26 @@ def _load_dataset(warehouse: Warehouse) -> pd.DataFrame:
     return df
 
 
-def train_all(warehouse: Warehouse | None = None, output_dir: Path | None = None) -> dict:
+def train_all(
+    warehouse: Warehouse | None = None,
+    output_dir: Path | None = None,
+    only: list[str] | tuple[str, ...] | None = None,
+) -> dict:
+    """Train classical ML models.
+
+    `only`: optional subset of {"xgboost", "catboost", "lightgbm"}. Defaults
+    to all three. Used by SageMaker entrypoints to scope a single job to one
+    model so each model produces its own artifact.
+    """
     settings = get_settings()
     wh = warehouse or get_warehouse()
     out_dir = Path(output_dir or settings.models_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    selected = tuple(only) if only else ALL_MODELS
+    unknown = [m for m in selected if m not in ALL_MODELS]
+    if unknown:
+        raise ValueError(f"Unknown model(s): {unknown}; valid: {ALL_MODELS}")
 
     df = _load_dataset(wh)
     X, y = prepare_matrix(df)
@@ -60,19 +77,37 @@ def train_all(warehouse: Warehouse | None = None, output_dir: Path | None = None
 
     print(f"[train] n_train={len(X_train)} n_val={len(X_val)} n_test={len(X_test)} pos_rate={y.mean():.3f}")
 
-    xgb_model = train_xgboost(X_train, y_train, X_val, y_val)
-    cat_model = train_catboost(X_train, y_train, X_val, y_val)
-    lgbm_model = train_lightgbm(X_train, y_train, X_val, y_val)
+    models: dict[str, object] = {}
+    if "xgboost" in selected:
+        from pipeline.ml.trainers.xgboost_trainer import train_xgboost
+
+        models["xgboost"] = train_xgboost(X_train, y_train, X_val, y_val)
+    if "catboost" in selected:
+        from pipeline.ml.trainers.catboost_trainer import train_catboost
+
+        models["catboost"] = train_catboost(X_train, y_train, X_val, y_val)
+    if "lightgbm" in selected:
+        from pipeline.ml.trainers.lightgbm_trainer import train_lightgbm
+
+        models["lightgbm"] = train_lightgbm(X_train, y_train, X_val, y_val)
 
     metrics = {
-        "xgboost": evaluate_model("xgboost", y_test, xgb_model.predict_proba(X_test)[:, 1]),
-        "catboost": evaluate_model("catboost", y_test, cat_model.predict_proba(X_test)[:, 1]),
-        "lightgbm": evaluate_model("lightgbm", y_test, lgbm_model.predict_proba(X_test)[:, 1]),
+        name: evaluate_model(name, y_test, m.predict_proba(X_test)[:, 1])
+        for name, m in models.items()
     }
     for name, m in metrics.items():
         print(f"[train] {name}: roc={m.roc_auc:.3f} pr={m.pr_auc:.3f} f1={m.f1:.3f} thr={m.optimal_threshold:.3f}")
 
-    paths = export_all(out_dir, xgb_model, cat_model, lgbm_model, n_features=X.shape[1])
+    exporters = {
+        "xgboost": export_xgboost,
+        "catboost": export_catboost,
+        "lightgbm": export_lightgbm,
+    }
+    paths: dict[str, Path] = {}
+    for name, model in models.items():
+        out = out_dir / f"{name}.onnx"
+        exporters[name](model, X.shape[1], out)
+        paths[name] = out
     print(f"[train] ONNX exports: {[str(p) for p in paths.values()]}")
 
     feature_info = {

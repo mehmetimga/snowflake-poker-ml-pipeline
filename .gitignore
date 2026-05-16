@@ -79,3 +79,18 @@ Thumbs.db
 
 # Docker volumes
 .docker-volumes/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+infra/terraform/*.tfvars.json
+infra/terraform/.terraform.tfstate.lock.info
+infra/terraform/crash.log
+infra/terraform/crash.*.log
+infra/terraform/*.tfplan
+infra/terraform/*_override.tf
+infra/terraform/*_override.tf.json
+infra/terraform/override.tf
+infra/terraform/override.tf.json
