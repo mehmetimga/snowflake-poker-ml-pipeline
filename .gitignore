@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Build artifacts
+build/
+dist/
+*.manifest
+*.spec
+pip-wheel-metadata/
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# Data + models (regenerable)
+data/raw/*
+data/parquet/*
+data/seeds/*
+!data/raw/.gitkeep
+!data/parquet/.gitkeep
+!data/seeds/.gitkeep
+models/*.onnx
+models/*.pt
+models/*.json
+models/*.csv
+!models/.gitkeep
+
+# ML training artifacts
+catboost_info/
+mlruns/
+mlartifacts/
+wandb/
+lightning_logs/
+tensorboard_logs/
+*.ckpt
+*.pkl
+*.joblib
+
+# Logs
+*.log
+logs/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Agent / tool local config
+.claude/
+
+# Docker volumes
+.docker-volumes/
