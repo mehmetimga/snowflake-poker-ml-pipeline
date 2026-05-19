@@ -12,14 +12,12 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from pipeline.config import get_settings
-from pipeline.features.engineer import compute_features
-from pipeline.inference.scorer import score_live_batch
 from pipeline.kafka.config import kafka_client_kwargs
-from pipeline.realtime.pattern_search import PatternSearchConfig, realtime_pattern_scores
-from pipeline.rules.engine import score_dataframe
+from pipeline.realtime.batch import score_live_hands
+from pipeline.realtime.pair_memory import RollingPairMemory
+from pipeline.realtime.pattern_search import PatternSearchConfig
 from pipeline.warehouse import Warehouse, get_warehouse
-from pipeline.warehouse.loader import hands_to_dataframes
-from pipeline.warehouse.sql import delete_by_values, unique_strings
+from pipeline.warehouse.sql import delete_by_values
 
 
 @dataclass(frozen=True)
@@ -41,12 +39,22 @@ class RealTimeProcessor:
         persist_history: bool = True,
         persist_alerts: bool = True,
         pattern_search: PatternSearchConfig | None = None,
+        enable_pair_memory: bool = True,
+        pair_memory_max_pairs: int = 10000,
+        pair_memory: RollingPairMemory | None = None,
     ) -> None:
         self.warehouse = warehouse
         self.threshold = threshold
         self.persist_history = persist_history
         self.persist_alerts = persist_alerts
         self.pattern_search = pattern_search or PatternSearchConfig()
+        self.pair_memory = (
+            pair_memory
+            if pair_memory is not None
+            else RollingPairMemory(max_pairs=pair_memory_max_pairs)
+            if enable_pair_memory
+            else None
+        )
 
     def _warehouse(self) -> Warehouse:
         if self.warehouse is None:
@@ -54,40 +62,14 @@ class RealTimeProcessor:
         return self.warehouse
 
     def process_hands(self, hands: Iterable[dict]) -> RealTimeBatchResult:
-        batch = list(hands)
-        hand_ids = unique_strings(hand["hand_id"] for hand in batch if "hand_id" in hand)
-        if not batch or not hand_ids:
-            return RealTimeBatchResult(hands=0, features=0, rule_flags=0, pair_stats=0, alerts=0)
-
-        df_hands, df_actions, df_players = hands_to_dataframes(batch)
-        features = compute_features(df_hands, df_actions, df_players)
-        flags = score_dataframe(features)
-        pattern_scores = {}
-        if self.pattern_search.enabled:
-            preliminary_alerts = score_live_batch(
-                features=features,
-                rule_flags=flags,
-                hands=df_hands,
-                actions=df_actions,
-                players=df_players,
-                threshold=self.pattern_search.candidate_risk_score,
-                log=False,
-            )
-            pattern_scores = realtime_pattern_scores(
-                players=df_players,
-                rule_flags=flags,
-                preliminary_alerts=preliminary_alerts,
-                config=self.pattern_search,
-            )
-        alerts = score_live_batch(
-            features=features,
-            rule_flags=flags,
-            hands=df_hands,
-            actions=df_actions,
-            players=df_players,
+        scored = score_live_hands(
+            hands,
             threshold=self.threshold,
-            pattern_scores=pattern_scores,
+            pattern_search=self.pattern_search,
+            pair_memory=self.pair_memory,
         )
+        if not scored.hand_ids:
+            return RealTimeBatchResult(hands=0, features=0, rule_flags=0, pair_stats=0, alerts=0)
 
         if self.persist_history or self.persist_alerts:
             warehouse = self._warehouse()
@@ -100,23 +82,23 @@ class RealTimeProcessor:
             # Make batch replay idempotent for Snowflake too, where primary keys
             # are informational and write_pandas appends by default.
             for table in tables:
-                delete_by_values(warehouse, table, "hand_id", hand_ids)
+                delete_by_values(warehouse, table, "hand_id", scored.hand_ids)
 
             if self.persist_history:
-                warehouse.write_pandas(df_hands, "RAW_HANDS")
-                warehouse.write_pandas(df_actions, "RAW_ACTIONS")
-                warehouse.write_pandas(df_players, "RAW_PLAYERS")
-                warehouse.write_pandas(features, "FEATURES")
-                warehouse.write_pandas(flags, "RULE_FLAGS")
-            if self.persist_alerts:
-                warehouse.write_pandas(alerts, "ALERTS")
+                warehouse.write_pandas(scored.hands, "RAW_HANDS")
+                warehouse.write_pandas(scored.actions, "RAW_ACTIONS")
+                warehouse.write_pandas(scored.players, "RAW_PLAYERS")
+                warehouse.write_pandas(scored.features, "FEATURES")
+                warehouse.write_pandas(scored.rule_flags, "RULE_FLAGS")
+            if self.persist_alerts and not scored.alerts.empty:
+                warehouse.write_pandas(scored.alerts, "ALERTS")
 
         return RealTimeBatchResult(
-            hands=len(df_hands),
-            features=len(features),
-            rule_flags=len(flags),
-            pair_stats=0,
-            alerts=len(alerts),
+            hands=len(scored.hands),
+            features=len(scored.features),
+            rule_flags=len(scored.rule_flags),
+            pair_stats=scored.pair_stats_count,
+            alerts=len(scored.alerts),
         )
 
     def run_kafka(

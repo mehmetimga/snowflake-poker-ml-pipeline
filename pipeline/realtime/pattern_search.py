@@ -20,6 +20,7 @@ class PatternSearchConfig:
     enabled: bool = False
     candidate_rule_score: float = 1.0
     candidate_risk_score: float = 0.5
+    candidate_pair_memory_score: float = 0.65
     max_pairs: int = 50
     limit: int = 1
     timeout: float = 1.5
@@ -93,6 +94,31 @@ def _live_pair_stats(players: pd.DataFrame, candidate_hands: Iterable[str], max_
     return out.reset_index()
 
 
+def _candidate_pair_stats(
+    pair_stats: pd.DataFrame,
+    candidate_hands: Iterable[str],
+    config: PatternSearchConfig,
+) -> pd.DataFrame:
+    if pair_stats.empty:
+        return pair_stats
+
+    scoped = pair_stats.copy()
+    hand_set = {str(hand_id) for hand_id in candidate_hands}
+    if "hand_id" in scoped.columns:
+        hand_mask = scoped["hand_id"].astype(str).isin(hand_set)
+    else:
+        hand_mask = pd.Series(False, index=scoped.index)
+
+    if "pair_memory_score" in scoped.columns:
+        memory_mask = scoped["pair_memory_score"].astype(float) >= config.candidate_pair_memory_score
+        scoped = scoped[hand_mask | memory_mask]
+        scoped = scoped.sort_values("pair_memory_score", ascending=False)
+    else:
+        scoped = scoped[hand_mask]
+
+    return scoped.head(config.max_pairs)
+
+
 def _best_score(points) -> float:
     if not points:
         return 0.0
@@ -111,6 +137,7 @@ def realtime_pattern_scores(
     rule_flags: pd.DataFrame,
     preliminary_alerts: pd.DataFrame,
     config: PatternSearchConfig,
+    pair_stats: pd.DataFrame | None = None,
 ) -> dict[tuple[str, str], float]:
     """Return per-(hand_id, player_id) Qdrant scores for selected live pairs.
 
@@ -129,15 +156,19 @@ def realtime_pattern_scores(
 
         normal_exists = client.collection_exists(settings.qdrant_normal_collection)
         hands = _candidate_hands(rule_flags, preliminary_alerts, config)
-        pair_stats = _live_pair_stats(players, hands, config.max_pairs)
-        if pair_stats.empty:
+        query_pairs = (
+            _candidate_pair_stats(pair_stats, hands, config)
+            if pair_stats is not None
+            else _live_pair_stats(players, hands, config.max_pairs)
+        )
+        if query_pairs.empty:
             return {}
 
         embedder = PairFeatureEmbedder()
-        vectors = embedder.encode(pair_stats[PAIR_FEATURE_COLUMNS].to_numpy(dtype=np.float32))
+        vectors = embedder.encode(query_pairs[PAIR_FEATURE_COLUMNS].to_numpy(dtype=np.float32))
         out: dict[tuple[str, str], float] = {}
 
-        for row, vector in zip(pair_stats.itertuples(index=False), vectors):
+        for row, vector in zip(query_pairs.itertuples(index=False), vectors):
             collusion_points = client.query_points(
                 collection_name=settings.qdrant_collusion_collection,
                 query=vector.tolist(),
@@ -161,7 +192,7 @@ def realtime_pattern_scores(
                 out[key] = max(out.get(key, 0.0), pattern_score)
 
         if out:
-            print(f"[qdrant][realtime] enriched {len(out)} player-hand scores from {len(pair_stats)} pair queries")
+            print(f"[qdrant][realtime] enriched {len(out)} player-hand scores from {len(query_pairs)} pair queries")
         return out
     except Exception as exc:
         print(f"[qdrant][realtime] pattern search skipped: {exc}")

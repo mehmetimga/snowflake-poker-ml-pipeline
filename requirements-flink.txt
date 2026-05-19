@@ -1,0 +1,5 @@
+# Optional local runtime for the PyFlink hot path.
+# If local installation is painful on your Python version, run the job from a
+# Flink Python container instead.
+# Python 3.10/3.11 is the safest local path for the Flink 1.19 dependency stack.
+apache-flink>=1.19,<2.0

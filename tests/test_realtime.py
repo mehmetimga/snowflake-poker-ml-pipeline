@@ -39,7 +39,7 @@ def test_realtime_processor_scores_without_warehouse():
     assert result.hands == 8
     assert result.features == 48
     assert result.rule_flags == 48
-    assert result.pair_stats == 0
+    assert result.pair_stats == 120
     assert result.alerts == 48
 
 
@@ -81,7 +81,7 @@ def test_realtime_processor_persists_history_and_alerts_after_scoring(tmp_path: 
     assert result.hands == 8
     assert result.features == 48
     assert result.rule_flags == 48
-    assert result.pair_stats == 0
+    assert result.pair_stats == 120
     assert result.alerts == 48
     assert wh.fetch_df("SELECT COUNT(*) AS c FROM RAW_HANDS").iloc[0]["c"] == 8
     assert wh.fetch_df("SELECT COUNT(*) AS c FROM FEATURES").iloc[0]["c"] == 48

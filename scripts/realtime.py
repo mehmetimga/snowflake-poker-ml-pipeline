@@ -18,8 +18,11 @@ def main() -> None:
     parser.add_argument("--enable-pattern-search", action="store_true")
     parser.add_argument("--pattern-candidate-rule-score", type=float, default=1.0)
     parser.add_argument("--pattern-candidate-risk-score", type=float, default=0.5)
+    parser.add_argument("--pattern-candidate-pair-memory-score", type=float, default=0.65)
     parser.add_argument("--pattern-max-pairs", type=int, default=50)
     parser.add_argument("--pattern-timeout", type=float, default=1.5)
+    parser.add_argument("--pair-memory-max-pairs", type=int, default=10000)
+    parser.add_argument("--no-pair-memory", action="store_true")
     parser.add_argument(
         "--no-persist-history",
         action="store_true",
@@ -45,9 +48,12 @@ def main() -> None:
             enabled=args.enable_pattern_search,
             candidate_rule_score=args.pattern_candidate_rule_score,
             candidate_risk_score=args.pattern_candidate_risk_score,
+            candidate_pair_memory_score=args.pattern_candidate_pair_memory_score,
             max_pairs=args.pattern_max_pairs,
             timeout=args.pattern_timeout,
         ),
+        enable_pair_memory=not args.no_pair_memory,
+        pair_memory_max_pairs=args.pair_memory_max_pairs,
     )
     total = processor.run_kafka(
         batch_size=args.batch_size,

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = Field("localhost:9092", alias="KAFKA_BOOTSTRAP_SERVERS")
     kafka_hands_topic: str = Field("hands.raw", alias="KAFKA_HANDS_TOPIC")
     kafka_alerts_topic: str = Field("alerts.out", alias="KAFKA_ALERTS_TOPIC")
+    kafka_pair_memory_topic: str = Field("pair.memory", alias="KAFKA_PAIR_MEMORY_TOPIC")
+    kafka_action_patterns_topic: str = Field("patterns.action", alias="KAFKA_ACTION_PATTERNS_TOPIC")
     kafka_security_protocol: str = Field("PLAINTEXT", alias="KAFKA_SECURITY_PROTOCOL")
     kafka_sasl_mechanism: Optional[str] = Field(None, alias="KAFKA_SASL_MECHANISM")
     kafka_sasl_username: Optional[str] = Field(None, alias="KAFKA_SASL_USERNAME")

@@ -87,5 +87,30 @@ services:
     command: ["streamlit", "run", "admin/Home.py", "--server.address=0.0.0.0", "--server.port=8501"]
     profiles: ["pipeline"]
 
+  flink-jobmanager:
+    image: apache/flink:1.19.1-scala_2.12-java17
+    container_name: poker-flink-jobmanager
+    profiles: ["flink"]
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        parallelism.default: 1
+
+  flink-taskmanager:
+    image: apache/flink:1.19.1-scala_2.12-java17
+    container_name: poker-flink-taskmanager
+    profiles: ["flink"]
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+
 volumes:
   qdrant_storage:

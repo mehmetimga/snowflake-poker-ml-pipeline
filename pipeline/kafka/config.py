@@ -43,3 +43,29 @@ def kafka_client_kwargs() -> dict[str, Any]:
     if settings.kafka_sasl_password is not None:
         kwargs["sasl_plain_password"] = settings.kafka_sasl_password
     return kwargs
+
+
+def flink_kafka_properties() -> dict[str, str]:
+    """Java Kafka client properties for Flink Kafka source/sink connectors."""
+    settings = get_settings()
+    props = {"security.protocol": settings.kafka_security_protocol}
+    mechanism = settings.kafka_sasl_mechanism
+    if not mechanism:
+        return props
+
+    if mechanism == "AWS_MSK_IAM":
+        props["sasl.mechanism"] = "AWS_MSK_IAM"
+        props["sasl.jaas.config"] = "software.amazon.msk.auth.iam.IAMLoginModule required;"
+        props["sasl.client.callback.handler.class"] = (
+            "software.amazon.msk.auth.iam.IAMClientCallbackHandler"
+        )
+        return props
+
+    props["sasl.mechanism"] = mechanism
+    if settings.kafka_sasl_username is not None or settings.kafka_sasl_password is not None:
+        props["sasl.jaas.config"] = (
+            "org.apache.kafka.common.security.plain.PlainLoginModule required "
+            f'username="{settings.kafka_sasl_username or ""}" '
+            f'password="{settings.kafka_sasl_password or ""}";'
+        )
+    return props
