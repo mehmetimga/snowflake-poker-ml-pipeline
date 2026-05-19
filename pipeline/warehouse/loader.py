@@ -1,4 +1,4 @@
-"""Convert generator HandEvent objects into RAW_* DataFrames for the warehouse."""
+"""Convert generator hand dictionaries into RAW_* DataFrames for the warehouse."""
 
 from __future__ import annotations
 

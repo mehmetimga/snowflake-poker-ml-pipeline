@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = Field("localhost:9092", alias="KAFKA_BOOTSTRAP_SERVERS")
     kafka_hands_topic: str = Field("hands.raw", alias="KAFKA_HANDS_TOPIC")
     kafka_alerts_topic: str = Field("alerts.out", alias="KAFKA_ALERTS_TOPIC")
+    kafka_security_protocol: str = Field("PLAINTEXT", alias="KAFKA_SECURITY_PROTOCOL")
+    kafka_sasl_mechanism: Optional[str] = Field(None, alias="KAFKA_SASL_MECHANISM")
+    kafka_sasl_username: Optional[str] = Field(None, alias="KAFKA_SASL_USERNAME")
+    kafka_sasl_password: Optional[str] = Field(None, alias="KAFKA_SASL_PASSWORD")
+    aws_region: str = Field("us-west-2", alias="AWS_REGION")
 
     qdrant_url: str = Field("http://localhost:6333", alias="QDRANT_URL")
     qdrant_collusion_collection: str = Field("collusion_patterns", alias="QDRANT_COLLUSION_COLLECTION")

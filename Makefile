@@ -1,8 +1,16 @@
-.PHONY: help install services down migrate generate consume features train seed-qdrant admin demo test clean build-byoc push-byoc tf-init tf-plan tf-apply
+.PHONY: help install check-kafka services down migrate generate consume realtime features train seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
 STREAMLIT ?= $(shell [ -x .venv/bin/streamlit ] && echo .venv/bin/streamlit || echo streamlit)
+KAFKA_TOPIC ?= hands.raw
+REALTIME_HANDS ?= 5000
+REALTIME_BATCH_SIZE ?= 25
+REALTIME_THRESHOLD ?= 0.0
+REALTIME_GROUP ?= realtime-demo-$(shell date +%s)
+REALTIME_FLAGS ?= --from-beginning --no-persist-history --no-persist-alerts
+
+export PYTHONPATH := $(CURDIR):$(PYTHONPATH)
 
 help:
 	@echo "Targets:"
@@ -12,17 +20,27 @@ help:
 	@echo "  migrate      Apply SQL migrations to warehouse (DuckDB or Snowflake)"
 	@echo "  generate     Generate synthetic hands and publish to Kafka"
 	@echo "  consume      Consume from Kafka and write to warehouse"
+	@echo "  realtime     Consume Kafka and score each batch immediately"
 	@echo "  features     Compute FEATURES + RULE_FLAGS tables"
 	@echo "  train        Train ML/DL/GNN/meta models, export ONNX"
 	@echo "  seed-qdrant  Seed Qdrant collusion/normal pattern collections"
 	@echo "  admin        Launch Streamlit admin on :8501"
 	@echo "  demo         End-to-end: services + migrate + generate + consume + features + train + seed-qdrant"
+	@echo "  demo-realtime End-to-end live path: Kafka -> realtime processor -> ALERTS"
 	@echo "  test         Run pytest smoke tests"
 	@echo "  clean        Remove generated data and models"
 
 install:
 	$(PIP) install -r requirements.txt
 	$(PIP) install -e .
+
+check-kafka:
+	@$(PY) -c "import kafka" >/dev/null 2>&1 || ( \
+		echo "Missing Python Kafka client for $(PY)."; \
+		echo "Run: make install"; \
+		echo "Or:  $(PIP) install kafka-python-ng==2.2.2"; \
+		exit 1; \
+	)
 
 services:
 	docker compose up -d kafka qdrant
@@ -33,11 +51,14 @@ down:
 migrate:
 	$(PY) scripts/migrate.py
 
-generate:
+generate: check-kafka
 	$(PY) scripts/generate.py --hands 5000 --players 200 --pairs 30 --out kafka
 
-consume:
+consume: check-kafka
 	$(PY) scripts/stream.py --max-messages 5000
+
+realtime: check-kafka
+	$(PY) scripts/realtime.py
 
 features:
 	$(PY) scripts/load_warehouse.py --compute-features
@@ -54,6 +75,19 @@ admin:
 demo: services migrate generate consume features train seed-qdrant
 	@echo ""
 	@echo "Demo pipeline complete. Launch the admin with: make admin"
+
+demo-realtime: check-kafka services
+	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9094 --create --if-not-exists --topic $(KAFKA_TOPIC)
+	KAFKA_HANDS_TOPIC=$(KAFKA_TOPIC) $(PY) scripts/realtime.py \
+		--max-messages $(REALTIME_HANDS) --batch-size $(REALTIME_BATCH_SIZE) \
+		--threshold $(REALTIME_THRESHOLD) \
+		--group-id $(REALTIME_GROUP) $(REALTIME_FLAGS) & \
+		rt_pid=$$!; \
+		sleep 3; \
+		KAFKA_HANDS_TOPIC=$(KAFKA_TOPIC) $(PY) scripts/generate.py \
+			--hands $(REALTIME_HANDS) --players 200 --pairs 30 --out kafka; \
+		wait $$rt_pid
 
 test:
 	pytest -q

@@ -6,6 +6,7 @@ from typing import Optional
 from kafka import KafkaConsumer
 
 from pipeline.config import get_settings
+from pipeline.kafka.config import kafka_client_kwargs
 from pipeline.warehouse import Warehouse, get_warehouse
 from pipeline.warehouse.loader import load_hands
 
@@ -33,6 +34,7 @@ class WarehouseSink:
             auto_offset_reset="earliest",
             enable_auto_commit=True,
             consumer_timeout_ms=10000,
+            **kafka_client_kwargs(),
         )
 
     def run(self, max_messages: Optional[int] = None) -> int:

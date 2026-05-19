@@ -6,6 +6,7 @@ from typing import Iterable
 from kafka import KafkaProducer
 
 from pipeline.config import get_settings
+from pipeline.kafka.config import kafka_client_kwargs
 
 
 class HandProducer:
@@ -16,6 +17,7 @@ class HandProducer:
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else None,
             acks="all",
+            **kafka_client_kwargs(),
         )
         self.topic = topic or s.kafka_hands_topic
 

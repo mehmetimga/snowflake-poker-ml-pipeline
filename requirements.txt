@@ -13,6 +13,7 @@ snowflake-connector-python[pandas]==3.10.0
 
 # Kafka
 kafka-python-ng==2.2.2
+aws-msk-iam-sasl-signer-python==1.0.2
 
 # Classical ML
 scikit-learn==1.5.0

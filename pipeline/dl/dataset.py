@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 from pipeline.warehouse import Warehouse
+from pipeline.warehouse.sql import sql_string_list, unique_strings
 
 
 ACTION_VOCAB = {"fold": 0, "check": 1, "call": 2, "bet": 3, "raise": 4}
@@ -15,13 +18,41 @@ STREET_VOCAB = {"preflop": 0, "flop": 1, "turn": 2, "river": 3}
 FEATURE_DIM = 4  # action_idx, street_idx, amount_norm, is_self
 
 
-def build_sequences(warehouse: Warehouse, max_len: int = 60) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str]]]:
+def build_sequences(
+    warehouse: Warehouse,
+    max_len: int = 60,
+    hand_ids: Iterable[object] | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str]]]:
     """Return X (n, max_len, FEATURE_DIM), y (n,), and ids."""
-    actions = warehouse.fetch_df("SELECT * FROM RAW_ACTIONS ORDER BY hand_id, sequence_no")
-    players = warehouse.fetch_df("SELECT hand_id, player_id, is_suspicious FROM RAW_PLAYERS")
+    ids_filter = unique_strings(hand_ids or [])
+    if hand_ids is not None and not ids_filter:
+        return np.zeros((0, max_len, FEATURE_DIM), dtype=np.float32), np.zeros((0,), dtype=np.int64), []
+
+    if ids_filter:
+        id_list = sql_string_list(ids_filter)
+        actions = warehouse.fetch_df(
+            f"SELECT * FROM RAW_ACTIONS WHERE hand_id IN ({id_list}) ORDER BY hand_id, sequence_no"
+        )
+        players = warehouse.fetch_df(
+            f"SELECT hand_id, player_id, is_suspicious FROM RAW_PLAYERS WHERE hand_id IN ({id_list})"
+        )
+    else:
+        actions = warehouse.fetch_df("SELECT * FROM RAW_ACTIONS ORDER BY hand_id, sequence_no")
+        players = warehouse.fetch_df("SELECT hand_id, player_id, is_suspicious FROM RAW_PLAYERS")
+    return build_sequences_from_dataframes(actions, players, max_len=max_len)
+
+
+def build_sequences_from_dataframes(
+    actions: pd.DataFrame,
+    players: pd.DataFrame,
+    max_len: int = 60,
+) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str]]]:
+    """Return sequence tensors from already-loaded RAW_ACTIONS/RAW_PLAYERS frames."""
     if actions.empty or players.empty:
         return np.zeros((0, max_len, FEATURE_DIM), dtype=np.float32), np.zeros((0,), dtype=np.int64), []
 
+    actions = actions.copy()
+    players = players.copy()
     actions["action_idx"] = actions["action_type"].map(ACTION_VOCAB).fillna(0).astype(int)
     actions["street_idx"] = actions["street"].map(STREET_VOCAB).fillna(0).astype(int)
     amount_norm = (actions["amount"] / (actions["amount"].max() + 1e-6)).astype(float)

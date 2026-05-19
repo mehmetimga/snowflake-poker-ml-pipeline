@@ -7,6 +7,7 @@ VGAE anomaly scores, and Qdrant min-distance into wide + deep feature vectors.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Tuple
 
@@ -15,14 +16,18 @@ import onnxruntime as ort
 import pandas as pd
 import torch
 
-from pipeline.dl.dataset import FEATURE_DIM, build_sequences
+from pipeline.dl.dataset import FEATURE_DIM, build_sequences, build_sequences_from_dataframes
 from pipeline.dl.lstm_encoder import LSTMEncoder
 from pipeline.dl.transformer import TransformerEncoder
 from pipeline.features.engineer import FEATURE_COLUMNS
 from pipeline.warehouse import Warehouse
+from pipeline.warehouse.sql import sql_string_list, unique_strings
 
 
 def _onnx_predict(path: Path, X: np.ndarray) -> np.ndarray:
+    if not path.exists():
+        print(f"[inference] missing {path.name}; using zero scores for that model")
+        return np.zeros((len(X),), dtype=np.float32)
     sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     input_name = sess.get_inputs()[0].name
     outputs = sess.run(None, {input_name: X.astype(np.float32)})
@@ -38,9 +43,40 @@ def _onnx_predict(path: Path, X: np.ndarray) -> np.ndarray:
 def assemble_dataset(
     warehouse: Warehouse,
     models_dir: Path,
+    hand_ids: Iterable[object] | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[str, str]]]:
-    features = warehouse.fetch_df("SELECT * FROM FEATURES")
-    flags = warehouse.fetch_df("SELECT hand_id, player_id, rule_score FROM RULE_FLAGS")
+    ids_filter = unique_strings(hand_ids or [])
+    if hand_ids is not None and not ids_filter:
+        return np.zeros((0, 6)), np.zeros((0, 96)), np.zeros((0,)), []
+
+    if ids_filter:
+        id_list = sql_string_list(ids_filter)
+        features = warehouse.fetch_df(f"SELECT * FROM FEATURES WHERE hand_id IN ({id_list})")
+        flags = warehouse.fetch_df(
+            f"SELECT hand_id, player_id, rule_score FROM RULE_FLAGS WHERE hand_id IN ({id_list})"
+        )
+    else:
+        features = warehouse.fetch_df("SELECT * FROM FEATURES")
+        flags = warehouse.fetch_df("SELECT hand_id, player_id, rule_score FROM RULE_FLAGS")
+    return assemble_dataset_from_frames(
+        features=features,
+        flags=flags,
+        models_dir=models_dir,
+        warehouse=warehouse,
+        hand_ids=ids_filter if ids_filter else None,
+    )
+
+
+def assemble_dataset_from_frames(
+    features: pd.DataFrame,
+    flags: pd.DataFrame,
+    models_dir: Path,
+    actions: pd.DataFrame | None = None,
+    players: pd.DataFrame | None = None,
+    warehouse: Warehouse | None = None,
+    hand_ids: Iterable[object] | None = None,
+    pattern_scores: dict[tuple[str, str], float] | None = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[str, str]]]:
     df = features.merge(flags, on=["hand_id", "player_id"], how="inner")
     if df.empty:
         return np.zeros((0, 6)), np.zeros((0, 96)), np.zeros((0,)), []
@@ -61,9 +97,18 @@ def assemble_dataset(
     vgae_scores = np.array([vgae_map.get(pid, 0.0) for pid in df["player_id"]], dtype=np.float32)
 
     rule_scores = df["rule_score"].astype(np.float32).to_numpy()
+    ids_pairs = list(zip(df["hand_id"].astype(str).tolist(), df["player_id"].astype(str).tolist()))
+    pattern_map = pattern_scores or {}
+    qdrant_scores = np.array([float(pattern_map.get(pair, 0.0)) for pair in ids_pairs], dtype=np.float32)
 
     # Sequence embeddings via LSTM + Transformer (zeros if models or data are missing)
-    Xs, _, ids = build_sequences(warehouse)
+    if actions is not None and players is not None:
+        Xs, _, ids = build_sequences_from_dataframes(actions, players)
+    elif warehouse is not None:
+        Xs, _, ids = build_sequences(warehouse, hand_ids=hand_ids)
+    else:
+        Xs = np.zeros((0, 60, FEATURE_DIM), dtype=np.float32)
+        ids = []
     lstm_path = models_dir / "lstm.pt"
     trans_path = models_dir / "transformer.pt"
     lstm_default_dim = 64
@@ -91,7 +136,6 @@ def assemble_dataset(
                 lstm_emb[j] = lstm_all[i]
                 trans_emb[j] = trans_all[i]
 
-    wide = np.stack([xgb_p, cat_p, lgbm_p, vgae_scores, np.zeros_like(xgb_p), rule_scores], axis=1).astype(np.float32)
+    wide = np.stack([xgb_p, cat_p, lgbm_p, vgae_scores, qdrant_scores, rule_scores], axis=1).astype(np.float32)
     deep = np.concatenate([lstm_emb, trans_emb], axis=1).astype(np.float32)
-    ids_pairs = list(zip(df["hand_id"].tolist(), df["player_id"].tolist()))
     return wide, deep, y, ids_pairs
