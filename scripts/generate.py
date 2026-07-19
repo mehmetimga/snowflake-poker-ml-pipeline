@@ -36,6 +36,7 @@ def main() -> None:
     parser.add_argument("--tables", type=int, default=20)
     parser.add_argument("--pairs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--split", default="live", help="Dataset split label embedded in hand IDs")
     parser.add_argument("--out", choices=["kafka", "parquet", "both", "jsonl"], default="kafka")
     parser.add_argument("--jsonl-path", default="data/raw/hands.jsonl")
     args = parser.parse_args()
@@ -46,6 +47,7 @@ def main() -> None:
         n_tables=args.tables,
         n_colluding_pairs=args.pairs,
         seed=args.seed,
+        dataset_split=args.split,
     )
     gen = HandGenerator(cfg)
 

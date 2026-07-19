@@ -8,20 +8,21 @@ End-to-end demo ML pipeline for detecting collusion in synthetic No-Limit Hold'e
 
 ## What's in here
 
-- **Synthetic hand generator** — 6-max NLHE cash hands with injected collusion patterns (soft-play, chip-dump, squeeze-collude, fold-benefit).
+- **PokerKit hand generator** — valid 6-max NLHE cash-game state transitions with deterministic cards, real pot settlement, and injected synthetic collusion patterns.
 - **Kafka stream** — hands published to `hands.raw`; consumer batches them into the warehouse.
 - **Warehouse** — Snowflake or DuckDB (toggle with `WAREHOUSE_BACKEND`). Same SQL migrations run on both.
 - **Feature engineering** — ~60 numeric features per `(hand_id, player_id)` from raw actions.
 - **Rule engine** — 5 simple Python rules ported from the original Rust engine.
-- **Classical ML** — XGBoost, CatBoost, LightGBM with 80/20 stratified split, ONNX export.
-- **Deep learning** — LSTM encoder + Transformer encoder over action sequences.
-- **GNN** — VGAE + simple HGT over the player-pair graph.
+- **Classical ML** — XGBoost, CatBoost, LightGBM with frozen leakage-safe splits and ONNX export.
+- **Deep learning (phase two)** — LSTM encoder + Transformer encoder over action sequences.
+- **GNN (phase two)** — VGAE + simple HGT over the player-pair graph.
 - **Qdrant** — similarity search over pair-pattern embeddings.
 - **Wide-and-Deep meta-learner** — small PyTorch stacker that fuses all model outputs into a final risk score.
 - **Realtime processor** — Kafka hot path that computes features/rules in memory, scores with trained artifacts, and optionally persists history/alerts.
 - **Flink hot path** — optional PyFlink jobs that consume `hands.raw`, maintain rolling pair memory, detect action motifs, and publish alert JSON to `alerts.out`.
 - **Streamlit admin** — alerts, hand viewer, model metrics, graph explorer, retrain trigger, similarity search.
 - **AWS deployment** — Terraform for VPC, ECR, S3, ECS/Fargate, optional MSK/Qdrant, and a SageMaker training pipeline.
+- **Snowflake container deployment** — CPU services/jobs on Snowpark Container Services with internal model stages and managed-Kafka egress.
 
 ## Quickstart (local, no Snowflake account)
 
@@ -31,6 +32,43 @@ make install
 make demo                  # services + migrate + generate + consume + features + train + seed-qdrant
 make admin                 # streamlit at http://localhost:8501
 ```
+
+## Reproducible CPU validation
+
+The validation workflow is intentionally different from an unbounded random
+stream. PokerKit first creates four frozen datasets. Train, validation, test,
+and challenge each have a separate player population, so player or collusion
+pair identity cannot leak across evaluation boundaries. Ground-truth labels
+are stored in sidecar files and are absent from the Kafka events used for
+inference.
+
+```bash
+# Recommended comparison dataset: 20k / 5k / 5k / 5k hands.
+make dataset
+
+# Load only labeled train/validation/test data and build warehouse features.
+make load-dataset
+
+# CPU phase: XGBoost + CatBoost + LightGBM, ONNX export, then batch scoring.
+make train
+
+# Fast local smoke variant while developing.
+make cpu-validate TRAIN_HANDS=1000 VALIDATION_HANDS=300 \
+  TEST_HANDS=300 CHALLENGE_HANDS=300
+```
+
+The challenge set stays out of training. After models are frozen and the
+realtime consumer is running, replay the exact same label-free events through
+Kafka and compare persisted alerts with the local label sidecar:
+
+```bash
+make replay-challenge REPLAY_RATE=25
+make evaluate-challenge
+```
+
+`manifest.json` records seeds, counts, PokerKit version, and SHA-256 hashes for
+every event and label file. Rebuilding with the same configuration produces
+identical data.
 
 ## Real-time processing
 
@@ -59,7 +97,7 @@ make migrate
 make demo-realtime REALTIME_FLAGS=--from-beginning
 ```
 
-`scripts/realtime.py` computes features/rules from each Kafka batch in memory, runs ML/DL/GNN-score lookup from existing model artifacts, generates alerts, and then optionally stores raw/features/rules/alerts for durability. Use `--batch-size` for latency/throughput, `--no-persist-history` to avoid warehouse history writes, and `--no-persist-alerts` to avoid alert table writes.
+`scripts/realtime.py` computes features/rules from each Kafka batch in memory, runs available model artifacts, generates alerts, and then optionally stores raw/features/rules/alerts for durability. In the CPU phase this means classical ONNX models plus rules; DL/GNN artifacts are added only in phase two. Use `--batch-size` for latency/throughput, `--no-persist-history` to avoid warehouse history writes, and `--no-persist-alerts` to avoid alert table writes.
 
 Qdrant pattern search can be added to realtime as a bounded, fail-open
 enrichment:
@@ -158,6 +196,22 @@ make demo
 
 No code changes. Same Python modules, same Streamlit admin, same ONNX artifacts.
 
+Run `make train-full` only after moving to a Snowflake region with a supported
+GPU pool and building the GPU runtime image. The default `make train` and
+`make snow-train` commands deliberately remain CPU-only.
+
+### Snowpark Container Services deployment
+
+The Snowflake-native container path runs the Streamlit admin, realtime scorer,
+and CPU training job from one `linux/amd64` image in Snowflake's image registry.
+Because public SPCS endpoints are HTTP/HTTPS, the laptop producer and the
+Snowflake consumer use an external managed Kafka cluster rather than exposing a
+Kafka TCP broker from Snowflake.
+
+See [infra/snowflake/README.md](infra/snowflake/README.md) for provisioning,
+registry push, Kafka secret/egress setup, deployment, status, and cost-control
+commands.
+
 ## AWS / SageMaker architecture
 
 Terraform under `infra/terraform` provisions the cloud demo stack:
@@ -193,7 +247,7 @@ make push-byoc
 ```
 pipeline/                  # Library code (pip install -e .)
   warehouse/               # Snowflake + DuckDB adapters
-  generator/               # Synthetic hand + collusion injection
+  generator/               # PokerKit simulation, frozen data + collusion injection
   kafka/                   # Producer + consumer
   features/                # Feature engineering
   rules/                   # Rule engine (5 rules)

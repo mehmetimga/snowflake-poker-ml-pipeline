@@ -1,0 +1,22 @@
+spec:
+  containers:
+  - name: train
+    image: __IMAGE_PATH__
+    command:
+    - python
+    args:
+    - scripts/snowflake_train.py
+    env:
+      WAREHOUSE_BACKEND: snowflake
+      SNOWFLAKE_WAREHOUSE: DEMO_WH
+      SNOWFLAKE_DATABASE: POKER_ML_DEMO
+      SNOWFLAKE_SCHEMA: PUBLIC
+      SNOWFLAKE_MODEL_STAGE: POKER_ML_DEMO.SPCS.MODEL_ARTIFACTS
+      ML_JOB_MODELS_DIR: /tmp/models
+    resources:
+      requests:
+        cpu: 2
+        memory: 8Gi
+      limits:
+        cpu: 3
+        memory: 12Gi

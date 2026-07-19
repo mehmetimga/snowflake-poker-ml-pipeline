@@ -16,15 +16,27 @@ class Settings(BaseSettings):
     duckdb_s3_prefix: str = Field("warehouse/", alias="DUCKDB_S3_PREFIX")
 
     snowflake_account: Optional[str] = Field(None, alias="SNOWFLAKE_ACCOUNT")
+    snowflake_host: Optional[str] = Field(None, alias="SNOWFLAKE_HOST")
     snowflake_user: Optional[str] = Field(None, alias="SNOWFLAKE_USER")
     snowflake_password: Optional[str] = Field(None, alias="SNOWFLAKE_PASSWORD")
+    snowflake_authenticator: Optional[str] = Field(None, alias="SNOWFLAKE_AUTHENTICATOR")
+    snowflake_client_request_mfa_token: bool = Field(
+        False, alias="SNOWFLAKE_CLIENT_REQUEST_MFA_TOKEN"
+    )
     snowflake_private_key_path: Optional[Path] = Field(None, alias="SNOWFLAKE_PRIVATE_KEY_PATH")
+    snowflake_oauth_token_path: Path = Field(
+        Path("/snowflake/session/token"), alias="SNOWFLAKE_OAUTH_TOKEN_PATH"
+    )
     snowflake_warehouse: str = Field("DEMO_WH", alias="SNOWFLAKE_WAREHOUSE")
     snowflake_database: str = Field("POKER_ML_DEMO", alias="SNOWFLAKE_DATABASE")
     snowflake_schema: str = Field("PUBLIC", alias="SNOWFLAKE_SCHEMA")
     snowflake_role: str = Field("SYSADMIN", alias="SNOWFLAKE_ROLE")
+    snowflake_model_stage: str = Field(
+        "POKER_ML_DEMO.SPCS.MODEL_ARTIFACTS", alias="SNOWFLAKE_MODEL_STAGE"
+    )
 
     kafka_bootstrap_servers: str = Field("localhost:9092", alias="KAFKA_BOOTSTRAP_SERVERS")
+    kafka_egress_brokers: Optional[str] = Field(None, alias="KAFKA_EGRESS_BROKERS")
     kafka_hands_topic: str = Field("hands.raw", alias="KAFKA_HANDS_TOPIC")
     kafka_alerts_topic: str = Field("alerts.out", alias="KAFKA_ALERTS_TOPIC")
     kafka_pair_memory_topic: str = Field("pair.memory", alias="KAFKA_PAIR_MEMORY_TOPIC")

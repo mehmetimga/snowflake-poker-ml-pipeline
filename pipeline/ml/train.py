@@ -1,6 +1,6 @@
 """End-to-end classical-ML training orchestrator.
 
-Reads FEATURES + RULE_FLAGS from the warehouse, splits 80/20 stratified,
+Reads FEATURES + RULE_FLAGS from the warehouse, honors frozen dataset splits,
 trains XGBoost/CatBoost/LightGBM, evaluates, and exports ONNX.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from sklearn.model_selection import train_test_split
 
 from pipeline.config import get_settings
 from pipeline.features.engineer import FEATURE_COLUMNS, prepare_matrix
-from pipeline.ml.evaluation import evaluate_model
+from pipeline.ml.evaluation import evaluate_model, select_optimal_threshold
 from pipeline.ml.export_onnx import export_catboost, export_lightgbm, export_xgboost
 from pipeline.warehouse import Warehouse, get_warehouse
 
@@ -33,8 +34,82 @@ def _load_dataset(warehouse: Warehouse) -> pd.DataFrame:
     if features.empty or flags.empty:
         raise RuntimeError("FEATURES or RULE_FLAGS table is empty — run feature engineering first.")
     df = features.merge(flags, on=["hand_id", "player_id"], how="inner")
+    hand_splits = warehouse.fetch_df("SELECT hand_id, dataset_split FROM RAW_HANDS")
+    if not hand_splits.empty:
+        hand_splits["dataset_split"] = hand_splits["dataset_split"].fillna("live").astype(str).str.lower()
+        df = df.merge(hand_splits, on="hand_id", how="left")
+    else:
+        df["dataset_split"] = "live"
     df = df[df["flag_eligible"].astype(bool)]
     return df
+
+
+@dataclass(frozen=True)
+class DatasetPartitions:
+    train: pd.DataFrame
+    validation: pd.DataFrame
+    test: pd.DataFrame
+    strategy: str
+
+
+def _partition_dataset(df: pd.DataFrame, random_seed: int) -> DatasetPartitions:
+    """Use frozen splits when present, otherwise group by whole hand.
+
+    Frozen datasets use disjoint player populations and are the required path
+    for comparable runs. The fallback keeps every row from a hand together so
+    legacy/live data no longer leaks one hand across train and evaluation.
+    """
+    split_values = set(df.get("dataset_split", pd.Series(dtype=str)).dropna().astype(str))
+    required = {"train", "validation", "test"}
+    if required <= split_values:
+        parts = {
+            name: df[df["dataset_split"] == name].copy()
+            for name in required
+        }
+        populations = {
+            name: set(part["player_id"].astype(str))
+            for name, part in parts.items()
+        }
+        for left, right in (("train", "validation"), ("train", "test"), ("validation", "test")):
+            overlap = populations[left] & populations[right]
+            if overlap:
+                raise RuntimeError(
+                    f"Player leakage between frozen {left}/{right} splits: {len(overlap)} IDs"
+                )
+        return DatasetPartitions(
+            train=parts["train"],
+            validation=parts["validation"],
+            test=parts["test"],
+            strategy="frozen_disjoint_players",
+        )
+
+    hand_targets = (
+        df.groupby("hand_id", as_index=False)["is_suspicious"]
+        .max()
+        .rename(columns={"is_suspicious": "hand_target"})
+    )
+    hand_train_val, hand_test = train_test_split(
+        hand_targets,
+        test_size=0.20,
+        stratify=hand_targets["hand_target"],
+        random_state=random_seed,
+    )
+    hand_train, hand_validation = train_test_split(
+        hand_train_val,
+        test_size=0.10,
+        stratify=hand_train_val["hand_target"],
+        random_state=random_seed,
+    )
+    return DatasetPartitions(
+        train=df[df["hand_id"].isin(hand_train["hand_id"])].copy(),
+        validation=df[df["hand_id"].isin(hand_validation["hand_id"])].copy(),
+        test=df[df["hand_id"].isin(hand_test["hand_id"])].copy(),
+        strategy="grouped_by_hand_fallback",
+    )
+
+
+def _matrix(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    return prepare_matrix(frame)
 
 
 def train_all(
@@ -64,18 +139,18 @@ def train_all(
     if len(np.unique(y)) < 2:
         raise RuntimeError("Need both suspicious and non-suspicious labels in the dataset.")
 
-    X_train_full, X_test, y_train_full, y_test = train_test_split(
-        X, y, test_size=0.20, stratify=y, random_state=settings.random_seed
-    )
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full,
-        y_train_full,
-        test_size=0.10,
-        stratify=y_train_full,
-        random_state=settings.random_seed,
-    )
+    partitions = _partition_dataset(df, settings.random_seed)
+    X_train, y_train = _matrix(partitions.train)
+    X_val, y_val = _matrix(partitions.validation)
+    X_test, y_test = _matrix(partitions.test)
+    for name, labels in (("train", y_train), ("validation", y_val), ("test", y_test)):
+        if len(np.unique(labels)) < 2:
+            raise RuntimeError(f"The {name} split needs both suspicious and normal labels.")
 
-    print(f"[train] n_train={len(X_train)} n_val={len(X_val)} n_test={len(X_test)} pos_rate={y.mean():.3f}")
+    print(
+        f"[train] split={partitions.strategy} n_train={len(X_train)} "
+        f"n_val={len(X_val)} n_test={len(X_test)} pos_rate={y.mean():.3f}"
+    )
 
     models: dict[str, object] = {}
     if "xgboost" in selected:
@@ -91,9 +166,18 @@ def train_all(
 
         models["lightgbm"] = train_lightgbm(X_train, y_train, X_val, y_val)
 
+    thresholds = {
+        name: select_optimal_threshold(y_val, model.predict_proba(X_val)[:, 1])
+        for name, model in models.items()
+    }
     metrics = {
-        name: evaluate_model(name, y_test, m.predict_proba(X_test)[:, 1])
-        for name, m in models.items()
+        name: evaluate_model(
+            name,
+            y_test,
+            model.predict_proba(X_test)[:, 1],
+            threshold=thresholds[name],
+        )
+        for name, model in models.items()
     }
     for name, m in metrics.items():
         print(f"[train] {name}: roc={m.roc_auc:.3f} pr={m.pr_auc:.3f} f1={m.f1:.3f} thr={m.optimal_threshold:.3f}")
@@ -116,6 +200,7 @@ def train_all(
         "n_train": int(len(X_train)),
         "n_val": int(len(X_val)),
         "n_test": int(len(X_test)),
+        "split_strategy": partitions.strategy,
     }
     (out_dir / "feature_info.json").write_text(json.dumps(feature_info, indent=2))
     thresholds = {name: m.optimal_threshold for name, m in metrics.items()}

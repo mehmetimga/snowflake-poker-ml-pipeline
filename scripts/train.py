@@ -20,6 +20,7 @@ STAGES = [
     ("Wide-and-Deep meta-learner", "pipeline.meta.train", "train_meta_learner"),
     ("inference -> ALERTS", "pipeline.inference.scorer", "score_warehouse"),
 ]
+CPU_STAGE_NUMBERS = {1, 5}
 
 
 def _run_stage(idx: int, title: str, module: str, fn: str) -> None:
@@ -38,13 +39,20 @@ def _run_stage(idx: int, title: str, module: str, fn: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--profile",
+        choices=("cpu", "full"),
+        default="cpu",
+        help="cpu runs classical ML + inference; full also runs DL/GNN/meta",
+    )
+    parser.add_argument(
         "--only",
         nargs="+",
         type=int,
         help="Run a subset of stages (1-indexed).",
     )
     args = parser.parse_args()
-    selected = set(args.only or range(1, len(STAGES) + 1))
+    default_stages = CPU_STAGE_NUMBERS if args.profile == "cpu" else set(range(1, len(STAGES) + 1))
+    selected = set(args.only or default_stages)
     for i, (title, module, fn) in enumerate(STAGES, 1):
         if i in selected:
             _run_stage(i, title, module, fn)

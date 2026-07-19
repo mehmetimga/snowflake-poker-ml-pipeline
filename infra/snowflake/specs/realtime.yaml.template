@@ -1,0 +1,45 @@
+spec:
+  containers:
+  - name: realtime
+    image: __IMAGE_PATH__
+    command:
+    - python
+    args:
+    - scripts/realtime.py
+    - --batch-size
+    - "25"
+    - --threshold
+    - "0.5"
+    env:
+      WAREHOUSE_BACKEND: snowflake
+      SNOWFLAKE_WAREHOUSE: DEMO_WH
+      SNOWFLAKE_DATABASE: POKER_ML_DEMO
+      SNOWFLAKE_SCHEMA: PUBLIC
+      MODELS_DIR: /opt/models
+      KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
+      KAFKA_HANDS_TOPIC: hands.raw
+      KAFKA_ALERTS_TOPIC: alerts.out
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_SASL_MECHANISM: PLAIN
+    secrets:
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+      secretKeyRef: username
+      envVarName: KAFKA_SASL_USERNAME
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+      secretKeyRef: password
+      envVarName: KAFKA_SASL_PASSWORD
+    volumeMounts:
+    - name: models
+      mountPath: /opt/models
+    resources:
+      requests:
+        cpu: 1
+        memory: 3Gi
+      limits:
+        cpu: 2
+        memory: 7Gi
+  volumes:
+  - name: models
+    source: stage
+    stageConfig:
+      name: "@POKER_ML_DEMO.SPCS.MODEL_ARTIFACTS"

@@ -69,6 +69,7 @@ def test_live_scorer_includes_optional_qdrant_pattern_score():
 
 def test_realtime_processor_persists_history_and_alerts_after_scoring(tmp_path: Path):
     settings = Settings(
+        _env_file=None,
         WAREHOUSE_BACKEND="duckdb",
         DUCKDB_PATH=tmp_path / "warehouse.duckdb",
         MODELS_DIR=tmp_path / "models",

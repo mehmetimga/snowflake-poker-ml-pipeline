@@ -1,4 +1,4 @@
-.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate generate consume realtime flink-realtime flink-pair-memory flink-action-patterns features train seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply
+.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns features train train-full cpu-validate seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -18,6 +18,16 @@ REALTIME_BATCH_SIZE ?= 25
 REALTIME_THRESHOLD ?= 0.0
 REALTIME_GROUP ?= realtime-demo-$(shell date +%s)
 REALTIME_FLAGS ?= --from-beginning --no-persist-history --no-persist-alerts
+DATASET_DIR ?= data/datasets/cpu-v1
+TRAIN_HANDS ?= 20000
+VALIDATION_HANDS ?= 5000
+TEST_HANDS ?= 5000
+CHALLENGE_HANDS ?= 5000
+DATASET_PLAYERS ?= 200
+DATASET_PAIRS ?= 30
+DATASET_SEED ?= 42
+REPLAY_RATE ?= 25
+LOAD_BATCH_SIZE ?= 2000
 
 export PYTHONPATH := $(CURDIR):$(PYTHONPATH)
 
@@ -29,20 +39,38 @@ help:
 	@echo "  flink-services Start Kafka + Qdrant + local Flink cluster via docker compose"
 	@echo "  down         Stop docker compose services"
 	@echo "  migrate      Apply SQL migrations to warehouse (DuckDB or Snowflake)"
+	@echo "  dataset      Build frozen PokerKit train/validation/test/challenge files"
+	@echo "  load-dataset Load labeled train/validation/test splits and compute features"
 	@echo "  generate     Generate synthetic hands and publish to Kafka"
+	@echo "  replay-challenge Replay the label-free frozen challenge stream to Kafka"
+	@echo "  evaluate-challenge Compare persisted alerts with challenge labels"
 	@echo "  consume      Consume from Kafka and write to warehouse"
 	@echo "  realtime     Consume Kafka and score each batch immediately"
 	@echo "  flink-realtime Consume Kafka with PyFlink and publish alert JSON"
 	@echo "  flink-pair-memory Build keyed rolling pair memory with PyFlink"
 	@echo "  flink-action-patterns Detect action motifs with PyFlink"
 	@echo "  features     Compute FEATURES + RULE_FLAGS tables"
-	@echo "  train        Train ML/DL/GNN/meta models, export ONNX"
+	@echo "  train        CPU phase: train classical ML, export ONNX, and score"
+	@echo "  train-full   Later phase: also train DL, GNN, and meta models"
+	@echo "  cpu-validate Build/load frozen data and run the CPU training phase"
 	@echo "  seed-qdrant  Seed Qdrant collusion/normal pattern collections"
 	@echo "  admin        Launch Streamlit admin on :8501"
 	@echo "  demo         End-to-end: services + migrate + generate + consume + features + train + seed-qdrant"
 	@echo "  demo-realtime End-to-end live path: Kafka -> realtime processor -> ALERTS"
 	@echo "  test         Run pytest smoke tests"
 	@echo "  clean        Remove generated data and models"
+	@echo "  snow-bootstrap Provision suspended Snowpark Container Services resources"
+	@echo "  snow-mfa-login Cache a Snowflake MFA token using a local TOTP prompt"
+	@echo "  snow-configure-kafka Store remote Kafka network access + credentials"
+	@echo "  snow-render  Render SPCS service specs"
+	@echo "  snow-build   Build the linux/amd64 SPCS application image"
+	@echo "  snow-push    Tag and push the image to Snowflake (login first)"
+	@echo "  snow-deploy-admin Deploy Streamlit admin to SPCS"
+	@echo "  snow-suspend-admin Suspend Streamlit and allow the compute pool to stop"
+	@echo "  snow-resume-admin Resume the Streamlit service"
+	@echo "  snow-deploy-realtime Deploy remote-Kafka scorer to SPCS"
+	@echo "  snow-train   Submit the containerized CPU training job"
+	@echo "  snow-status  Show Snowflake container deployment status"
 
 install:
 	$(PIP) install -r requirements.txt
@@ -79,8 +107,29 @@ down:
 migrate:
 	$(PY) scripts/migrate.py
 
+dataset:
+	$(PY) scripts/build_dataset.py --output-dir $(DATASET_DIR) \
+		--train-hands $(TRAIN_HANDS) --validation-hands $(VALIDATION_HANDS) \
+		--test-hands $(TEST_HANDS) --challenge-hands $(CHALLENGE_HANDS) \
+		--players $(DATASET_PLAYERS) --pairs $(DATASET_PAIRS) --seed $(DATASET_SEED)
+
+load-dataset: migrate
+	@for split in train validation test; do \
+		$(PY) scripts/load_warehouse.py \
+			--jsonl $(DATASET_DIR)/$$split.events.jsonl \
+			--labels $(DATASET_DIR)/$$split.labels.jsonl \
+			--batch-size $(LOAD_BATCH_SIZE) || exit $$?; \
+	done
+	$(PY) scripts/load_warehouse.py --compute-features
+
 generate: check-kafka
 	$(PY) scripts/generate.py --hands 5000 --players 200 --pairs 30 --out kafka
+
+replay-challenge: check-kafka
+	$(PY) scripts/replay.py --events $(DATASET_DIR)/challenge.events.jsonl --rate $(REPLAY_RATE)
+
+evaluate-challenge:
+	$(PY) scripts/evaluate_challenge.py --labels $(DATASET_DIR)/challenge.labels.jsonl
 
 consume: check-kafka
 	$(PY) scripts/stream.py --max-messages 5000
@@ -112,7 +161,12 @@ features:
 	$(PY) scripts/load_warehouse.py --compute-features
 
 train:
-	$(PY) scripts/train.py
+	$(PY) scripts/train.py --profile cpu
+
+train-full:
+	$(PY) scripts/train.py --profile full
+
+cpu-validate: dataset load-dataset train
 
 seed-qdrant:
 	$(PY) scripts/seed_qdrant.py
@@ -144,6 +198,49 @@ clean:
 	rm -f data/parquet/*.duckdb data/parquet/*.parquet
 	rm -f data/raw/*.jsonl
 	rm -f models/*.onnx models/*.pt models/*.json models/*.csv
+
+# ---- Snowflake / Snowpark Container Services ----
+SNOW_IMAGE ?= poker-pipeline:dev
+SNOW_REPO_URL ?= clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo
+SNOW_REMOTE_IMAGE ?= $(SNOW_REPO_URL)/poker-pipeline:dev
+
+snow-bootstrap:
+	$(PY) infra/snowflake/deploy.py bootstrap
+
+snow-mfa-login:
+	$(PY) scripts/snowflake_mfa_login.py
+
+snow-configure-kafka:
+	$(PY) infra/snowflake/deploy.py configure-kafka
+
+snow-render:
+	$(PY) infra/snowflake/deploy.py render
+
+snow-build:
+	docker buildx build --platform linux/amd64 --load \
+		-f Dockerfile.spcs -t $(SNOW_IMAGE) .
+
+snow-push:
+	docker tag $(SNOW_IMAGE) $(SNOW_REMOTE_IMAGE)
+	docker push $(SNOW_REMOTE_IMAGE)
+
+snow-deploy-admin:
+	$(PY) infra/snowflake/deploy.py deploy-admin
+
+snow-suspend-admin:
+	$(PY) infra/snowflake/deploy.py suspend-admin
+
+snow-resume-admin:
+	$(PY) infra/snowflake/deploy.py resume-admin
+
+snow-deploy-realtime:
+	$(PY) infra/snowflake/deploy.py deploy-realtime
+
+snow-train:
+	$(PY) infra/snowflake/deploy.py run-training-job
+
+snow-status:
+	$(PY) infra/snowflake/deploy.py status
 
 # ---- AWS / Terraform ----
 # Force AWS_PROFILE=default for these targets. The shell may export

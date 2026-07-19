@@ -5,13 +5,14 @@ from pipeline.kafka import config as kafka_config
 
 
 def test_kafka_client_kwargs_defaults_to_plaintext(monkeypatch):
-    monkeypatch.setattr(kafka_config, "get_settings", lambda: Settings())
+    monkeypatch.setattr(kafka_config, "get_settings", lambda: Settings(_env_file=None))
 
     assert kafka_config.kafka_client_kwargs() == {"security_protocol": "PLAINTEXT"}
 
 
 def test_kafka_client_kwargs_maps_aws_msk_iam_to_oauth_provider(monkeypatch):
     settings = Settings(
+        _env_file=None,
         KAFKA_SECURITY_PROTOCOL="SASL_SSL",
         KAFKA_SASL_MECHANISM="AWS_MSK_IAM",
         AWS_REGION="us-east-1",
@@ -27,6 +28,7 @@ def test_kafka_client_kwargs_maps_aws_msk_iam_to_oauth_provider(monkeypatch):
 
 def test_flink_kafka_properties_maps_aws_msk_iam(monkeypatch):
     settings = Settings(
+        _env_file=None,
         KAFKA_SECURITY_PROTOCOL="SASL_SSL",
         KAFKA_SASL_MECHANISM="AWS_MSK_IAM",
     )

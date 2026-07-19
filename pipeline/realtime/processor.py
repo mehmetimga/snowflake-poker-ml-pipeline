@@ -120,7 +120,10 @@ class RealTimeProcessor:
             group_id=group_id,
             auto_offset_reset=auto_offset_reset,
             enable_auto_commit=True,
-            consumer_timeout_ms=10000,
+            # A production realtime service should block waiting for new
+            # records. Bounded smoke runs still time out so their process can
+            # terminate after the producer has finished.
+            consumer_timeout_ms=-1 if max_messages is None else 10000,
             **kafka_client_kwargs(),
         )
         total = 0

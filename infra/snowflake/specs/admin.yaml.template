@@ -1,0 +1,33 @@
+spec:
+  containers:
+  - name: admin
+    image: __IMAGE_PATH__
+    command:
+    - streamlit
+    args:
+    - run
+    - admin/Home.py
+    - --server.address=0.0.0.0
+    - --server.port=8501
+    - --server.headless=true
+    env:
+      WAREHOUSE_BACKEND: snowflake
+      SNOWFLAKE_WAREHOUSE: DEMO_WH
+      SNOWFLAKE_DATABASE: POKER_ML_DEMO
+      SNOWFLAKE_SCHEMA: PUBLIC
+      MODELS_DIR: /tmp/models
+    readinessProbe:
+      port: 8501
+      path: /_stcore/health
+    resources:
+      requests:
+        cpu: 0.5
+        memory: 1Gi
+      limits:
+        cpu: 1
+        memory: 3Gi
+  endpoints:
+  - name: admin-ui
+    port: 8501
+    protocol: HTTP
+    public: true

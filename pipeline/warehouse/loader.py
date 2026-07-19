@@ -7,6 +7,7 @@ from typing import Iterable
 import pandas as pd
 
 from pipeline.warehouse.factory import Warehouse
+from pipeline.warehouse.sql import delete_by_values
 
 
 def hands_to_dataframes(hands: Iterable[dict]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -22,6 +23,7 @@ def hands_to_dataframes(hands: Iterable[dict]) -> tuple[pd.DataFrame, pd.DataFra
                 "num_players": h["num_players"],
                 "pot_size": h["pot_size"],
                 "board": h.get("board") or [],
+                "dataset_split": h.get("dataset_split", "live"),
             }
         )
         for a in h["actions"]:
@@ -45,7 +47,9 @@ def hands_to_dataframes(hands: Iterable[dict]) -> tuple[pd.DataFrame, pd.DataFra
                     "stack_start": p["stack_start"],
                     "hole_cards": p.get("hole_cards"),
                     "won_amount": p["won_amount"],
-                    "is_suspicious": p["is_suspicious"],
+                    # Live Kafka events intentionally omit offline ground-truth
+                    # labels. Those fields are never model inputs.
+                    "is_suspicious": p.get("is_suspicious", False),
                     "collusion_pair_id": p.get("collusion_pair_id"),
                 }
             )
@@ -60,6 +64,11 @@ def load_hands(warehouse: Warehouse, hands: Iterable[dict]) -> int:
     df_hands, df_actions, df_players = hands_to_dataframes(hands)
     if df_hands.empty:
         return 0
+    hand_ids = df_hands["hand_id"].astype(str).tolist()
+    # Snowflake primary keys are informational. Delete a replayed hand before
+    # appending so frozen datasets remain idempotent in both warehouse modes.
+    for table in ("RAW_ACTIONS", "RAW_PLAYERS", "RAW_HANDS"):
+        delete_by_values(warehouse, table, "hand_id", hand_ids)
     warehouse.write_pandas(df_hands, "RAW_HANDS")
     warehouse.write_pandas(df_actions, "RAW_ACTIONS")
     warehouse.write_pandas(df_players, "RAW_PLAYERS")

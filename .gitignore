@@ -36,6 +36,7 @@ ipython_config.py
 data/raw/*
 data/parquet/*
 data/seeds/*
+data/datasets/*
 !data/raw/.gitkeep
 !data/parquet/.gitkeep
 !data/seeds/.gitkeep
@@ -79,6 +80,9 @@ Thumbs.db
 
 # Docker volumes
 .docker-volumes/
+
+# Locally rendered Snowpark Container Services specs
+infra/snowflake/rendered/
 
 # Terraform
 infra/terraform/.terraform/
