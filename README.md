@@ -11,6 +11,7 @@ Planning documents:
 - [Real-time context and ML implementation plan](docs/realtime-context-ml-implementation-plan.md)
 - [Data generation, storage, and pipeline plan](docs/data-generation-and-pipeline-plan.md)
 - [How the Flink real-time feature pipeline works](docs/flink-realtime-feature-pipeline.md)
+- [Data science and ML/AI model development guide](docs/data-science-model-development-guide.md)
 - [Realtime model input contract](docs/realtime-model-input-contract.md)
 
 ## What's in here

@@ -675,6 +675,11 @@ using identical event fixtures.
 
 Maintain three separate evaluation suites.
 
+For a data-scientist-oriented explanation of prediction units, splits,
+leakage, metrics, current model evidence, rules, deep learning, graph learning,
+and promotion gates, read the
+[Data science and ML/AI model development guide](data-science-model-development-guide.md).
+
 ### Cold-start benchmark
 
 Use disjoint users across splits:

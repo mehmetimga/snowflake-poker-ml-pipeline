@@ -3,6 +3,10 @@
 Phase 12 adds a leakage-safe ensemble experiment and the controls needed to
 operate the current CatBoost champion. It does not change the deployed model.
 
+For the broader data-science workflow and the recommended roles of CatBoost,
+rules, deep learning, graph learning, anomaly detection, and analyst AI, read
+the [Data science and ML/AI model development guide](data-science-model-development-guide.md).
+
 ## Outcome
 
 The five-fold OOF stack combines fold-local CatBoost, deterministic rules, and
