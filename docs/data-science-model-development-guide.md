@@ -6,6 +6,9 @@ leakage, metrics, the current CatBoost champion, deterministic rules, deep
 learning, graph learning, ensembles, anomaly detection, analyst feedback, and
 model promotion.
 
+Implementation progress is tracked in the
+[ML/AI recommendations implementation plan](ml-ai-recommendations-implementation-plan.md).
+
 It is both an onboarding guide and an implementation plan. Statements marked
 **implemented** describe code or artifacts already in this repository.
 Statements marked **next** are recommended additions; they are not claims about
