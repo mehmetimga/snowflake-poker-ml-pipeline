@@ -6,6 +6,10 @@ complete hands, expands a six-player hand into 15 unordered pairs, and writes
 versioned snapshots to `poker.pair-features.v1` keyed by `player_a:player_b`.
 It performs no synchronous database reads.
 
+For a beginner-oriented explanation of streams, keyed state, event time,
+watermarks, prior-only features, and the downstream `[15, 58]` model tensor,
+read [How the Flink real-time feature pipeline works](../../../docs/flink-realtime-feature-pipeline.md).
+
 ## Version-one semantics
 
 - `player_a < player_b` in lexical order and the Kafka key is

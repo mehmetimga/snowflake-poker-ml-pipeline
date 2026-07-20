@@ -10,6 +10,8 @@ Planning documents:
 
 - [Real-time context and ML implementation plan](docs/realtime-context-ml-implementation-plan.md)
 - [Data generation, storage, and pipeline plan](docs/data-generation-and-pipeline-plan.md)
+- [How the Flink real-time feature pipeline works](docs/flink-realtime-feature-pipeline.md)
+- [Realtime model input contract](docs/realtime-model-input-contract.md)
 
 ## What's in here
 
@@ -24,7 +26,7 @@ Planning documents:
 - **Qdrant** — similarity search over pair-pattern embeddings.
 - **Wide-and-Deep meta-learner** — small PyTorch stacker that fuses all model outputs into a final risk score.
 - **Realtime processor** — Kafka hot path that computes features/rules in memory, scores with trained artifacts, and optionally persists history/alerts.
-- **Flink hot path** — optional PyFlink jobs that consume `hands.raw`, maintain rolling pair memory, detect action motifs, and publish alert JSON to `alerts.out`.
+- **Java/Flink hot path** — event-time context enrichment, prior-only user and pair state, six-player-to-15-pair expansion, and versioned feature snapshots on canonical Kafka topics. Older PyFlink motif jobs remain available as local experiments.
 - **Streamlit admin** — alerts, hand viewer, model metrics, graph explorer, retrain trigger, similarity search.
 - **AWS deployment** — Terraform for VPC, ECR, S3, ECS/Fargate, optional MSK/Qdrant, and a SageMaker training pipeline.
 - **Snowflake container deployment** — CPU services/jobs on Snowpark Container Services with internal model stages and managed-Kafka egress.

@@ -5,6 +5,10 @@ envelopes, expands each hand to one record per player, and joins each row to
 the latest context version whose `effective_at <= played_at`. It never queries
 Snowflake or PostgreSQL in the hot path.
 
+For a beginner-oriented explanation of streams, keyed state, event time,
+watermarks, timers, both Java jobs, and the downstream model vector, read
+[How the Flink real-time feature pipeline works](../../../docs/flink-realtime-feature-pipeline.md).
+
 ## Join policy
 
 - Kafka streams are repartitioned by `player_id` / `user_id` into keyed state.

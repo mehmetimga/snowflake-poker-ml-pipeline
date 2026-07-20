@@ -9,6 +9,9 @@ The detailed decisions for synthetic generation, files, PostgreSQL, CDC,
 Kafka feeding, Snowflake persistence, label isolation, dataset splits, and DGX
 exports are maintained in the
 [data generation, storage, and pipeline plan](data-generation-and-pipeline-plan.md).
+The exact online CatBoost input, its ordered 58-feature vector, missing-data
+behavior, forbidden inputs, and feature-versioning rules are defined in the
+[realtime model input contract](realtime-model-input-contract.md).
 
 The project will:
 
@@ -56,11 +59,19 @@ context publish directly to Kafka; PostgreSQL and Debezium are deferred. See the
 [data plan](data-generation-and-pipeline-plan.md) for the authoritative storage
 and feed sequence.
 
-The editable visual architecture is in
-[`poker-ml-end-to-end.excalidraw`](poker-ml-end-to-end.excalidraw). Every compute
-box now names its deployment boundary and target Docker image. It distinguishes
-client/source processes, external Confluent Cloud, SPCS container workloads,
-Snowflake managed data services, and the optional external DGX research lab.
+The editable visual architecture has two complementary views:
+
+- [`poker-ml-end-to-end.excalidraw`](poker-ml-end-to-end.excalidraw) is the
+  functional end-to-end data and ML flow.
+- [`poker-ml-production-components.excalidraw`](poker-ml-production-components.excalidraw)
+  is the production component and deployment view. It expands PostgreSQL,
+  Debezium CDC, Confluent topics, every target SPCS Docker image, Snowflake data
+  stores, operational consumers, model algorithms, promotion gates, and the
+  feedback/retraining loop.
+
+Both diagrams distinguish client/source processes, external Confluent Cloud,
+SPCS container workloads, Snowflake managed data services, and the optional
+external DGX research lab.
 
 ### Deployment boundaries
 
@@ -531,28 +542,27 @@ Every scored pair should persist:
 
 ## Flink pipeline
 
-The current Flink scorer uses no event-time watermarks and can broadcast pair
-memory. That is acceptable for a small demo but should not be used for
-company-wide user context.
+The implemented Java 17 / Flink 1.19.1 pipeline uses event-time watermarks,
+timers, and partitioned keyed state. It does not broadcast company-wide pair
+or user memory. A detailed code-oriented explanation is in
+[How the Flink real-time feature pipeline works](flink-realtime-feature-pipeline.md).
 
-Broadcast state is copied into every parallel operator and held in memory,
-making it unsuitable for all company users. See the
-[Flink Broadcast State documentation](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/fault-tolerance/broadcast_state/).
-
-Implement the following event-time pipeline:
+The implemented event-time pipeline:
 
 1. Parse and validate hand events.
 2. Assign event-time timestamps and watermarks.
 3. Deduplicate by `event_id` and `hand_id`.
 4. Expand each hand into six player-hand records.
 5. Temporally join each player record to user context by `user_id`.
-6. Temporally join session and account-link context when required.
-7. Reassemble the enriched hand.
-8. Expand six players into 15 candidate pairs.
-9. Update keyed player and pair rolling state.
-10. Compute pair features.
-11. Publish versioned feature snapshots to `poker.pair-features.v1`.
-12. Persist raw events and feature snapshots to Snowflake.
+6. Reassemble the enriched hand.
+7. Expand six players into 15 candidate pairs.
+8. Update keyed player and pair rolling state.
+9. Compute pair features.
+10. Publish versioned feature snapshots to `poker.pair-features.v1`.
+
+Session/account-link temporal enrichment remains a future extension. A
+separate Kafka sink path, not the Flink feature operators, persists raw events
+and feature snapshots to Snowflake.
 
 The Go `risk-scorer` then:
 
@@ -577,7 +587,7 @@ fallback because they are not deterministic under replay.
 
 ### Late and missing context policy
 
-Initial policy:
+Implemented policy:
 
 - Allow 30 seconds of lateness locally; make it configurable in production.
 - Represent missing context with explicit missing indicators.
