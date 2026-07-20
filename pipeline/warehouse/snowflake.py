@@ -94,7 +94,13 @@ class SnowflakeWarehouse:
         # default, so lowercase pandas names otherwise become invalid quoted
         # identifiers such as "hand_id".
         upload.columns = [str(column).upper() for column in upload.columns]
-        write_pandas(self.conn, upload, table.upper(), auto_create_table=False)
+        write_pandas(
+            self.conn,
+            upload,
+            table.upper(),
+            auto_create_table=False,
+            use_logical_type=True,
+        )
 
     def close(self) -> None:
         self.conn.close()

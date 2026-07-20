@@ -1,4 +1,4 @@
-.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns features train train-full cpu-validate seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
+.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-drift model-registry model-registry-check phase12-operational phase12-check phase12 go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -7,6 +7,10 @@ KAFKA_TOPIC ?= hands.raw
 FLINK_ALERTS_TOPIC ?= alerts.out
 FLINK_PAIR_MEMORY_TOPIC ?= pair.memory
 FLINK_ACTION_PATTERNS_TOPIC ?= patterns.action
+MAVEN ?= mvn
+GO ?= go
+FLINK_CONTEXT_DIR ?= streaming/flink-java/context-enrichment
+FLINK_PAIR_FEATURES_DIR ?= streaming/flink-java/pair-features
 FLINK_GROUP ?= flink-realtime-$(shell date +%s)
 FLINK_PAIR_MEMORY_GROUP ?= flink-pair-memory-$(shell date +%s)
 FLINK_ACTION_PATTERN_GROUP ?= flink-action-patterns-$(shell date +%s)
@@ -19,6 +23,66 @@ REALTIME_THRESHOLD ?= 0.0
 REALTIME_GROUP ?= realtime-demo-$(shell date +%s)
 REALTIME_FLAGS ?= --from-beginning --no-persist-history --no-persist-alerts
 DATASET_DIR ?= data/datasets/cpu-v1
+WORLD_DATASET_DIR ?= data/datasets/context-v1
+WORLD_DATASET_ID ?= context-v1
+PAIR_DATASET_DIR ?= data/datasets/pair-v1
+PAIR_DATASET_FLAGS ?=
+PAIR_LABEL_FLAGS ?=
+PAIR_MODEL_DIR ?= models/pair-catboost-v1
+PAIR_TRAIN_FLAGS ?=
+PAIR_MODEL_CHECK_FLAGS ?=
+PAIR_CHALLENGER_DATASET ?= data/datasets/pair-full-v2
+PAIR_CHALLENGER_BASELINE ?= models/pair-catboost-full-v2
+PAIR_CHALLENGER_OUTPUT ?= models/pair-challengers-full-v2
+PAIR_CHALLENGER_MODELS ?= residual_mlp,ft_transformer,dcn_v2
+PAIR_CHALLENGER_EPOCHS ?= 20
+PAIR_CHALLENGER_BATCH_SIZE ?= 1024
+PAIR_CHALLENGER_PATIENCE ?= 4
+PAIR_CHALLENGER_BOOTSTRAP_SAMPLES ?= 200
+PAIR_CHALLENGER_FLAGS ?=
+PAIR_HISTORY_SOURCE ?= data/datasets/context-full-v2
+PAIR_HISTORY_DATASET ?= data/datasets/pair-sequences-full-v2
+PAIR_HISTORY_OUTPUT ?= models/pair-history-full-v2
+PAIR_HISTORY_MAX_HANDS ?= 16
+PAIR_HISTORY_PRETRAIN_EPOCHS ?= 5
+PAIR_HISTORY_EPOCHS ?= 15
+PAIR_HISTORY_PRETRAIN_BATCH_SIZE ?= 512
+PAIR_HISTORY_BATCH_SIZE ?= 1024
+PAIR_HISTORY_PATIENCE ?= 4
+PAIR_HISTORY_BOOTSTRAP_SAMPLES ?= 200
+PAIR_HISTORY_DATASET_FLAGS ?=
+PAIR_HISTORY_FLAGS ?=
+PAIR_GRAPH_DATASET ?= data/datasets/pair-graph-full-v2
+PAIR_GRAPH_OUTPUT ?= models/pair-graph-full-v2
+PAIR_GRAPH_NEW_BASELINE ?= models/pair-catboost-new-relationship-v2
+PAIR_GRAPH_BENCHMARKS ?= cold_start,new_relationship
+PAIR_GRAPH_USER_NEIGHBORS ?= 8
+PAIR_GRAPH_RESOURCE_NEIGHBORS ?= 4
+PAIR_GRAPH_EPOCHS ?= 15
+PAIR_GRAPH_BATCH_SIZE ?= 1024
+PAIR_GRAPH_PATIENCE ?= 4
+PAIR_GRAPH_BOOTSTRAP_SAMPLES ?= 200
+PAIR_GRAPH_BASELINE_FLAGS ?=
+PAIR_GRAPH_DATASET_FLAGS ?=
+PAIR_GRAPH_FLAGS ?=
+PAIR_ENSEMBLE_OUTPUT ?= models/pair-ensemble-full-v2
+PAIR_ENSEMBLE_FOLDS ?= 5
+PAIR_ENSEMBLE_BOOTSTRAP_SAMPLES ?= 500
+PAIR_ENSEMBLE_FLAGS ?=
+MODEL_REGISTRY_DIR ?= models/registry
+GO_RISK_DIR ?= services/go
+GO_RISK_MODEL_DIR ?= $(abspath models/pair-catboost-full-v2)
+GO_RISK_LISTEN ?= :8080
+TRITON_HTTP_URL ?= http://127.0.0.1:8000
+GO_RISK_FLAGS ?=
+GO_RISK_KAFKA_FLAGS ?=
+RISK_SCORE_CHECK_FLAGS ?=
+WORLD_REPLAY_MODE ?= accelerated
+WORLD_REPLAY_RATE ?= 100
+WORLD_REPLAY_FLAGS ?=
+WORLD_INGEST_FLAGS ?=
+PAIR_FEATURE_CHECK_FLAGS ?=
+PAIR_FEATURE_INGEST_FLAGS ?=
 TRAIN_HANDS ?= 20000
 VALIDATION_HANDS ?= 5000
 TEST_HANDS ?= 5000
@@ -28,6 +92,18 @@ DATASET_PAIRS ?= 30
 DATASET_SEED ?= 42
 REPLAY_RATE ?= 25
 LOAD_BATCH_SIZE ?= 2000
+DL_DATASET ?= data/datasets/dgx-v1/dl_sequences.npz
+DL_OUTPUT_DIR ?= models/dgx
+DGX_HOST ?= IcardiSpark
+DGX_PROJECT_DIR ?= /home/mehmet/snowflake-poker-ml-pipeline
+DGX_IMAGE ?= nvcr.io/nvidia/pytorch:25.12-py3
+DGX_EPOCHS ?= 20
+DGX_BATCH_SIZE ?= 512
+DGX_PATIENCE ?= 4
+DGX_TRITON_IMAGE ?= nvcr.io/nvidia/tritonserver:25.12-py3-igpu
+DGX_TRITON_CONTAINER ?= poker-triton
+DGX_TRITON_MODEL_DIR ?= $(DGX_PROJECT_DIR)/models/pair-catboost-full-v2/triton
+DGX_TRITON_LOCAL_PORT ?= 18000
 
 export PYTHONPATH := $(CURDIR):$(PYTHONPATH)
 
@@ -40,6 +116,48 @@ help:
 	@echo "  down         Stop docker compose services"
 	@echo "  migrate      Apply SQL migrations to warehouse (DuckDB or Snowflake)"
 	@echo "  dataset      Build frozen PokerKit train/validation/test/challenge files"
+	@echo "  world-dataset Build context-rich, multi-topic PokerKit dataset files"
+	@echo "  pair-dataset Build frozen pair benchmarks and DGX Parquet exports"
+	@echo "  pair-dataset-check Audit pair dataset hashes and leakage boundaries"
+	@echo "  pair-labels Load restricted pair-label sidecars into the warehouse"
+	@echo "  pair-train   Train/calibrate/export the pair-level CatBoost model"
+	@echo "  pair-model-check Verify artifacts and score a 15-pair hand through ONNX"
+	@echo "  pair-challengers-test Test neural tabular architectures and promotion gates"
+	@echo "  pair-challengers-train Train Phase 9 tabular challengers locally"
+	@echo "  pair-challengers-check Verify Phase 9 hashes, splits, and promotion gates"
+	@echo "  pair-history-dataset Build strictly prior multi-hand user/pair histories"
+	@echo "  pair-history-dataset-check Verify Phase 10 hashes, alignment, and timestamps"
+	@echo "  pair-history-test Test Phase 10 dataset, pretraining, and model contracts"
+	@echo "  pair-history-train Pretrain and fine-tune the Phase 10 model locally"
+	@echo "  pair-history-check Verify Phase 10 model artifacts and promotion gate"
+	@echo "  pair-graph-baseline Train label-safe new-relationship CatBoost comparison"
+	@echo "  pair-graph-dataset Build prior-only cold-start and new-pair graph snapshots"
+	@echo "  pair-graph-dataset-check Verify graph hashes, lineage, and temporal edges"
+	@echo "  pair-graph-test Test the Phase 11 graph builder and inductive model"
+	@echo "  pair-graph-train Train Phase 11 graph models locally"
+	@echo "  pair-graph-check Verify Phase 11 artifacts and multi-benchmark gates"
+	@echo "  pair-ensemble-train Train the leakage-safe Phase 12 OOF stacker"
+	@echo "  pair-ensemble-check Verify OOF isolation, hashes, and portable scoring"
+	@echo "  model-drift Build validation-window reference and evaluate test drift"
+	@echo "  model-registry Build immutable registry/deployment/audit snapshots"
+	@echo "  phase12-operational Run replay, recovery, load, race, and security checks"
+	@echo "  phase12-check Verify all existing Phase 12 artifacts and controls"
+	@echo "  phase12      Train and verify the complete Phase 12 workflow"
+	@echo "  go-risk-test Test the Go complete-hand scorer and Triton client"
+	@echo "  go-risk-check Verify Go can load the promoted artifact contract"
+	@echo "  go-risk-run Run the Go HTTP scorer against a Triton V2 endpoint"
+	@echo "  go-risk-kafka Run the Go Kafka scorer against Confluent and Triton"
+	@echo "  go-risk-kafka-check Verify the Go adapter can authenticate to Kafka"
+	@echo "  risk-scores-check Validate versioned risk scores consumed from Kafka"
+	@echo "  world-topics Create missing canonical Kafka topics"
+	@echo "  enrichment-topics Create Flink enrichment output and dead-letter topics"
+	@echo "  scoring-topics Create risk-score, risk-alert, and dead-letter topics"
+	@echo "  world-replay Publish the context-rich dataset to canonical Kafka topics"
+	@echo "  world-replay-dry Validate and count the replay without Kafka writes"
+	@echo "  world-verify Consume and verify frozen events from canonical Kafka topics"
+	@echo "  world-ingest Consume canonical topics into the configured warehouse"
+	@echo "  pair-features-check Validate pair rows and optional online/offline parity"
+	@echo "  pair-features-ingest Persist pair-feature snapshots idempotently"
 	@echo "  load-dataset Load labeled train/validation/test splits and compute features"
 	@echo "  generate     Generate synthetic hands and publish to Kafka"
 	@echo "  replay-challenge Replay the label-free frozen challenge stream to Kafka"
@@ -49,10 +167,32 @@ help:
 	@echo "  flink-realtime Consume Kafka with PyFlink and publish alert JSON"
 	@echo "  flink-pair-memory Build keyed rolling pair memory with PyFlink"
 	@echo "  flink-action-patterns Detect action motifs with PyFlink"
+	@echo "  flink-context-build Build the native Java event-time context job"
+	@echo "  flink-context-test Test the native Java event-time context job"
+	@echo "  flink-pair-features-build Build the native Java pair-feature job"
+	@echo "  flink-pair-features-test Test the native Java pair-feature job"
 	@echo "  features     Compute FEATURES + RULE_FLAGS tables"
 	@echo "  train        CPU phase: train classical ML, export ONNX, and score"
 	@echo "  train-full   Later phase: also train DL, GNN, and meta models"
 	@echo "  cpu-validate Build/load frozen data and run the CPU training phase"
+	@echo "  dl-export    Export frozen, secret-free DL arrays from the warehouse"
+	@echo "  dl-train-local Train LSTM + Transformer from the exported arrays"
+	@echo "  dgx-sync     Copy code and the exported DL bundle to DGX Spark"
+	@echo "  dgx-train-dl Run leakage-safe DL training in the NVIDIA PyTorch container"
+	@echo "  dgx-fetch-dl Copy trained DL artifacts back from DGX Spark"
+	@echo "  dgx-pair-challengers-sync Copy label-safe pair splits and challenger code to DGX"
+	@echo "  dgx-pair-challengers-train Train Residual MLP, FT-Transformer, and DCN-V2"
+	@echo "  dgx-pair-challengers-fetch Copy Phase 9 metrics and checkpoints from DGX"
+	@echo "  dgx-pair-history-sync Copy label-safe Phase 10 histories and code to DGX"
+	@echo "  dgx-pair-history-train Pretrain and fine-tune the multi-hand model on DGX"
+	@echo "  dgx-pair-history-fetch Copy Phase 10 metrics and checkpoints from DGX"
+	@echo "  dgx-pair-graph-sync Copy public Phase 11 graph benchmarks and baselines"
+	@echo "  dgx-pair-graph-train Train cold-start and new-pair GraphSAGE models on DGX"
+	@echo "  dgx-pair-graph-fetch Copy Phase 11 metrics and checkpoints from DGX"
+	@echo "  dgx-triton-sync Copy the promoted Triton model repository to DGX Spark"
+	@echo "  dgx-triton-start Start or reuse the localhost-only DGX Triton container"
+	@echo "  dgx-triton-status Check DGX Triton container, server, and model readiness"
+	@echo "  dgx-triton-tunnel Forward localhost:18000 to the DGX Triton HTTP API"
 	@echo "  seed-qdrant  Seed Qdrant collusion/normal pattern collections"
 	@echo "  admin        Launch Streamlit admin on :8501"
 	@echo "  demo         End-to-end: services + migrate + generate + consume + features + train + seed-qdrant"
@@ -113,6 +253,193 @@ dataset:
 		--test-hands $(TEST_HANDS) --challenge-hands $(CHALLENGE_HANDS) \
 		--players $(DATASET_PLAYERS) --pairs $(DATASET_PAIRS) --seed $(DATASET_SEED)
 
+world-dataset:
+	$(PY) scripts/generate_realtime_world.py --output-dir $(WORLD_DATASET_DIR) \
+		--dataset-id $(WORLD_DATASET_ID) --train-hands $(TRAIN_HANDS) \
+		--validation-hands $(VALIDATION_HANDS) --test-hands $(TEST_HANDS) \
+		--challenge-hands $(CHALLENGE_HANDS) --players $(DATASET_PLAYERS) \
+		--pairs $(DATASET_PAIRS) --seed $(DATASET_SEED)
+
+pair-dataset:
+	$(PY) scripts/build_pair_dataset.py --source-dir $(WORLD_DATASET_DIR) \
+		--output-dir $(PAIR_DATASET_DIR) $(PAIR_DATASET_FLAGS)
+
+pair-dataset-check:
+	$(PY) scripts/check_pair_dataset.py --dataset $(PAIR_DATASET_DIR)
+
+pair-labels:
+	$(PY) scripts/load_pair_labels.py --dataset $(PAIR_DATASET_DIR) $(PAIR_LABEL_FLAGS)
+
+pair-train: pair-dataset-check
+	$(PY) scripts/train_pair_catboost.py --dataset $(PAIR_DATASET_DIR) \
+		--output-dir $(PAIR_MODEL_DIR) $(PAIR_TRAIN_FLAGS)
+
+pair-model-check:
+	$(PY) scripts/check_pair_model.py --dataset $(PAIR_DATASET_DIR) \
+		--model-dir $(PAIR_MODEL_DIR) $(PAIR_MODEL_CHECK_FLAGS)
+
+pair-challengers-test:
+	$(PY) -m pytest -q tests/test_pair_challengers.py
+
+pair-challengers-train:
+	$(PY) scripts/train_pair_challengers.py --dataset $(PAIR_CHALLENGER_DATASET) \
+		--baseline-dir $(PAIR_CHALLENGER_BASELINE) --output-dir $(PAIR_CHALLENGER_OUTPUT) \
+		--models $(PAIR_CHALLENGER_MODELS) --epochs $(PAIR_CHALLENGER_EPOCHS) \
+		--batch-size $(PAIR_CHALLENGER_BATCH_SIZE) --patience $(PAIR_CHALLENGER_PATIENCE) \
+		--bootstrap-samples $(PAIR_CHALLENGER_BOOTSTRAP_SAMPLES) $(PAIR_CHALLENGER_FLAGS)
+
+pair-challengers-check:
+	$(PY) scripts/check_pair_challengers.py --model-dir $(PAIR_CHALLENGER_OUTPUT)
+
+pair-history-dataset:
+	$(PY) scripts/build_pair_history_dataset.py --source-dir $(PAIR_HISTORY_SOURCE) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) --output-dir $(PAIR_HISTORY_DATASET) \
+		--max-history $(PAIR_HISTORY_MAX_HANDS) $(PAIR_HISTORY_DATASET_FLAGS)
+
+pair-history-dataset-check:
+	$(PY) scripts/check_pair_history_dataset.py --dataset $(PAIR_HISTORY_DATASET) \
+		--source-dir $(PAIR_HISTORY_SOURCE) --pair-dataset $(PAIR_CHALLENGER_DATASET)
+
+pair-history-test:
+	$(PY) -m pytest -q tests/test_pair_history.py
+
+pair-history-train:
+	$(PY) scripts/train_pair_history.py --history-dataset $(PAIR_HISTORY_DATASET) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) --baseline-dir $(PAIR_CHALLENGER_BASELINE) \
+		--output-dir $(PAIR_HISTORY_OUTPUT) --pretrain-epochs $(PAIR_HISTORY_PRETRAIN_EPOCHS) \
+		--epochs $(PAIR_HISTORY_EPOCHS) --pretrain-batch-size $(PAIR_HISTORY_PRETRAIN_BATCH_SIZE) \
+		--batch-size $(PAIR_HISTORY_BATCH_SIZE) --patience $(PAIR_HISTORY_PATIENCE) \
+		--bootstrap-samples $(PAIR_HISTORY_BOOTSTRAP_SAMPLES) $(PAIR_HISTORY_FLAGS)
+
+pair-history-check:
+	$(PY) scripts/check_pair_history_model.py --model-dir $(PAIR_HISTORY_OUTPUT)
+
+pair-graph-baseline:
+	$(PY) scripts/train_public_pair_baseline.py --dataset $(PAIR_CHALLENGER_DATASET) \
+		--output-dir $(PAIR_GRAPH_NEW_BASELINE) --benchmark new_relationship \
+		$(PAIR_GRAPH_BASELINE_FLAGS)
+
+pair-graph-dataset:
+	$(PY) scripts/build_pair_graph_dataset.py --source-dir $(PAIR_HISTORY_SOURCE) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) --output-dir $(PAIR_GRAPH_DATASET) \
+		--benchmarks $(PAIR_GRAPH_BENCHMARKS) \
+		--max-user-neighbors $(PAIR_GRAPH_USER_NEIGHBORS) \
+		--max-resource-neighbors $(PAIR_GRAPH_RESOURCE_NEIGHBORS) \
+		$(PAIR_GRAPH_DATASET_FLAGS)
+
+pair-graph-dataset-check:
+	$(PY) scripts/check_pair_graph_dataset.py --dataset $(PAIR_GRAPH_DATASET) \
+		--source-dir $(PAIR_HISTORY_SOURCE) --pair-dataset $(PAIR_CHALLENGER_DATASET)
+
+pair-graph-test:
+	$(PY) -m pytest -q tests/test_pair_graph.py
+
+pair-graph-train:
+	$(PY) scripts/train_pair_graph.py --graph-dataset $(PAIR_GRAPH_DATASET) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) \
+		--cold-start-baseline $(PAIR_CHALLENGER_BASELINE) \
+		--new-relationship-baseline $(PAIR_GRAPH_NEW_BASELINE) \
+		--output-dir $(PAIR_GRAPH_OUTPUT) --benchmarks $(PAIR_GRAPH_BENCHMARKS) \
+		--epochs $(PAIR_GRAPH_EPOCHS) --batch-size $(PAIR_GRAPH_BATCH_SIZE) \
+		--patience $(PAIR_GRAPH_PATIENCE) \
+		--bootstrap-samples $(PAIR_GRAPH_BOOTSTRAP_SAMPLES) $(PAIR_GRAPH_FLAGS)
+
+pair-graph-check:
+	$(PY) scripts/check_pair_graph_model.py --model-dir $(PAIR_GRAPH_OUTPUT)
+
+pair-ensemble-test:
+	$(PY) -m pytest -q tests/test_pair_ensemble.py tests/test_model_ops.py
+
+pair-ensemble-train:
+	$(PY) scripts/train_pair_ensemble.py --dataset $(PAIR_CHALLENGER_DATASET) \
+		--champion-dir $(PAIR_CHALLENGER_BASELINE) --output-dir $(PAIR_ENSEMBLE_OUTPUT) \
+		--folds $(PAIR_ENSEMBLE_FOLDS) \
+		--bootstrap-samples $(PAIR_ENSEMBLE_BOOTSTRAP_SAMPLES) $(PAIR_ENSEMBLE_FLAGS)
+
+pair-ensemble-check:
+	$(PY) scripts/check_pair_ensemble.py --model-dir $(PAIR_ENSEMBLE_OUTPUT)
+
+model-drift:
+	$(PY) scripts/check_model_drift.py --dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) --output-dir $(MODEL_REGISTRY_DIR)
+
+phase12-operational:
+	$(PY) scripts/run_phase12_operational_checks.py \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--output $(MODEL_REGISTRY_DIR)/operational_report.json
+
+model-registry:
+	$(PY) scripts/build_model_registry.py --champion-dir $(PAIR_CHALLENGER_BASELINE) \
+		--ensemble-dir $(PAIR_ENSEMBLE_OUTPUT) --output-dir $(MODEL_REGISTRY_DIR) \
+		--operational-report $(MODEL_REGISTRY_DIR)/operational_report.json
+
+model-registry-check:
+	$(PY) scripts/check_model_registry.py --registry-dir $(MODEL_REGISTRY_DIR)
+
+phase12-check: pair-ensemble-test pair-ensemble-check model-drift phase12-operational model-registry model-registry-check
+
+phase12: pair-ensemble-train phase12-check
+
+go-risk-test:
+	cd $(GO_RISK_DIR) && $(GO) test ./...
+
+go-risk-race:
+	cd $(GO_RISK_DIR) && $(GO) test -race ./internal/risk ./internal/stream
+
+go-risk-benchmark:
+	cd $(GO_RISK_DIR) && $(GO) test -run '^$$' -bench '^BenchmarkScoreHand$$' -benchtime=1s ./internal/risk
+
+go-risk-check:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/risk-contract-check \
+		--model-dir $(GO_RISK_MODEL_DIR)
+
+go-risk-run:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/risk-scorer \
+		--model-dir $(GO_RISK_MODEL_DIR) --triton-url $(TRITON_HTTP_URL) \
+		--listen $(GO_RISK_LISTEN) $(GO_RISK_FLAGS)
+
+go-risk-kafka:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/risk-kafka \
+		--model-dir $(GO_RISK_MODEL_DIR) --triton-url $(TRITON_HTTP_URL) \
+		$(GO_RISK_KAFKA_FLAGS)
+
+go-risk-kafka-check:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/risk-kafka \
+		--model-dir $(GO_RISK_MODEL_DIR) --check-kafka-only
+
+risk-scores-check: check-kafka
+	$(PY) scripts/check_risk_scores.py $(RISK_SCORE_CHECK_FLAGS)
+
+world-replay: check-kafka
+	$(PY) scripts/replay_world.py --dataset $(WORLD_DATASET_DIR) \
+		--mode $(WORLD_REPLAY_MODE) --rate $(WORLD_REPLAY_RATE) $(WORLD_REPLAY_FLAGS)
+
+world-topics: check-kafka
+	$(PY) scripts/ensure_world_topics.py
+
+enrichment-topics: check-kafka
+	$(PY) scripts/ensure_enrichment_topics.py
+
+scoring-topics: check-kafka
+	$(PY) scripts/ensure_scoring_topics.py
+
+world-replay-dry:
+	$(PY) scripts/replay_world.py --dataset $(WORLD_DATASET_DIR) \
+		--mode replay --dry-run $(WORLD_REPLAY_FLAGS)
+
+world-verify: check-kafka
+	$(PY) scripts/verify_world_replay.py --dataset $(WORLD_DATASET_DIR) \
+		$(WORLD_REPLAY_FLAGS)
+
+world-ingest: check-kafka
+	$(PY) scripts/ingest_world.py --migrate $(WORLD_INGEST_FLAGS)
+
+pair-features-check: check-kafka
+	$(PY) scripts/check_pair_features.py $(PAIR_FEATURE_CHECK_FLAGS)
+
+pair-features-ingest: check-kafka
+	$(PY) scripts/ingest_pair_features.py $(PAIR_FEATURE_INGEST_FLAGS)
+
 load-dataset: migrate
 	@for split in train validation test; do \
 		$(PY) scripts/load_warehouse.py \
@@ -157,6 +484,18 @@ flink-action-patterns: check-flink
 		--action-patterns-topic $(FLINK_ACTION_PATTERNS_TOPIC) \
 		--group-id $(FLINK_ACTION_PATTERN_GROUP) $(FLINK_ACTION_PATTERN_FLAGS)
 
+flink-context-build:
+	cd $(FLINK_CONTEXT_DIR) && $(MAVEN) clean package
+
+flink-context-test:
+	cd $(FLINK_CONTEXT_DIR) && $(MAVEN) test
+
+flink-pair-features-build:
+	cd $(FLINK_PAIR_FEATURES_DIR) && $(MAVEN) clean package
+
+flink-pair-features-test:
+	cd $(FLINK_PAIR_FEATURES_DIR) && $(MAVEN) test
+
 features:
 	$(PY) scripts/load_warehouse.py --compute-features
 
@@ -167,6 +506,182 @@ train-full:
 	$(PY) scripts/train.py --profile full
 
 cpu-validate: dataset load-dataset train
+
+dl-export:
+	$(PY) scripts/export_dl_dataset.py --output $(DL_DATASET)
+
+dl-train-local:
+	$(PY) scripts/train_dl.py --dataset $(DL_DATASET) --output-dir $(DL_OUTPUT_DIR) \
+		--epochs $(DGX_EPOCHS) --batch-size $(DGX_BATCH_SIZE) \
+		--patience $(DGX_PATIENCE)
+
+dgx-sync:
+	@test -f $(DL_DATASET) || (echo "Missing $(DL_DATASET); run 'make dl-export' first."; exit 1)
+	ssh $(DGX_HOST) "mkdir -p $(DGX_PROJECT_DIR)/data/datasets/dgx-v1 $(DGX_PROJECT_DIR)/models/dgx"
+	rsync -az --exclude=.env --exclude=.git --exclude=.venv --exclude=data --exclude=models \
+		./ $(DGX_HOST):$(DGX_PROJECT_DIR)/
+	rsync -az $(DL_DATASET) $(DL_DATASET:.npz=.manifest.json) \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/data/datasets/dgx-v1/
+
+dgx-train-dl: dgx-sync
+	ssh $(DGX_HOST) docker run --rm --gpus all --ipc=host \
+		--ulimit memlock=-1 --ulimit stack=67108864 \
+		-e PYTHONPATH=/workspace -e PYTHONUNBUFFERED=1 \
+		-v $(DGX_PROJECT_DIR):/workspace -w /workspace $(DGX_IMAGE) \
+		python scripts/train_dl.py --dataset $(DL_DATASET) --output-dir $(DL_OUTPUT_DIR) \
+		--epochs $(DGX_EPOCHS) --batch-size $(DGX_BATCH_SIZE) \
+		--patience $(DGX_PATIENCE) --device cuda
+
+dgx-fetch-dl:
+	mkdir -p $(DL_OUTPUT_DIR)
+	rsync -az $(DGX_HOST):$(DGX_PROJECT_DIR)/$(DL_OUTPUT_DIR)/ $(DL_OUTPUT_DIR)/
+
+dgx-pair-challengers-sync:
+	@test -f $(PAIR_CHALLENGER_DATASET)/manifest.json || \
+		(echo "Missing pair dataset manifest; build pair-full-v2 first."; exit 1)
+	@test -f $(PAIR_CHALLENGER_BASELINE)/predictions.parquet || \
+		(echo "Missing promoted CatBoost predictions."; exit 1)
+	ssh $(DGX_HOST) "mkdir -p $(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE) $(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_OUTPUT)"
+	rsync -az --exclude=.env --exclude=.git --exclude=.venv --exclude=data --exclude=models \
+		./ $(DGX_HOST):$(DGX_PROJECT_DIR)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/manifest.json $(PAIR_CHALLENGER_DATASET)/schema.json \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/dgx/cold_start/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start/
+	rsync -az $(PAIR_CHALLENGER_BASELINE)/metrics.json \
+		$(PAIR_CHALLENGER_BASELINE)/predictions.parquet \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE)/
+
+dgx-pair-challengers-train: dgx-pair-challengers-sync
+	ssh $(DGX_HOST) docker run --rm --gpus all --ipc=host \
+		--ulimit memlock=-1 --ulimit stack=67108864 \
+		-e PYTHONPATH=/workspace -e PYTHONUNBUFFERED=1 \
+		-v $(DGX_PROJECT_DIR):/workspace -w /workspace $(DGX_IMAGE) \
+		python scripts/train_pair_challengers.py --dataset $(PAIR_CHALLENGER_DATASET) \
+		--baseline-dir $(PAIR_CHALLENGER_BASELINE) --output-dir $(PAIR_CHALLENGER_OUTPUT) \
+		--models $(PAIR_CHALLENGER_MODELS) --epochs $(PAIR_CHALLENGER_EPOCHS) \
+		--batch-size $(PAIR_CHALLENGER_BATCH_SIZE) --patience $(PAIR_CHALLENGER_PATIENCE) \
+		--bootstrap-samples $(PAIR_CHALLENGER_BOOTSTRAP_SAMPLES) --device cuda --overwrite \
+		$(PAIR_CHALLENGER_FLAGS)
+
+dgx-pair-challengers-fetch:
+	mkdir -p $(PAIR_CHALLENGER_OUTPUT)
+	rsync -az $(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_OUTPUT)/ \
+		$(PAIR_CHALLENGER_OUTPUT)/
+
+dgx-pair-history-sync:
+	@test -f $(PAIR_HISTORY_DATASET)/manifest.json || \
+		(echo "Missing Phase 10 history dataset; run make pair-history-dataset first."; exit 1)
+	@test -f $(PAIR_CHALLENGER_BASELINE)/predictions.parquet || \
+		(echo "Missing promoted CatBoost predictions."; exit 1)
+	ssh $(DGX_HOST) "mkdir -p $(DGX_PROJECT_DIR)/$(PAIR_HISTORY_DATASET) \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE) $(DGX_PROJECT_DIR)/$(PAIR_HISTORY_OUTPUT)"
+	rsync -az --exclude=.env --exclude=.git --exclude=.venv --exclude=data --exclude=models \
+		./ $(DGX_HOST):$(DGX_PROJECT_DIR)/
+	rsync -az $(PAIR_HISTORY_DATASET)/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_HISTORY_DATASET)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/manifest.json $(PAIR_CHALLENGER_DATASET)/schema.json \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/dgx/cold_start/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start/
+	rsync -az $(PAIR_CHALLENGER_BASELINE)/metrics.json \
+		$(PAIR_CHALLENGER_BASELINE)/predictions.parquet \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE)/
+
+dgx-pair-history-train: dgx-pair-history-sync
+	ssh $(DGX_HOST) docker run --rm --gpus all --ipc=host \
+		--ulimit memlock=-1 --ulimit stack=67108864 \
+		-e PYTHONPATH=/workspace -e PYTHONUNBUFFERED=1 \
+		-v $(DGX_PROJECT_DIR):/workspace -w /workspace $(DGX_IMAGE) \
+		python scripts/train_pair_history.py --history-dataset $(PAIR_HISTORY_DATASET) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) --baseline-dir $(PAIR_CHALLENGER_BASELINE) \
+		--output-dir $(PAIR_HISTORY_OUTPUT) --pretrain-epochs $(PAIR_HISTORY_PRETRAIN_EPOCHS) \
+		--epochs $(PAIR_HISTORY_EPOCHS) --pretrain-batch-size $(PAIR_HISTORY_PRETRAIN_BATCH_SIZE) \
+		--batch-size $(PAIR_HISTORY_BATCH_SIZE) --patience $(PAIR_HISTORY_PATIENCE) \
+		--bootstrap-samples $(PAIR_HISTORY_BOOTSTRAP_SAMPLES) --device cuda --overwrite \
+		$(PAIR_HISTORY_FLAGS)
+
+dgx-pair-history-fetch:
+	mkdir -p $(PAIR_HISTORY_OUTPUT)
+	rsync -az $(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_HISTORY_OUTPUT)/ \
+		$(PAIR_HISTORY_OUTPUT)/
+
+dgx-pair-graph-sync:
+	@test -f $(PAIR_GRAPH_DATASET)/manifest.json || \
+		(echo "Missing Phase 11 graph dataset; run make pair-graph-dataset first."; exit 1)
+	@test -f $(PAIR_GRAPH_NEW_BASELINE)/predictions.parquet || \
+		(echo "Missing new-relationship baseline; run make pair-graph-baseline first."; exit 1)
+	ssh $(DGX_HOST) "mkdir -p $(DGX_PROJECT_DIR)/$(PAIR_GRAPH_DATASET) \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/new_relationship \
+		$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE) \
+		$(DGX_PROJECT_DIR)/$(PAIR_GRAPH_NEW_BASELINE) $(DGX_PROJECT_DIR)/$(PAIR_GRAPH_OUTPUT)"
+	rsync -az --exclude=.env --exclude=.git --exclude=.venv --exclude=data --exclude=models \
+		./ $(DGX_HOST):$(DGX_PROJECT_DIR)/
+	rsync -az $(PAIR_GRAPH_DATASET)/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_GRAPH_DATASET)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/manifest.json $(PAIR_CHALLENGER_DATASET)/schema.json \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/dgx/cold_start/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/cold_start/
+	rsync -az $(PAIR_CHALLENGER_DATASET)/dgx/new_relationship/ \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_DATASET)/dgx/new_relationship/
+	rsync -az $(PAIR_CHALLENGER_BASELINE)/metrics.json \
+		$(PAIR_CHALLENGER_BASELINE)/artifact_manifest.json \
+		$(PAIR_CHALLENGER_BASELINE)/predictions.parquet \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_CHALLENGER_BASELINE)/
+	rsync -az $(PAIR_GRAPH_NEW_BASELINE)/metrics.json \
+		$(PAIR_GRAPH_NEW_BASELINE)/artifact_manifest.json \
+		$(PAIR_GRAPH_NEW_BASELINE)/predictions.parquet \
+		$(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_GRAPH_NEW_BASELINE)/
+
+dgx-pair-graph-train: dgx-pair-graph-sync
+	ssh $(DGX_HOST) docker run --rm --gpus all --ipc=host \
+		--ulimit memlock=-1 --ulimit stack=67108864 \
+		-e PYTHONPATH=/workspace -e PYTHONUNBUFFERED=1 \
+		-v $(DGX_PROJECT_DIR):/workspace -w /workspace $(DGX_IMAGE) \
+		python scripts/train_pair_graph.py --graph-dataset $(PAIR_GRAPH_DATASET) \
+		--pair-dataset $(PAIR_CHALLENGER_DATASET) \
+		--cold-start-baseline $(PAIR_CHALLENGER_BASELINE) \
+		--new-relationship-baseline $(PAIR_GRAPH_NEW_BASELINE) \
+		--output-dir $(PAIR_GRAPH_OUTPUT) --benchmarks $(PAIR_GRAPH_BENCHMARKS) \
+		--epochs $(PAIR_GRAPH_EPOCHS) --batch-size $(PAIR_GRAPH_BATCH_SIZE) \
+		--patience $(PAIR_GRAPH_PATIENCE) \
+		--bootstrap-samples $(PAIR_GRAPH_BOOTSTRAP_SAMPLES) --device cuda --overwrite \
+		$(PAIR_GRAPH_FLAGS)
+
+dgx-pair-graph-fetch:
+	mkdir -p $(PAIR_GRAPH_OUTPUT)
+	rsync -az $(DGX_HOST):$(DGX_PROJECT_DIR)/$(PAIR_GRAPH_OUTPUT)/ \
+		$(PAIR_GRAPH_OUTPUT)/
+
+dgx-triton-sync:
+	ssh $(DGX_HOST) "mkdir -p $(DGX_TRITON_MODEL_DIR)"
+	rsync -az models/pair-catboost-full-v2/triton/ \
+		$(DGX_HOST):$(DGX_TRITON_MODEL_DIR)/
+
+dgx-triton-start: dgx-triton-sync
+	ssh $(DGX_HOST) 'if docker container inspect $(DGX_TRITON_CONTAINER) >/dev/null 2>&1; then \
+		docker start $(DGX_TRITON_CONTAINER); \
+	else \
+		docker image inspect $(DGX_TRITON_IMAGE) >/dev/null 2>&1 || docker pull $(DGX_TRITON_IMAGE); \
+		docker run -d --name $(DGX_TRITON_CONTAINER) --restart unless-stopped --gpus all \
+			-p 127.0.0.1:8000:8000 -p 127.0.0.1:8001:8001 -p 127.0.0.1:8002:8002 \
+			-v $(DGX_TRITON_MODEL_DIR):/models:ro $(DGX_TRITON_IMAGE) \
+			tritonserver --model-repository=/models --strict-model-config=true --log-verbose=0; \
+	fi'
+
+dgx-triton-status:
+	ssh $(DGX_HOST) 'docker ps --filter name=^$(DGX_TRITON_CONTAINER)$$ \
+		--format "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"; \
+		curl --fail --silent --show-error http://127.0.0.1:8000/v2/health/ready; \
+		curl --fail --silent --show-error http://127.0.0.1:8000/v2/models/pair_catboost/ready; \
+		curl --fail --silent --show-error http://127.0.0.1:8000/v2/models/pair_catboost/stats'
+
+dgx-triton-tunnel:
+	ssh -N -L $(DGX_TRITON_LOCAL_PORT):127.0.0.1:8000 $(DGX_HOST)
 
 seed-qdrant:
 	$(PY) scripts/seed_qdrant.py

@@ -1,4 +1,10 @@
-__all__ = ["HandProducer", "WarehouseSink"]
+__all__ = [
+    "HandProducer",
+    "WarehouseSink",
+    "WorldEventProducer",
+    "WorldTopics",
+    "WorldWarehouseSink",
+]
 
 
 def __getattr__(name):
@@ -10,4 +16,12 @@ def __getattr__(name):
         from .consumer import WarehouseSink
 
         return WarehouseSink
+    if name in {"WorldEventProducer", "WorldTopics"}:
+        from .event_producer import WorldEventProducer, WorldTopics
+
+        return {"WorldEventProducer": WorldEventProducer, "WorldTopics": WorldTopics}[name]
+    if name == "WorldWarehouseSink":
+        from .world_sink import WorldWarehouseSink
+
+        return WorldWarehouseSink
     raise AttributeError(name)

@@ -101,11 +101,25 @@ def assemble_dataset_from_frames(
     pattern_map = pattern_scores or {}
     qdrant_scores = np.array([float(pattern_map.get(pair, 0.0)) for pair in ids_pairs], dtype=np.float32)
 
-    # Sequence embeddings via LSTM + Transformer (zeros if models or data are missing)
+    # Sequence embeddings via LSTM + Transformer (zeros if models or data are missing).
+    # Reuse the training-fitted amount scale; fitting a new scale on each live
+    # batch would silently change the model inputs.
+    amount_scale: float | None = None
+    dl_info_path = models_dir / "dl_info.json"
+    if dl_info_path.exists():
+        amount_scale = float(json.loads(dl_info_path.read_text()).get("amount_scale", 0.0)) or None
     if actions is not None and players is not None:
-        Xs, _, ids = build_sequences_from_dataframes(actions, players)
+        Xs, _, ids = build_sequences_from_dataframes(
+            actions,
+            players,
+            amount_scale=amount_scale,
+        )
     elif warehouse is not None:
-        Xs, _, ids = build_sequences(warehouse, hand_ids=hand_ids)
+        Xs, _, ids = build_sequences(
+            warehouse,
+            hand_ids=hand_ids,
+            amount_scale=amount_scale,
+        )
     else:
         Xs = np.zeros((0, 60, FEATURE_DIM), dtype=np.float32)
         ids = []

@@ -1,0 +1,31 @@
+groups:
+  - name: poker-risk-scorer
+    rules:
+      - alert: PokerRiskScorerHighErrorRate
+        expr: rate(risk_scorer_errors_total[5m]) / clamp_min(rate(risk_scorer_requests_total[5m]), 0.001) > 0.02
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Risk scorer HTTP error rate is above 2%
+      - alert: PokerRiskScorerP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(risk_scorer_request_duration_seconds_bucket[5m]))) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Risk scorer p95 latency is above 250 ms
+      - alert: PokerRiskScorerReadinessFailure
+        expr: increase(risk_scorer_ready_failures_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: Triton readiness checks are failing
+      - alert: PokerRiskScorerNoSuccessfulHands
+        expr: time() - risk_scorer_last_success_unixtime > 900 and rate(risk_scorer_requests_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Requests are arriving but no hand has scored for 15 minutes

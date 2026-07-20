@@ -81,6 +81,7 @@ class GeneratorConfig:
     n_colluding_pairs: int = 30
     seed: int = 42
     dataset_split: str = "live"
+    dataset_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.n_hands < 0:
@@ -91,8 +92,15 @@ class GeneratorConfig:
             raise ValueError("n_tables must be positive")
         if self.n_colluding_pairs < 0 or self.n_colluding_pairs * 2 > self.n_players:
             raise ValueError("n_colluding_pairs must use at most n_players / 2 players")
-        if not self.dataset_split or not self.dataset_split.replace("-", "_").isalnum():
+        if not self.dataset_split or not self.dataset_split.replace("-", "").replace(
+            "_", ""
+        ).isalnum():
             raise ValueError("dataset_split must be a non-empty alphanumeric label")
+        if self.dataset_id is not None and (
+            not self.dataset_id
+            or not self.dataset_id.replace("-", "").replace("_", "").isalnum()
+        ):
+            raise ValueError("dataset_id must be an alphanumeric label when provided")
 
 
 @dataclass
@@ -112,7 +120,12 @@ class HandGenerator:
         self.players = self._make_players()
         self.pairs = self._make_pairs()
         self._assign_pairs()
-        self.tables = [f"{config.dataset_split}_table_{i:02d}" for i in range(config.n_tables)]
+        table_scope = (
+            f"{config.dataset_id}_{config.dataset_split}"
+            if config.dataset_id
+            else config.dataset_split
+        )
+        self.tables = [f"{table_scope}_table_{i:02d}" for i in range(config.n_tables)]
         self._t0 = datetime(2026, 5, 1, tzinfo=timezone.utc)
 
     def _make_players(self) -> list[_Player]:
@@ -123,12 +136,13 @@ class HandGenerator:
             while name in used:
                 name = _make_name(self.rng)
             used.add(name)
-            player_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"pokerkit-player:{self.cfg.dataset_split}:{self.cfg.seed}:{index}",
-                )
+            player_namespace = (
+                f"pokerkit-player:{self.cfg.dataset_id}:{self.cfg.dataset_split}:"
+                f"{self.cfg.seed}:{index}"
+                if self.cfg.dataset_id
+                else f"pokerkit-player:{self.cfg.dataset_split}:{self.cfg.seed}:{index}"
             )
+            player_id = str(uuid.uuid5(uuid.NAMESPACE_URL, player_namespace))
             players.append(_Player(player_id=player_id, name=name))
         return players
 
@@ -141,7 +155,11 @@ class HandGenerator:
             a, b = ids[2 * i], ids[2 * i + 1]
             pairs.append(
                 CollusionPair(
-                    pair_id=f"{self.cfg.dataset_split}_pair_{i:03d}",
+                    pair_id=(
+                        f"{self.cfg.dataset_id}_{self.cfg.dataset_split}_pair_{i:03d}"
+                        if self.cfg.dataset_id
+                        else f"{self.cfg.dataset_split}_pair_{i:03d}"
+                    ),
                     player_a=self.players[a].player_id,
                     player_b=self.players[b].player_id,
                     pattern=patterns[i % len(patterns)],
@@ -309,8 +327,13 @@ class HandGenerator:
             )
 
         split = self.cfg.dataset_split.lower()
+        hand_prefix = (
+            f"{self.cfg.dataset_id.upper()}-{split.upper()}"
+            if self.cfg.dataset_id
+            else split.upper()
+        )
         return {
-            "hand_id": f"{split.upper()}-H-{index:08d}",
+            "hand_id": f"{hand_prefix}-H-{index:08d}",
             "table_id": self.rng.choice(self.tables),
             "played_at": played_at.isoformat(),
             "dataset_split": split,

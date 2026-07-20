@@ -1,0 +1,53 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scoring requests / second",
+      "type": "timeseries",
+      "targets": [{"expr": "sum(rate(risk_scorer_requests_total[5m]))", "legendFormat": "requests/s"}]
+    },
+    {
+      "id": 2,
+      "title": "HTTP p95 latency",
+      "type": "timeseries",
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(risk_scorer_request_duration_seconds_bucket[5m])))", "legendFormat": "p95 seconds"}]
+    },
+    {
+      "id": 3,
+      "title": "Error rate",
+      "type": "timeseries",
+      "targets": [{"expr": "sum(rate(risk_scorer_errors_total[5m])) / clamp_min(sum(rate(risk_scorer_requests_total[5m])), 0.001)", "legendFormat": "error ratio"}]
+    },
+    {
+      "id": 4,
+      "title": "In-flight requests",
+      "type": "timeseries",
+      "targets": [{"expr": "sum(risk_scorer_inflight_requests)", "legendFormat": "in flight"}]
+    },
+    {
+      "id": 5,
+      "title": "Hands and pairs scored / second",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "sum(rate(risk_scorer_hands_scored_total[5m]))", "legendFormat": "hands/s"},
+        {"expr": "sum(rate(risk_scorer_pairs_scored_total[5m]))", "legendFormat": "pairs/s"}
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Readiness failures",
+      "type": "timeseries",
+      "targets": [{"expr": "sum(increase(risk_scorer_ready_failures_total[5m]))", "legendFormat": "failures"}]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["poker", "risk", "phase12"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Poker risk scorer",
+  "uid": "poker-risk-scorer-v1",
+  "version": 1
+}

@@ -8,6 +8,8 @@ spec:
     - scripts/realtime.py
     - --batch-size
     - "25"
+    - --flush-interval-seconds
+    - "5"
     - --threshold
     - "0.5"
     env:

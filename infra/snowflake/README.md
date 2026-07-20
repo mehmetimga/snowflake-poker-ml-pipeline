@@ -11,9 +11,42 @@ Snowflake CPU training job -> model stage ----+
                                    SPCS Streamlit admin
 ```
 
-The current Snowflake account is in AWS `eu-central-2`. CPU container families
-are available there, but the GPU families used by the existing SageMaker design
-are not. This deployment therefore runs the small demo models on CPU.
+## Current implementation versus target deployment
+
+The files in this directory currently deploy a single Python application image
+for the realtime scorer, training job, and admin service. The validated Go
+scorer runs locally today, Java/Flink is not yet packaged for SPCS, and Triton
+runs on DGX Spark for development testing.
+
+That is the current test topology, not the final production boundary. The
+target is:
+
+```text
+client/source                 external managed             Snowflake ML platform
+PokerKit today -----------+                            +--> SPCS POKER_FLINK
+poker server + Postgres --+--> Confluent Cloud Kafka --+--> SPCS POKER_RISK
+Debezium CDC in future ---+                            +--> SPCS POKER_SINK
+                                                        +--> SPCS jobs/admin
+                                                        +--> Snowflake data services
+```
+
+Target SPCS images are `poker-flink:<git-sha>`, `poker-risk:<git-sha>`,
+`poker-sink:<git-sha>`, `poker-train:<git-sha>`, and
+`poker-admin:<git-sha>`. An optional pinned CPU Triton container can run beside
+Go in each `POKER_RISK` service instance and be called over localhost. For the
+current small CatBoost ONNX model, embedding ONNX in Go is simpler and is the
+recommended default.
+
+The physical DGX is not part of the target realtime path. Keep it only as an
+optional offline research accelerator. If a later production model requires a
+GPU, verify GPU instance-family availability in the Snowflake account and run
+Triton on an SPCS GPU compute pool in a supported region.
+
+The current bootstrap uses the `CPU_X64_S` family in AWS `eu-central-2`. GPU
+family availability changes by account and region, so do not assume a specific
+GPU family is deployable; verify it with
+`SHOW COMPUTE POOL INSTANCE FAMILIES`. This deployment runs the small demo
+models on CPU.
 
 ## Why Kafka is external
 

@@ -49,3 +49,34 @@ def test_pokerkit_generator_is_deterministic_and_settles_real_pots():
         assert [action["sequence_no"] for action in hand["actions"]] == list(
             range(len(hand["actions"]))
         )
+
+
+def test_dataset_id_scopes_players_tables_pairs_and_hands():
+    config = GeneratorConfig(
+        n_hands=1,
+        n_players=12,
+        n_tables=2,
+        n_colluding_pairs=3,
+        seed=42,
+        dataset_split="train",
+        dataset_id="context-v1",
+    )
+    scoped = HandGenerator(config)
+    legacy = HandGenerator(
+        GeneratorConfig(
+            n_hands=1,
+            n_players=12,
+            n_tables=2,
+            n_colluding_pairs=3,
+            seed=42,
+            dataset_split="train",
+        )
+    )
+    hand = next(scoped.iter_hands())
+
+    assert hand["hand_id"].startswith("CONTEXT-V1-TRAIN-H-")
+    assert hand["table_id"].startswith("context-v1_train_table_")
+    assert all(pair.pair_id.startswith("context-v1_train_pair_") for pair in scoped.pairs)
+    assert {player.player_id for player in scoped.players}.isdisjoint(
+        player.player_id for player in legacy.players
+    )

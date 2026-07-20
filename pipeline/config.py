@@ -38,6 +38,33 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = Field("localhost:9092", alias="KAFKA_BOOTSTRAP_SERVERS")
     kafka_egress_brokers: Optional[str] = Field(None, alias="KAFKA_EGRESS_BROKERS")
     kafka_hands_topic: str = Field("hands.raw", alias="KAFKA_HANDS_TOPIC")
+    kafka_world_hands_topic: str = Field(
+        "poker.hands.raw.v1", alias="KAFKA_WORLD_HANDS_TOPIC"
+    )
+    kafka_user_context_topic: str = Field(
+        "poker.user-context.v1", alias="KAFKA_USER_CONTEXT_TOPIC"
+    )
+    kafka_session_context_topic: str = Field(
+        "poker.session-context.v1", alias="KAFKA_SESSION_CONTEXT_TOPIC"
+    )
+    kafka_account_links_topic: str = Field(
+        "poker.account-links.v1", alias="KAFKA_ACCOUNT_LINKS_TOPIC"
+    )
+    kafka_player_context_topic: str = Field(
+        "poker.hand-player-context.v1", alias="KAFKA_PLAYER_CONTEXT_TOPIC"
+    )
+    kafka_pair_features_topic: str = Field(
+        "poker.pair-features.v1", alias="KAFKA_PAIR_FEATURES_TOPIC"
+    )
+    kafka_risk_scores_topic: str = Field(
+        "poker.risk-scores.v1", alias="KAFKA_RISK_SCORES_TOPIC"
+    )
+    kafka_risk_alerts_topic: str = Field(
+        "poker.risk-alerts.v1", alias="KAFKA_RISK_ALERTS_TOPIC"
+    )
+    kafka_dead_letter_topic: str = Field(
+        "poker.pipeline.dead-letter.v1", alias="KAFKA_DEAD_LETTER_TOPIC"
+    )
     kafka_alerts_topic: str = Field("alerts.out", alias="KAFKA_ALERTS_TOPIC")
     kafka_pair_memory_topic: str = Field("pair.memory", alias="KAFKA_PAIR_MEMORY_TOPIC")
     kafka_action_patterns_topic: str = Field("patterns.action", alias="KAFKA_ACTION_PATTERNS_TOPIC")

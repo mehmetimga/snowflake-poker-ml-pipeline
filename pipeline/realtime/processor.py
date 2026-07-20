@@ -8,6 +8,9 @@ from the warehouse.
 from __future__ import annotations
 
 import json
+import sys
+import time
+import traceback
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -109,8 +112,22 @@ class RealTimeProcessor:
         max_messages: Optional[int] = None,
         group_id: str = "realtime-processor",
         auto_offset_reset: str = "latest",
+        flush_interval_seconds: float = 5.0,
+        poll_timeout_ms: int = 1000,
+        bounded_idle_timeout_seconds: float = 10.0,
     ) -> int:
         from kafka import KafkaConsumer
+
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        if max_messages is not None and max_messages < 1:
+            raise ValueError("max_messages must be positive when provided")
+        if flush_interval_seconds < 0:
+            raise ValueError("flush_interval_seconds cannot be negative")
+        if poll_timeout_ms < 1:
+            raise ValueError("poll_timeout_ms must be positive")
+        if bounded_idle_timeout_seconds < 0:
+            raise ValueError("bounded_idle_timeout_seconds cannot be negative")
 
         settings = get_settings()
         consumer = KafkaConsumer(
@@ -119,34 +136,116 @@ class RealTimeProcessor:
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
             group_id=group_id,
             auto_offset_reset=auto_offset_reset,
-            enable_auto_commit=True,
-            # A production realtime service should block waiting for new
-            # records. Bounded smoke runs still time out so their process can
-            # terminate after the producer has finished.
-            consumer_timeout_ms=-1 if max_messages is None else 10000,
+            # Persist the complete batch before advancing offsets. If scoring,
+            # Snowflake, or the commit itself fails, a restart replays the same
+            # records; warehouse writes are idempotent by hand_id.
+            enable_auto_commit=False,
             **kafka_client_kwargs(),
         )
         total = 0
         buffer: list[dict] = []
+        buffer_started_at: float | None = None
+        last_record_at = time.monotonic()
         try:
-            for msg in consumer:
-                buffer.append(msg.value)
-                if len(buffer) >= batch_size:
-                    total += self._flush(buffer)
+            while max_messages is None or total < max_messages:
+                now = time.monotonic()
+                if (
+                    buffer
+                    and buffer_started_at is not None
+                    and now - buffer_started_at >= flush_interval_seconds
+                ):
+                    total += self._flush_and_commit(consumer, buffer)
                     buffer.clear()
-                if max_messages is not None and total + len(buffer) >= max_messages:
+                    buffer_started_at = None
+
+                if max_messages is not None and total >= max_messages:
                     break
+
+                max_records = batch_size - len(buffer)
+                if max_messages is not None:
+                    max_records = min(max_records, max_messages - total - len(buffer))
+                if max_records < 1:
+                    total += self._flush_and_commit(consumer, buffer)
+                    buffer.clear()
+                    buffer_started_at = None
+                    continue
+
+                try:
+                    records_by_partition = consumer.poll(
+                        timeout_ms=poll_timeout_ms,
+                        max_records=max_records,
+                    )
+                except KeyboardInterrupt:
+                    print(
+                        "[realtime] shutdown requested; flushing buffered records",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    break
+
+                received = 0
+                for records in records_by_partition.values():
+                    for record in records:
+                        if not buffer:
+                            buffer_started_at = time.monotonic()
+                        buffer.append(record.value)
+                        received += 1
+
+                now = time.monotonic()
+                if received:
+                    last_record_at = now
+
+                max_reached = (
+                    max_messages is not None
+                    and total + len(buffer) >= max_messages
+                )
+                flush_due = (
+                    buffer
+                    and buffer_started_at is not None
+                    and now - buffer_started_at >= flush_interval_seconds
+                )
+                if buffer and (len(buffer) >= batch_size or max_reached or flush_due):
+                    total += self._flush_and_commit(consumer, buffer)
+                    buffer.clear()
+                    buffer_started_at = None
+
+                if (
+                    max_messages is not None
+                    and not received
+                    and now - last_record_at >= bounded_idle_timeout_seconds
+                ):
+                    break
+
             if buffer:
-                total += self._flush(buffer)
+                total += self._flush_and_commit(consumer, buffer)
         finally:
             consumer.close()
         return total
+
+    def _flush_and_commit(self, consumer, buffer: list[dict]) -> int:
+        try:
+            processed = self._flush(buffer)
+            consumer.commit()
+        except Exception:
+            print(
+                "[realtime] batch failed; Kafka offsets were not committed",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stderr)
+            raise
+        print(
+            f"[realtime] committed Kafka offsets after {processed} persisted hands",
+            flush=True,
+        )
+        return processed
 
     def _flush(self, buffer: list[dict]) -> int:
         result = self.process_hands(buffer)
         print(
             "[realtime] "
             f"hands={result.hands} features={result.features} "
-            f"rules={result.rule_flags} pairs={result.pair_stats} alerts={result.alerts}"
+            f"rules={result.rule_flags} pairs={result.pair_stats} alerts={result.alerts}",
+            flush=True,
         )
         return result.hands

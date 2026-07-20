@@ -11,3 +11,6 @@ __all__ = [
     "compute_features",
     "prepare_matrix",
 ]
+from .pair_features import PairFeatureCore, canonical_pair
+
+__all__ = ["PairFeatureCore", "canonical_pair"]

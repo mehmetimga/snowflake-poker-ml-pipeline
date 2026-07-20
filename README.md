@@ -6,6 +6,11 @@ End-to-end demo ML pipeline for detecting collusion in synthetic No-Limit Hold'e
 
 ![Snowflake Poker ML Pipeline architecture](docs/pipeline.png)
 
+Planning documents:
+
+- [Real-time context and ML implementation plan](docs/realtime-context-ml-implementation-plan.md)
+- [Data generation, storage, and pipeline plan](docs/data-generation-and-pipeline-plan.md)
+
 ## What's in here
 
 - **PokerKit hand generator** — valid 6-max NLHE cash-game state transitions with deterministic cards, real pot settlement, and injected synthetic collusion patterns.
@@ -70,6 +75,273 @@ make evaluate-challenge
 every event and label file. Rebuilding with the same configuration produces
 identical data.
 
+The next-generation context-rich dataset adds versioned event envelopes,
+synthetic users, devices, networks, sessions, account links, and private
+pair-level labels while retaining legal PokerKit hands:
+
+```bash
+# Small first milestone; generated files remain outside Git.
+make world-dataset TRAIN_HANDS=20 VALIDATION_HANDS=5 \
+  TEST_HANDS=5 CHALLENGE_HANDS=5 DATASET_PLAYERS=24 DATASET_PAIRS=4
+```
+
+This writes separate topic-ready JSONL streams under
+`data/datasets/context-v1/<split>/events/`. Challenge labels are written only
+under `private_labels/`. Direct Kafka replay is the current project path;
+Debezium remains a future poker-server integration.
+
+Validate the complete replay locally, create any missing canonical topics, then
+publish and read a bounded split back from Kafka:
+
+```bash
+make world-replay-dry
+make world-topics
+
+python scripts/replay_world.py --dataset data/datasets/context-v1 \
+  --mode replay --split train
+python scripts/verify_world_replay.py --dataset data/datasets/context-v1 \
+  --split train --timeout-ms 20000
+```
+
+Available delivery modes are `replay`, `accelerated`, `realtime`, and `chaos`.
+The Kafka record timestamp is the current publish time so historical replays do
+not immediately expire from delete-policy topics. Business event time remains
+unchanged in the envelope's `occurred_at` field and Kafka header.
+
+Load canonical envelopes into the configured DuckDB or Snowflake warehouse.
+The production consumer commits Kafka offsets only after the warehouse
+transaction succeeds; the manual-assignment form is useful for a bounded audit:
+
+```bash
+# Long-running consumer-group mode.
+make world-ingest WORLD_INGEST_FLAGS="--group-id poker-world-warehouse-sink-v1"
+
+# Re-read a known frozen smoke dataset without changing consumer-group offsets.
+python scripts/ingest_world.py --migrate --assign-from-beginning \
+  --max-messages 70 --batch-size 200
+python scripts/check_world_warehouse.py
+```
+
+World-generated player, pair, table, and hand IDs include `dataset_id`, so a
+new benchmark cannot replace rows belonging to an older frozen dataset.
+
+## Frozen pair benchmarks
+
+Build the pair-level ML data product from the immutable context world—not from
+current Kafka or current user rows:
+
+```bash
+make pair-dataset
+make pair-dataset-check
+```
+
+`data/datasets/pair-v1` contains four benchmark views:
+
+- `cold_start`: the original disjoint-user train/validation/test/challenge splits.
+- `temporal`: one user population split chronologically 70/15/15.
+- `new_relationship`: hand-atomic splits that keep validation/test positive
+  pair identities out of training.
+- `challenge`: public feature rows with labels only under `private_labels/`.
+
+Every public feature file is label-free. The `dgx/` directory contains
+train/validation/test Parquet files with a binary `target`, the exact
+`pair-features-v1` model columns, and no challenge rows. `manifest.json` records
+all counts, SHA-256 hashes, split policies, and the source-world hash.
+
+Migration 009 adds the restricted `PAIR_LABELS` table and the point-in-time
+`PAIR_TRAINING_EXAMPLES` view. Load non-challenge label sidecars only after the
+feature events are persisted:
+
+```bash
+make pair-labels PAIR_LABEL_FLAGS=--migrate
+```
+
+## Pair-level CatBoost baseline
+
+Phase 8 trains only from the frozen Parquet contract. Numeric imputation and
+categorical vocabularies are fitted on `train`; Platt calibration and the
+alert-budget threshold are fitted on `validation`; `test` and the private
+challenge sidecar are evaluated afterward. The trainer also compares a
+deterministic rules baseline and a player-only logistic baseline:
+
+```bash
+make pair-train
+make pair-model-check
+```
+
+Artifacts under `models/pair-catboost-v1/` include the native CatBoost model,
+a tensor-output ONNX model, train-fitted preprocessing, calibration and
+decision-policy JSON, test/challenge reports, feature importance, SHAP summary,
+artifact hashes, and a ready-to-mount Triton model repository. ONNX is checked
+against CatBoost probabilities and the checker scores complete 15-pair hands
+without reading labels.
+
+The current 20/5/5/5-hand `pair-v1` dataset is intentionally only a pipeline smoke test:
+it has 2/1/0 positive pair rows in train/validation/test, so the generated model
+is marked `promotion_eligible=false`. Build a separate full dataset before
+using performance numbers:
+
+```bash
+make world-dataset WORLD_DATASET_DIR=data/datasets/context-full-v2 \
+  WORLD_DATASET_ID=context-full-v2 TRAIN_HANDS=20000 VALIDATION_HANDS=5000 \
+  TEST_HANDS=5000 CHALLENGE_HANDS=5000
+make pair-dataset WORLD_DATASET_DIR=data/datasets/context-full-v2 \
+  PAIR_DATASET_DIR=data/datasets/pair-full-v2
+make pair-train PAIR_DATASET_DIR=data/datasets/pair-full-v2 \
+  PAIR_MODEL_DIR=models/pair-catboost-full-v2
+```
+
+`context-full-v2` gives synthetic colluding relationships imperfect, correlated
+context such as shared infrastructure, similar account age, and similar skill.
+The correlations are probabilistic, normal users also share context, and no
+pair ID or target appears in inference events. This avoids a deterministic
+synthetic label leak while giving the cold-start benchmark a relationship
+signal that can generalize to disjoint users.
+
+The frozen full-v2 run passed the promotion gate: test PR-AUC 0.363 versus
+0.239 for the player-only baseline and 0.040 for rules-only, with 70.7% recall
+at the 2% alert-ranking budget. Private challenge PR-AUC was 0.375 with 83.0%
+recall at budget. These are synthetic benchmark results, not production claims.
+
+## Go risk scorer
+
+The Go hot path validates the promoted artifact hashes and exact 58-feature
+contract, keeps a bounded correction-aware hand cache, and sends one Triton V2
+request for all 15 pairs. Calibration, thresholding, player aggregation, and
+hand aggregation use the frozen JSON policies produced during training:
+
+```bash
+make go-risk-test
+make go-risk-check
+
+# Start after mounting models/pair-catboost-full-v2/triton in Triton.
+make go-risk-run TRITON_HTTP_URL=http://127.0.0.1:8000
+```
+
+The service exposes `/healthz`, Triton-backed `/readyz`, Prometheus `/metrics`,
+complete-hand `/v1/score-hand`, and incremental `/v1/pair-feature` endpoints.
+Higher snapshot revisions re-score a cached complete hand; duplicates and stale
+revisions do not call the model. The Go Kafka adapter now consumes
+`poker.pair-features.v1`, publishes versioned `poker.risk-scores.v1` and
+`poker.risk-alerts.v1` events, dead-letters invalid records, and commits only
+contiguous offsets whose outputs have been acknowledged. Run it after Triton:
+
+```bash
+make scoring-topics
+make go-risk-kafka TRITON_HTTP_URL=http://127.0.0.1:8000
+```
+
+Because pair features are currently keyed by `pair_key`, the initial scorer
+deployment is intentionally one replica. A hand-keyed repartition is required
+before horizontal scaling.
+
+The promoted model has also been smoke-tested on DGX Spark through a
+localhost-only SSH tunnel. See the
+[DGX Triton scoring runbook](docs/dgx-triton-scoring-runbook.md) for repeatable
+deployment, readiness, bounded Kafka replay, and output-validation commands.
+
+## DGX Spark deep-learning validation
+
+DL training uses the same frozen train/validation/test boundaries as the
+classical models. The amount normalization scale is fitted on training actions
+only, validation chooses the classification threshold and early-stopping
+checkpoint, and test is used once for the final ROC-AUC, PR-AUC, and F1 report.
+Challenge and live rows are excluded.
+
+Export a secret-free NumPy bundle from the configured warehouse, then copy the
+bundle and source code to DGX Spark. Snowflake credentials and `.env` are never
+copied:
+
+```bash
+make dl-export
+make dgx-train-dl
+make dgx-fetch-dl
+```
+
+The DGX target uses NVIDIA's PyTorch container with GPU access, host IPC, and
+the recommended memory/stack limits. Docker only supplies the runtime; the
+repository and generated artifacts are bind-mounted, so container overhead is
+negligible. Useful overrides include:
+
+```bash
+make dgx-train-dl DGX_EPOCHS=30 DGX_BATCH_SIZE=1024 DGX_PATIENCE=5
+make dgx-train-dl DGX_HOST=IcardiSpark DGX_IMAGE=nvcr.io/nvidia/pytorch:25.12-py3
+```
+
+The resulting `models/dgx/dl_metrics.json` records validation and untouched
+test metrics for both LSTM and Transformer models. Compare test PR-AUC and F1
+against the frozen CatBoost baseline before promoting either model.
+
+### Phase 9 pair challengers
+
+The frozen `pair-full-v2` cold-start dataset has also been used to train a
+Residual MLP, FT-Transformer, and DCN-V2 on DGX Spark. The workflow keeps the
+private challenge off DGX, fits preprocessing on train only, selects checkpoints
+and thresholds on validation, and uses a paired hand bootstrap for the CatBoost
+comparison:
+
+```bash
+make pair-challengers-test
+make dgx-pair-challengers-train
+make dgx-pair-challengers-fetch
+make pair-challengers-check
+```
+
+The completed run passed its artifact and leakage checks, but none of the neural
+models passed the quality gate. The best neural test PR-AUC was `0.186673`,
+versus `0.362918` for CatBoost, so CatBoost remains the champion and the private
+challenge stays sealed. See the
+[DGX pair-challenger runbook](docs/dgx-pair-challengers-runbook.md) for the full
+metrics, promotion policy, and reproducible commands.
+
+### Phase 10 multi-hand histories
+
+Phase 10 builds 16-hand, strictly point-in-time histories for both users and
+their pair. Equal-timestamp hands are isolated, normalization is fitted on train
+only, and self-supervised user/pair encoders learn masked-step reconstruction,
+next-step prediction, and contrastive window consistency before pair-risk
+fine-tuning:
+
+```bash
+make pair-history-dataset
+make pair-history-dataset-check
+make dgx-pair-history-train
+make dgx-pair-history-fetch
+make pair-history-check
+```
+
+The full 450,000-row history artifact passed its hash, alignment, timestamp,
+and label-isolation checks. The DGX model achieved test PR-AUC `0.181929`
+versus `0.362918` for CatBoost, so it was correctly rejected and the private
+challenge remains sealed. See the
+[DGX multi-hand history runbook](docs/dgx-pair-history-runbook.md) for the data
+contract, measured results, and repeatable commands.
+
+### Phase 11 temporal heterogeneous graph
+
+Phase 11 constructs prior-only typed neighborhoods for users, devices,
+networks, sessions, tables, account-link evidence, and co-player relationships.
+The relation-aware GraphSAGE model uses feature-derived node initialization and
+contains zero raw-ID embeddings, allowing cold-start inference for unseen users:
+
+```bash
+make pair-graph-baseline
+make pair-graph-dataset
+make pair-graph-dataset-check
+make dgx-pair-graph-train
+make dgx-pair-graph-fetch
+make pair-graph-check
+```
+
+The 750,000-example cold-start/new-relationship graph artifact passed source,
+hash, alignment, future-edge, challenge-isolation, and inductive-node checks.
+GraphSAGE reached PR-AUC `0.247934` on cold start and `0.508470` on new
+relationships, compared with matching CatBoost results of `0.362918` and
+`0.615757`. Both bootstrap intervals were negative, so CatBoost remains the
+champion. See the
+[DGX temporal graph runbook](docs/dgx-pair-graph-runbook.md) for exact metrics
+and reproducible commands.
+
 ## Real-time processing
 
 `make demo` runs the batch demo path: generate Kafka data, persist it, then compute features/train/score from the warehouse. For live processing, use the realtime targets instead.
@@ -111,6 +383,47 @@ rule signals or preliminary high-risk scores. Qdrant failures or missing
 collections are logged and skipped so the hot path can still generate alerts.
 
 ## Flink hot path
+
+The context-rich path now has a native Java/Flink event-time job in addition
+to the earlier PyFlink demo jobs. It joins every hand/player row to the user
+context version effective when the hand occurred, publishes explicit
+matched/late/missing/corrected status, and performs no synchronous database
+lookups:
+
+```bash
+make enrichment-topics
+make flink-context-test
+make flink-context-build
+make flink-pair-features-test
+make flink-pair-features-build
+```
+
+See the
+[context-enrichment runbook](streaming/flink-java/context-enrichment/README.md)
+for Flink submission and bounded replay-audit commands. The canonical output
+is `poker.hand-player-context.v1`; invalid envelopes and context-version
+conflicts go to `poker.pipeline.dead-letter.v1`.
+
+The next native stage consumes those enriched player rows, keeps prior-only
+user and pair history in keyed state, reassembles each hand, and emits all 15
+canonical pairs to `poker.pair-features.v1`. Context corrections re-emit only
+the affected five pairs and do not count the hand twice. Contract floats are
+rounded to nine decimal places so Java/Flink and Python/Snowflake backfills are
+byte-stable at the feature boundary. See the
+[pair-feature runbook](streaming/flink-java/pair-features/README.md).
+
+Validate a bounded replay and persist it after the Flink job exits:
+
+```bash
+make pair-features-check PAIR_FEATURE_CHECK_FLAGS="--input-topic poker.hand-player-context.v1 --minimum-records 300"
+make pair-features-ingest PAIR_FEATURE_INGEST_FLAGS="--migrate --from-beginning --max-messages 300"
+```
+
+When Snowflake human-user MFA has expired, run `make snow-mfa-login` immediately
+before the ingest command. The sink commits Kafka offsets only after its
+warehouse transaction and upserts by deterministic `event_id`.
+
+The older jobs below continue to serve the original `hands.raw` demo path.
 
 The Flink implementation is the production-oriented replacement for the direct
 Python Kafka loop. It consumes complete hand events from `hands.raw`, reuses the
@@ -253,6 +566,8 @@ pipeline/                  # Library code (pip install -e .)
   rules/                   # Rule engine (5 rules)
   realtime/                # Kafka hot path: in-memory features/rules/scoring
   flink/                   # PyFlink hot path entrypoint
+  context/                 # Offline/reference point-in-time context join
+  events/                  # Canonical input and derived Pydantic contracts
   ml/                      # XGBoost / CatBoost / LightGBM + ONNX
   dl/                      # LSTM + Transformer
   gnn/                     # VGAE + simple HGT
@@ -261,7 +576,8 @@ pipeline/                  # Library code (pip install -e .)
   inference/               # Ensemble scorer
   sm/                      # SageMaker entrypoints
 admin/                     # Streamlit multipage app
-sql/migrations/            # 001-005 DDL (Snowflake; DuckDB-translated automatically)
+streaming/flink-java/      # Native stateful Flink jobs (Java 17)
+sql/migrations/            # Versioned DDL (Snowflake; DuckDB-translated automatically)
 scripts/                   # CLI entrypoints
 infra/                     # Terraform + SageMaker pipeline definition
 tests/                     # pytest smoke tests

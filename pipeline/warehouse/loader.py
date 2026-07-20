@@ -65,10 +65,13 @@ def load_hands(warehouse: Warehouse, hands: Iterable[dict]) -> int:
     if df_hands.empty:
         return 0
     hand_ids = df_hands["hand_id"].astype(str).tolist()
-    # Snowflake primary keys are informational. Delete a replayed hand before
-    # appending so frozen datasets remain idempotent in both warehouse modes.
-    for table in ("RAW_ACTIONS", "RAW_PLAYERS", "RAW_HANDS"):
-        delete_by_values(warehouse, table, "hand_id", hand_ids)
+    # Snowflake primary keys are informational, so delete before append there.
+    # DuckDB's adapter already uses INSERT OR REPLACE. A DELETE followed by an
+    # insert of the same primary key in one DuckDB transaction can be hidden by
+    # its MVCC index, so DuckDB must rely on its native replacement path.
+    if warehouse.kind != "duckdb":
+        for table in ("RAW_ACTIONS", "RAW_PLAYERS", "RAW_HANDS"):
+            delete_by_values(warehouse, table, "hand_id", hand_ids)
     warehouse.write_pandas(df_hands, "RAW_HANDS")
     warehouse.write_pandas(df_actions, "RAW_ACTIONS")
     warehouse.write_pandas(df_players, "RAW_PLAYERS")

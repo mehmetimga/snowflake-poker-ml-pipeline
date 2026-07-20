@@ -12,6 +12,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-messages", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=25)
+    parser.add_argument(
+        "--flush-interval-seconds",
+        type=float,
+        default=5.0,
+        help="Persist a partial Kafka batch after this many seconds.",
+    )
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--group-id", default="realtime-processor")
     parser.add_argument("--from-beginning", action="store_true")
@@ -60,6 +66,7 @@ def main() -> None:
         max_messages=args.max_messages,
         group_id=args.group_id,
         auto_offset_reset="earliest" if args.from_beginning else "latest",
+        flush_interval_seconds=args.flush_interval_seconds,
     )
     print(f"[realtime] total processed {total} hands")
 
