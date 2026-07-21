@@ -34,6 +34,9 @@ def test_render_specs_substitutes_image_and_kafka(monkeypatch, tmp_path: Path):
     templates.mkdir()
     (templates / "realtime.yaml.template").write_text(
         "image: __IMAGE_PATH__\nbrokers: __KAFKA_BOOTSTRAP_SERVERS__\n"
+        "group: __RISK_SCORER_GROUP_ID__\n"
+        "risk_build: __RISK_BUILD_VERSION__\n"
+        "flink_build: __FLINK_BUILD_VERSION__\n"
     )
     monkeypatch.setattr(deploy, "SPECS_DIR", templates)
     monkeypatch.setattr(deploy, "RENDERED_DIR", rendered)
@@ -46,6 +49,31 @@ def test_render_specs_substitutes_image_and_kafka(monkeypatch, tmp_path: Path):
     assert (rendered / "realtime.yaml").read_text() == (
         "image: /POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev\n"
         "brokers: broker.example.com:9092\n"
+        "group: poker-go-risk-scorer-v1\n"
+        "risk_build: dev\n"
+        "flink_build: dev\n"
+    )
+
+
+def test_render_specs_supports_mixed_immutable_builds(monkeypatch, tmp_path: Path):
+    templates = tmp_path / "templates"
+    rendered = tmp_path / "rendered"
+    templates.mkdir()
+    (templates / "mixed.yaml.template").write_text(
+        "risk: __RISK_BUILD_VERSION__\nflink: __FLINK_BUILD_VERSION__\n"
+    )
+    monkeypatch.setattr(deploy, "SPECS_DIR", templates)
+    monkeypatch.setattr(deploy, "RENDERED_DIR", rendered)
+
+    deploy.render_specs(
+        deploy.DEFAULT_IMAGE_PATH,
+        "broker.example.com:9092",
+        risk_build_version="21ebb31c01d6",
+        flink_build_version="603ff5dbd89f",
+    )
+
+    assert (rendered / "mixed.yaml").read_text() == (
+        "risk: 21ebb31c01d6\nflink: 603ff5dbd89f\n"
     )
 
 
@@ -57,4 +85,11 @@ def test_render_specs_rejects_unsafe_release_identity(tmp_path: Path, monkeypatc
             deploy.DEFAULT_IMAGE_PATH,
             "broker.example.com:9092",
             build_version="sha;DROP SERVICE",
+        )
+
+    with pytest.raises(SystemExit, match="risk scorer group ID"):
+        deploy.render_specs(
+            deploy.DEFAULT_IMAGE_PATH,
+            "broker.example.com:9092",
+            risk_scorer_group_id="group;DROP SERVICE",
         )

@@ -404,6 +404,24 @@ expire a valid replay immediately. The current Python client uses `acks=all`,
 bounded retries, one in-flight request, stable event IDs, and downstream
 deduplication; a future client migration may add native producer idempotence.
 
+For a live test against a long-running event-time job, generate a new world
+with an explicit UTC anchor instead of editing timestamps after generation:
+
+```bash
+python scripts/generate_realtime_world.py \
+  --output-dir /tmp/poker-live-smoke \
+  --dataset-id poker-live-smoke \
+  --train-hands 10 --validation-hands 1 --test-hands 1 --challenge-hands 1 \
+  --players 24 --tables 1 --pairs 4 --seed 610 \
+  --hand-start-at 2026-07-21T18:30:00Z
+```
+
+Choose an anchor later than the job's current watermark but safely behind wall
+clock. An unbounded stream also needs later events to advance the watermark and
+release its newest buffered window. Never future-date events merely to flush a
+test: rule-evidence governance correctly rejects an `emitted_at` earlier than
+`occurred_at`.
+
 ## Flink online data path
 
 Flink consumes Kafka only. It must not perform a synchronous PostgreSQL or

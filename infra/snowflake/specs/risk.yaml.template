@@ -10,7 +10,7 @@ spec:
     - --metrics-listen
     - 0.0.0.0:9091
     env:
-      RISK_SERVICE_BUILD_VERSION: __BUILD_VERSION__
+      RISK_SERVICE_BUILD_VERSION: __RISK_BUILD_VERSION__
       RISK_REVIEW_POLICY_PATH: /opt/poker/contracts/review-policy-v1.json
       RISK_RULE_ROLLOUT_PATH: /opt/poker/contracts/rule-rollout-v1.json
       RISK_ALLOWED_TENANTS: "__RISK_ALLOWED_TENANTS__"
@@ -24,7 +24,7 @@ spec:
       KAFKA_REVIEW_DECISIONS_TOPIC: poker.review-decisions.v1
       KAFKA_RISK_ALERTS_TOPIC: poker.risk-alerts.v1
       KAFKA_DEAD_LETTER_TOPIC: poker.pipeline.dead-letter.v1
-      KAFKA_RISK_SCORER_GROUP_ID: poker-go-risk-scorer-v1
+      KAFKA_RISK_SCORER_GROUP_ID: __RISK_SCORER_GROUP_ID__
     secrets:
     - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
       secretKeyRef: username

@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 12 |
+| Plan version | 13 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase C1 — release and deploy validated Go/Flink SPCS images |
+| Immediate next phase | Phase C1 — complete the Flink savepoint restore drill |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -409,10 +409,11 @@ Prometheus rules, Grafana dashboard, and Streamlit page are documented in
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
-Status: `IN PROGRESS` for C1. Local packaging and container smoke tests are
-complete; registry release, live SPCS deployment, and a savepoint recovery
-drill require a clean reviewed commit. C2–C5 remain `BLOCKED` on the future
-poker-server CDC source and independently reviewed real labels.
+Status: `IN PROGRESS` for C1. Immutable images, governed model artifacts, live
+SPCS services, periodic checkpoints, and a bounded end-to-end replay are
+verified. The controlled savepoint restore drill remains open. C2–C5 remain
+`BLOCKED` on the future poker-server CDC source and independently reviewed real
+labels.
 
 Purpose: measure the current pipeline on real poker-server data without
 automated enforcement.
@@ -424,9 +425,10 @@ Label collection will take longer than implementation.
 
 - [x] Package Java 17/Flink as `poker-flink:<git-sha>`.
 - [x] Package Go scoring as `poker-risk:<git-sha>`.
-- [ ] Deploy separate long-running `POKER_FLINK` and `POKER_RISK` SPCS services.
-- [ ] Configure durable checkpoint storage and savepoint recovery.
-- [ ] Store artifacts in a controlled Snowflake stage/registry URI, not a local
+- [x] Deploy separate long-running `POKER_FLINK` and `POKER_RISK` SPCS services.
+- [x] Configure durable checkpoint storage and verify both live jobs checkpoint.
+- [ ] Complete a controlled savepoint restore for both Flink jobs.
+- [x] Store artifacts in a controlled Snowflake stage/registry URI, not a local
   absolute path.
 - [x] Add service readiness, lag, watermark, checkpoint, state, and latency
   monitoring.
@@ -434,9 +436,9 @@ Label collection will take longer than implementation.
 The image contents, minimal runtime model bundle, SPCS service specs, block
 storage boundary, clean-commit release guard, deployment sequence, and local
 evidence are documented in
-[`docs/spcs-c1-deployment.md`](spcs-c1-deployment.md). The unchecked items
-require live Snowflake mutation and recovery evidence; a rendered specification
-alone does not close them.
+[`docs/spcs-c1-deployment.md`](spcs-c1-deployment.md). The remaining unchecked
+item requires a live savepoint and restore with post-restore replay evidence;
+periodic checkpoint completion alone does not close it.
 
 ### C2. Future CDC boundary
 
@@ -857,3 +859,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | B5 | Added a hash-bound public-test report for all seven rules, independent-label provenance controls, whole-hand intervals, reliable tenant/context/scenario/history slices, machine-readable monitoring baselines, and executable per-rule rollback in Go and Flink. | 75,000 rows/5,000 hands; 500 hand bootstraps per rule; 7/7 overall reports reliable; 51 reliable and 26 suppressed rule/segment slices; all 75,000 labels independently synthetic; all-rule rollback probability delta `0.0`; `make phase-b5-check` passed with 8 Java tests and all Python/Go suites; `make phase12-check` passed | B5 complete locally. Results confirm rules remain soft shadow evidence; no champion, threshold, hard rule, or deployed service changed. B6 dashboards and alerts are next |
 | 2026-07-21 | B6 | Completed operational Rules v2 monitoring with acknowledged Go runtime counters, existing Flink state/lateness signals, a hash-bound delayed-label window and report, deterministic lineage-rich alerts, Prometheus rules, a Grafana dashboard, and a Streamlit admin page. Thin windows are explicitly `insufficient_data`; circular or unknown labels are quarantined; no alert can disable a rule or enforce an action. | Stable frozen replay: 5,000 hands, 75,000 pair rows, 7/7 rules `ok`, 0 alerts; synthetic thin, drift, bad-label, integrity, and admin-loader tests passed; `make phase-b6-check` passed with 8 Java tests and all focused Python/Go suites; `make phase12-check` passed | Phase B complete locally with all rules still in soft shadow mode and model probability unchanged. Phase C1 SPCS packaging is next; real-data C2–C5 remain blocked on CDC and independently reviewed labels |
 | 2026-07-21 | C1 packaging | Added separate multi-stage amd64 `poker-risk` and `poker-flink` images, a hash-verified seven-file serving bundle, pinned localhost Triton sidecar contract, private readiness/metrics endpoints, three-container Flink session service, 20 GiB checkpoint/savepoint block volume, retained deletion snapshots, governed Kafka secrets, stage mounts, and a clean-commit release guard. | `make phase-c1-check`: 15 deployment tests, all Go packages, 6 context-enrichment Java tests, 8 pair-feature Java tests, and both shaded packages passed; `make c1-build` produced amd64 images; `make c1-image-smoke` loaded the 58-feature model bundle and both Flink jobs with Prometheus/RocksDB modules; `make snow-status` confirmed only legacy `poker-pipeline:dev`, `POKER_ADMIN`, and `POKER_REALTIME` are remote | C1 packaging complete locally. No C1 image was pushed, model uploaded, `POKER_FLINK`/`POKER_RISK` service deployed, or production behavior changed. The existing pool was already active because legacy services are running. Clean commit, registry release, live deployment, and savepoint/replay drill remain |
+| 2026-07-21 | C1 deployment | Released risk image `21ebb31c01d6`, Flink hotfix `603ff5dbd89f`, and pinned Triton `25.12-py3`; uploaded the hash-verified run bundle; deployed separate `POKER_FLINK` and `POKER_RISK` services; created the missing governed rule-evidence and review-decision topics; added validated scorer-group cutover and live PokerKit time anchors. | All five service containers ready; both Flink jobs `RUNNING`; post-replay checkpoint 5 completed for each job; 140/140 canonical target-plus-watermark events acknowledged; target output was exactly 150 pair rows for 10 complete hands, 10 unique 15-pair/6-player scores, and 10 valid review decisions with zero broken references; current scorer run had zero stream-stop events | Live C1 deployment and bounded replay accepted. Excessive-disorder and future-clock negative runs were isolated and not used as acceptance evidence. C1 remains in progress only for the controlled two-job savepoint restore drill; C2–C5 remain blocked |

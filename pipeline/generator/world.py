@@ -89,6 +89,12 @@ def _json_line(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
 
 
+def _utc_anchor(value: datetime, name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must include timezone information")
+    return value.astimezone(timezone.utc)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -117,6 +123,8 @@ class SyntheticPokerWorld:
         seed: int,
         tenant_id: str = "demo",
         product_id: str = "poker",
+        hand_start_at: datetime | None = None,
+        context_start_at: datetime | None = None,
     ) -> None:
         self.dataset_id = dataset_id
         self.split = split
@@ -132,10 +140,13 @@ class SyntheticPokerWorld:
                 seed=seed,
                 dataset_split=split,
                 dataset_id=dataset_id,
-            )
+            ),
+            start_at=hand_start_at,
         )
         self._context_rng = random.Random(seed + 700_001)
-        self._context_t0 = datetime(2026, 4, 30, tzinfo=timezone.utc)
+        if context_start_at is None:
+            context_start_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
+        self._context_t0 = _utc_anchor(context_start_at, "context_start_at")
         self.users = self._make_users()
         self.account_links = self._make_account_links()
 
@@ -459,12 +470,24 @@ def _write_rows(path: Path, rows: Iterable[Any]) -> int:
 def build_realtime_world_dataset(
     output_dir: Path,
     config: RealtimeWorldConfig | None = None,
+    *,
+    hand_start_at: datetime | None = None,
+    context_start_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Write the canonical multi-stream dataset and a deterministic manifest."""
     cfg = config or RealtimeWorldConfig()
+    if hand_start_at is not None:
+        hand_start_at = _utc_anchor(hand_start_at, "hand_start_at")
+    if context_start_at is not None:
+        context_start_at = _utc_anchor(context_start_at, "context_start_at")
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = output_dir / "config.json"
-    config_path.write_text(_json_line(asdict(cfg)))
+    config_value = asdict(cfg)
+    if hand_start_at is not None:
+        config_value["hand_start_at"] = hand_start_at.astimezone(timezone.utc).isoformat()
+    if context_start_at is not None:
+        config_value["context_start_at"] = context_start_at.astimezone(timezone.utc).isoformat()
+    config_path.write_text(_json_line(config_value))
     schemas_path = output_dir / "schemas.json"
     schemas_path.write_text(_json_line(contract_schema_bundle()))
 
@@ -498,6 +521,8 @@ def build_realtime_world_dataset(
             seed=split_seed,
             tenant_id=cfg.tenant_id,
             product_id=cfg.product_id,
+            hand_start_at=hand_start_at,
+            context_start_at=context_start_at,
         )
         populations[split] = set(world.player_ids)
         split_dir = output_dir / split

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 from pipeline.events import validate_event
 from pipeline.generator import (
@@ -97,6 +100,35 @@ def test_context_exists_before_hands_and_populations_are_disjoint(tmp_path: Path
     for index, left in enumerate(names):
         for right in names[index + 1 :]:
             assert populations[left].isdisjoint(populations[right])
+
+
+def test_world_dataset_accepts_a_live_event_time_anchor(tmp_path: Path):
+    hand_start = datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc)
+    context_start = hand_start - timedelta(days=1)
+
+    build_realtime_world_dataset(
+        tmp_path,
+        _config(),
+        hand_start_at=hand_start,
+        context_start_at=context_start,
+    )
+
+    first_hand = next(iter_jsonl(tmp_path / "train" / "events" / "hands.jsonl"))
+    contexts = list(iter_jsonl(tmp_path / "train" / "events" / "user_context.jsonl"))
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert first_hand["occurred_at"] == "2026-07-22T09:00:00Z"
+    assert max(event["occurred_at"] for event in contexts) < first_hand["occurred_at"]
+    assert config["hand_start_at"] == "2026-07-22T09:00:00+00:00"
+    assert config["context_start_at"] == "2026-07-21T09:00:00+00:00"
+
+
+def test_world_dataset_rejects_a_naive_live_event_time_anchor(tmp_path: Path):
+    with pytest.raises(ValueError, match="hand_start_at must include timezone"):
+        build_realtime_world_dataset(
+            tmp_path,
+            _config(),
+            hand_start_at=datetime(2026, 7, 22, 9, 0),
+        )
 
 
 def test_colluder_context_is_correlated_but_not_a_deterministic_label():

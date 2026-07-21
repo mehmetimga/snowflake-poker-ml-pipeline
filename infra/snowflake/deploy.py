@@ -25,6 +25,7 @@ DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
 DEFAULT_FLINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:dev"
 DEFAULT_TRITON_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3"
 DEFAULT_MODEL_RUN_ID = "pair_7a1c58c1046b"
+DEFAULT_RISK_SCORER_GROUP_ID = "poker-go-risk-scorer-v1"
 POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
@@ -167,8 +168,11 @@ def render_specs(
     flink_image_path: str = DEFAULT_FLINK_IMAGE_PATH,
     triton_image_path: str = DEFAULT_TRITON_IMAGE_PATH,
     build_version: str = "dev",
+    risk_build_version: str | None = None,
+    flink_build_version: str | None = None,
     model_run_id: str = DEFAULT_MODEL_RUN_ID,
     allowed_tenants: str = "demo",
+    risk_scorer_group_id: str = DEFAULT_RISK_SCORER_GROUP_ID,
 ) -> None:
     image_paths = {
         "application": image_path,
@@ -182,9 +186,14 @@ def render_specs(
                 f"{label} image path must look like "
                 "/DATABASE/SCHEMA/REPOSITORY/image:tag"
             )
+    risk_build_version = risk_build_version or build_version
+    flink_build_version = flink_build_version or build_version
     for label, candidate in {
         "build version": build_version,
+        "risk build version": risk_build_version,
+        "Flink build version": flink_build_version,
         "model run ID": model_run_id,
+        "risk scorer group ID": risk_scorer_group_id,
     }.items():
         if not _SAFE_ID.fullmatch(candidate):
             raise SystemExit(f"Invalid {label}: {candidate!r}")
@@ -197,9 +206,11 @@ def render_specs(
         "__RISK_IMAGE_PATH__": risk_image_path,
         "__FLINK_IMAGE_PATH__": flink_image_path,
         "__TRITON_IMAGE_PATH__": triton_image_path,
-        "__BUILD_VERSION__": build_version,
+        "__RISK_BUILD_VERSION__": risk_build_version,
+        "__FLINK_BUILD_VERSION__": flink_build_version,
         "__MODEL_RUN_ID__": model_run_id,
         "__RISK_ALLOWED_TENANTS__": ",".join(tenants),
+        "__RISK_SCORER_GROUP_ID__": risk_scorer_group_id,
     }
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     for template_path in sorted(SPECS_DIR.glob("*.yaml.template")):
@@ -377,11 +388,23 @@ def main() -> None:
         "--build-version", default=os.environ.get("SPCS_BUILD_VERSION", "dev")
     )
     render.add_argument(
+        "--risk-build-version", default=os.environ.get("SPCS_RISK_BUILD_VERSION")
+    )
+    render.add_argument(
+        "--flink-build-version", default=os.environ.get("SPCS_FLINK_BUILD_VERSION")
+    )
+    render.add_argument(
         "--model-run-id",
         default=os.environ.get("SPCS_MODEL_RUN_ID", DEFAULT_MODEL_RUN_ID),
     )
     render.add_argument(
         "--allowed-tenants", default=os.environ.get("RISK_ALLOWED_TENANTS", "demo")
+    )
+    render.add_argument(
+        "--risk-scorer-group-id",
+        default=os.environ.get(
+            "SPCS_RISK_SCORER_GROUP_ID", DEFAULT_RISK_SCORER_GROUP_ID
+        ),
     )
 
     sub.add_parser("deploy-admin")
@@ -416,8 +439,11 @@ def main() -> None:
             flink_image_path=args.flink_image_path,
             triton_image_path=args.triton_image_path,
             build_version=args.build_version,
+            risk_build_version=args.risk_build_version,
+            flink_build_version=args.flink_build_version,
             model_run_id=args.model_run_id,
             allowed_tenants=args.allowed_tenants,
+            risk_scorer_group_id=args.risk_scorer_group_id,
         )
     elif args.command == "deploy-admin":
         deploy_service("POKER_ADMIN", "admin.yaml")

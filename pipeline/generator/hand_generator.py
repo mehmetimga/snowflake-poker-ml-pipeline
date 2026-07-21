@@ -114,7 +114,12 @@ class _Player:
 class HandGenerator:
     """Build synthetic NLHE cash hands as plain JSON-serializable dictionaries."""
 
-    def __init__(self, config: GeneratorConfig) -> None:
+    def __init__(
+        self,
+        config: GeneratorConfig,
+        *,
+        start_at: datetime | None = None,
+    ) -> None:
         self.cfg = config
         self.rng = random.Random(config.seed)
         self.players = self._make_players()
@@ -126,7 +131,11 @@ class HandGenerator:
             else config.dataset_split
         )
         self.tables = [f"{table_scope}_table_{i:02d}" for i in range(config.n_tables)]
-        self._t0 = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        if start_at is None:
+            start_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        if start_at.tzinfo is None or start_at.utcoffset() is None:
+            raise ValueError("start_at must include timezone information")
+        self._t0 = start_at.astimezone(timezone.utc)
 
     def _make_players(self) -> list[_Player]:
         players: list[_Player] = []

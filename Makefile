@@ -925,16 +925,19 @@ SNOW_IMAGE ?= poker-pipeline:dev
 SNOW_REPO_URL ?= clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo
 SNOW_REMOTE_IMAGE ?= $(SNOW_REPO_URL)/poker-pipeline:dev
 C1_IMAGE_TAG ?= $(shell $(PY) scripts/c1_image_tag.py 2>/dev/null || echo dev-unknown)
-C1_RISK_IMAGE ?= poker-risk:$(C1_IMAGE_TAG)
-C1_FLINK_IMAGE ?= poker-flink:$(C1_IMAGE_TAG)
-C1_REMOTE_RISK_IMAGE ?= $(SNOW_REPO_URL)/poker-risk:$(C1_IMAGE_TAG)
-C1_REMOTE_FLINK_IMAGE ?= $(SNOW_REPO_URL)/poker-flink:$(C1_IMAGE_TAG)
+C1_RISK_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+C1_FLINK_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+C1_RISK_IMAGE ?= poker-risk:$(C1_RISK_IMAGE_TAG)
+C1_FLINK_IMAGE ?= poker-flink:$(C1_FLINK_IMAGE_TAG)
+C1_REMOTE_RISK_IMAGE ?= $(SNOW_REPO_URL)/poker-risk:$(C1_RISK_IMAGE_TAG)
+C1_REMOTE_FLINK_IMAGE ?= $(SNOW_REPO_URL)/poker-flink:$(C1_FLINK_IMAGE_TAG)
 C1_TRITON_SOURCE_IMAGE ?= nvcr.io/nvidia/tritonserver:25.12-py3
 C1_REMOTE_TRITON_IMAGE ?= $(SNOW_REPO_URL)/tritonserver:25.12-py3
 C1_MODEL_SOURCE ?= models/pair-catboost-full-v2
 C1_MODEL_BUNDLE ?= build/c1/risk-runtime
 C1_MODEL_RUN_ID ?= pair_7a1c58c1046b
 C1_ALLOWED_TENANTS ?= demo
+C1_RISK_SCORER_GROUP_ID ?= poker-go-risk-scorer-v1
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -982,21 +985,25 @@ c1-risk-bundle:
 		--source $(C1_MODEL_SOURCE) --output $(C1_MODEL_BUNDLE)
 
 c1-render:
-	SPCS_RISK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:$(C1_IMAGE_TAG) \
-	SPCS_FLINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:$(C1_IMAGE_TAG) \
+	SPCS_RISK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:$(C1_RISK_IMAGE_TAG) \
+	SPCS_FLINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:$(C1_FLINK_IMAGE_TAG) \
 	SPCS_TRITON_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3 \
-	SPCS_BUILD_VERSION=$(C1_IMAGE_TAG) SPCS_MODEL_RUN_ID=$(C1_MODEL_RUN_ID) \
+	SPCS_BUILD_VERSION=$(C1_IMAGE_TAG) \
+	SPCS_RISK_BUILD_VERSION=$(C1_RISK_IMAGE_TAG) \
+	SPCS_FLINK_BUILD_VERSION=$(C1_FLINK_IMAGE_TAG) \
+	SPCS_MODEL_RUN_ID=$(C1_MODEL_RUN_ID) \
+	SPCS_RISK_SCORER_GROUP_ID=$(C1_RISK_SCORER_GROUP_ID) \
 	RISK_ALLOWED_TENANTS=$(C1_ALLOWED_TENANTS) \
 		$(PY) infra/snowflake/deploy.py render
 
 c1-build-risk:
 	docker buildx build --platform linux/amd64 --load \
-		--build-arg BUILD_VERSION=$(C1_IMAGE_TAG) \
+		--build-arg BUILD_VERSION=$(C1_RISK_IMAGE_TAG) \
 		-f Dockerfile.risk -t $(C1_RISK_IMAGE) .
 
 c1-build-flink:
 	docker buildx build --platform linux/amd64 --load \
-		--build-arg BUILD_VERSION=$(C1_IMAGE_TAG) \
+		--build-arg BUILD_VERSION=$(C1_FLINK_IMAGE_TAG) \
 		-f Dockerfile.flink -t $(C1_FLINK_IMAGE) .
 
 c1-build: c1-build-risk c1-build-flink

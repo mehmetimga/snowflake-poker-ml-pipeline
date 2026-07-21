@@ -38,6 +38,11 @@ is `dev-<current-head>`. A registry push or SPCS deployment is rejected unless
 the worktree is clean and the tag exactly equals the current 12-character Git
 SHA.
 
+Risk and Flink image/build revisions are rendered independently through
+`C1_RISK_IMAGE_TAG` and `C1_FLINK_IMAGE_TAG`. This matters for a component-only
+hotfix: the service-reported build version must describe the image actually
+running, even when the other component remains on an earlier reviewed commit.
+
 ## Model artifact boundary
 
 `scripts/build_risk_runtime_bundle.py` reads the governed champion manifest,
@@ -143,6 +148,42 @@ checkpoint creation, Kafka lag, Go/Triton readiness, a small canonical replay,
 acknowledged output counts, deterministic IDs, and zero model probability
 delta. Keep all decisions in shadow mode.
 
+`C1_RISK_SCORER_GROUP_ID` is an explicit validated deployment setting. Keep it
+stable during normal restarts. Change it only for a controlled cutover or
+recovery boundary, because a new group with no committed offsets starts at the
+current pair-topic tail. Retain the previous group and its offsets for audit.
+
+## Live C1 evidence — 2026-07-21
+
+The account now runs:
+
+| Component | Immutable release | Live result |
+|---|---|---|
+| Go risk service | `poker-risk:21ebb31c01d6` | ready; model run `pair_7a1c58c1046b` |
+| Flink service | `poker-flink:603ff5dbd89f` | three containers ready; both jobs running |
+| Triton sidecar | `tritonserver:25.12-py3` | ready; CPU ONNX model loaded |
+
+The Flink revision includes the closure-serialization hotfix required by the
+stateful pair rule. Both jobs completed checkpoint 5 after the accepted replay.
+The controlled target and watermark batches published 140 canonical records
+with 140 broker acknowledgements and no producer duplicates. The target ten
+hands produced exactly 150 versioned pair rows, ten unique hand scores, and ten
+review decisions. Every score contained 15 pair scores, six player scores, and
+the governed run ID; every decision referenced its score and hand correctly.
+The current scorer container run recorded no `stream stopped` event.
+
+Two negative runs are intentionally excluded from acceptance counts:
+
+- a multi-partition accelerated replay exceeded the configured 30-second
+  event-time disorder budget and was fail-closed into the DLQ; and
+- a future-dated test was rejected because governed evidence cannot be emitted
+  before its business event occurs.
+
+The remaining C1 gate is a controlled savepoint for both jobs, service restart
+with the two savepoint URIs, and a post-restore deterministic replay. Periodic
+checkpoints and retained block storage are live, but they are not a substitute
+for that savepoint restore evidence.
+
 ## Source references
 
 - [Snowflake service specification](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/specification-reference)
@@ -153,4 +194,3 @@ delta. Keep all decisions in shadow mode.
 - [Monitoring SPCS services](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/monitoring-services)
 - [Flink checkpointing](https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/dev/datastream/fault-tolerance/checkpointing/)
 - [Flink savepoints](https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/ops/state/savepoints/)
-
