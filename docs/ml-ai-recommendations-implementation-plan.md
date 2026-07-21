@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 9 |
+| Plan version | 10 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase B5 — rule governance and evaluation |
+| Immediate next phase | Phase B6 — rule dashboards and alerts |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -379,13 +379,17 @@ Every rule must have:
 - [x] owner and description;
 - [x] version and effective date;
 - [x] unit and replay tests;
-- [ ] precision, recall, firing rate, and alert-volume report;
-- [ ] segment and drift monitoring;
-- [ ] rollback procedure; and
-- [ ] independent-label evaluation.
+- [x] precision, recall, firing rate, and alert-volume report;
+- [x] segment and drift monitoring;
+- [x] rollback procedure; and
+- [x] independent-label evaluation.
 
 Labels created solely because a rule fired must be marked so that the same rule
 is not evaluated against circular truth.
+
+The frozen inputs, metrics, reliability rules, monitoring thresholds, observed
+results, and executable Go/Flink rollback are documented in
+[`docs/rule-governance-evaluation.md`](rule-governance-evaluation.md).
 
 ### B6. Acceptance gate
 
@@ -793,19 +797,31 @@ Completed slice — Phase B4:
 6. [x] Add policy firing-rate and review-volume gates before any shadow
    deployment.
 
-Immediate next slice — Phase B5:
+Completed slice — Phase B5:
 
-1. [ ] Build a deterministic rule-evaluation dataset from frozen public-test
+1. [x] Build a deterministic rule-evaluation dataset from frozen public-test
    features and independently available labels.
-2. [ ] Report per-rule support, firing rate, precision, recall, and alert
+2. [x] Report per-rule support, firing rate, precision, recall, and alert
    volume with whole-hand confidence intervals.
-3. [ ] Mark label provenance and exclude labels caused solely by the evaluated
+3. [x] Mark label provenance and exclude labels caused solely by the evaluated
    rule from its own quality report.
-4. [ ] Add tenant/context/scenario segment summaries and reliability floors.
-5. [ ] Define rule disable/rollback configuration and prove replay after a
+4. [x] Add tenant/context/scenario segment summaries and reliability floors.
+5. [x] Define rule disable/rollback configuration and prove replay after a
    rollback does not change stored model probability.
-6. [ ] Emit machine-readable monitoring thresholds for firing-rate and rule
+6. [x] Emit machine-readable monitoring thresholds for firing-rate and rule
    drift dashboards.
+
+Immediate next slice — Phase B6:
+
+1. [ ] Export runtime firing, evidence-volume, label-yield, lateness, and state
+   metrics to the target monitoring system.
+2. [ ] Build rule and segment dashboards from the B5 baseline contract.
+3. [ ] Alert on eligible-window threshold violations while marking thin
+   windows `insufficient_data`.
+4. [ ] Run alert tests with synthetic drift and verify links to the exact rule,
+   rollout, model, tenant, and evaluation versions.
+5. [ ] Keep all current rules in shadow evidence mode; dashboards do not grant
+   enforcement authority.
 
 ## 13. Progress log
 
@@ -824,3 +840,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | B2 | Froze six pair-rule definitions, added a pure Python reference and matching pre-inference Go evaluator, retained the exact rules-only formula, emitted deterministic evidence with score/alert references, and published evidence before its score and alert in one acknowledged batch. | `make phase-b2-check`: 18 Python tests plus Go risk/stream suites passed; cross-language golden score `0.8475`; replay IDs matched and higher snapshot revisions produced distinct IDs; enabled/disabled Go scorer probabilities and decisions matched; `go test ./...`: passed; `make phase12-check`: passed | B2 complete with no probability blend and no production deployment change. Phase B remains in progress; the first stateful Java/Flink rule is next |
 | 2026-07-21 | B3 | Implemented the first stateful rule, `pair.repeated-fold-to-partner-wins`, as a 24-hour event-time window with scoped keyed state, deterministic corrections, lateness handling, 72-hour TTL, metrics, and Python/Java replay parity. Flink carries complete evidence to Go, which validates and publishes it atomically with the corresponding score/alert batch. | `make phase-b3-check`: 22 Python tests, 7 Java tests, and Go risk/stream suites passed; shared golden evidence IDs matched across Python and Java; checkpoint restore, duplicate, correction, stale, late-event, transport-validation, and probability-invariance paths passed | First B3 vertical slice complete with no deployed-job or probability change. Other stateful candidates are deferred pending shadow evidence; B4 decision-policy separation is next |
 | 2026-07-21 | B4 | Added `poker.review-routing:v1` and an independent `poker.review-decision.recorded` audit contract. All seven current rules are explicitly soft, the hard list is empty, hypothetical hard rules require review with deterministic reasons, and quality failures remain DLQ-only. Go now publishes evidence, score, review decision, and optional policy-linked alert in one acknowledged batch. | `make phase-b4-check`: 32 Python tests, 7 Java tests, and Go risk/stream suites passed; Python/Go golden decision ID `23300633-c2ac-5284-b110-039fe2850d03`; Kafka replay, output order, hard-below-threshold routing, soft-rule non-action, DLQ isolation, rollout metrics, and probability invariance passed | B4 complete in local shadow configuration. No hard rule, automatic enforcement, probability change, or deployment change. B5 governed rule evaluation is next |
+| 2026-07-21 | B5 | Added a hash-bound public-test report for all seven rules, independent-label provenance controls, whole-hand intervals, reliable tenant/context/scenario/history slices, machine-readable monitoring baselines, and executable per-rule rollback in Go and Flink. | 75,000 rows/5,000 hands; 500 hand bootstraps per rule; 7/7 overall reports reliable; 51 reliable and 26 suppressed rule/segment slices; all 75,000 labels independently synthetic; all-rule rollback probability delta `0.0`; `make phase-b5-check` passed with 8 Java tests and all Python/Go suites; `make phase12-check` passed | B5 complete locally. Results confirm rules remain soft shadow evidence; no champion, threshold, hard rule, or deployed service changed. B6 dashboards and alerts are next |

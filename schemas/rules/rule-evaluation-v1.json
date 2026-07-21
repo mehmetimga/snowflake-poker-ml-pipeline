@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "evaluation_id": "rules-v2-public-test-v1",
+  "benchmark": "cold_start",
+  "split": "test",
+  "bootstrap": {
+    "samples": 500,
+    "confidence_level": 0.95,
+    "random_seed": 20260721,
+    "sampling_unit": "hand_id"
+  },
+  "label_policy": {
+    "allowed_independent_provenance": [
+      "synthetic"
+    ],
+    "circular_provenance": [
+      "rule_derived",
+      "rules_v2_derived",
+      "weak_rule_label"
+    ],
+    "unknown_provenance_action": "fail",
+    "circular_provenance_action": "exclude",
+    "require_label_available_at": true
+  },
+  "reliability_floor": {
+    "minimum_hands": 10,
+    "minimum_positives": 5,
+    "minimum_negatives": 20,
+    "minimum_firings": 5
+  },
+  "segment_dimensions": [
+    "tenant_id",
+    "context_availability",
+    "scenario_family",
+    "pair_history"
+  ],
+  "monitoring": {
+    "minimum_labeled_hands": 250,
+    "minimum_positive_labels": 20,
+    "minimum_rule_firings": 20,
+    "maximum_absolute_firing_rate_change": 0.02,
+    "maximum_relative_firing_rate_change": 0.5,
+    "minimum_precision_ratio_to_baseline": 0.5,
+    "maximum_alert_volume_ratio_to_baseline": 2.0,
+    "maximum_circular_or_unknown_label_rows": 0,
+    "maximum_probability_delta_on_rollback": 0.0
+  }
+}

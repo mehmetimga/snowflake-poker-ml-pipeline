@@ -65,6 +65,7 @@ type Scorer struct {
 	clock               func() time.Time
 	serviceBuildVersion string
 	pairRulesEnabled    bool
+	pairRuleEnablement  map[string]bool
 }
 
 func NewScorer(bundle *ArtifactBundle, backend InferenceBackend, clock func() time.Time) (*Scorer, error) {
@@ -88,6 +89,20 @@ func NewScorerWithBuildVersion(bundle *ArtifactBundle, backend InferenceBackend,
 		bundle: bundle, backend: backend, clock: clock,
 		serviceBuildVersion: buildVersion, pairRulesEnabled: true,
 	}, nil
+}
+
+// SetRuleRollout applies evidence-only enablement. Model preprocessing,
+// inference, calibration, thresholds, and score aggregation are unaffected.
+func (scorer *Scorer) SetRuleRollout(config *RuleRolloutConfig) error {
+	if config == nil {
+		return fmt.Errorf("rule rollout configuration is required")
+	}
+	enabled, err := config.GoRuleEnablement()
+	if err != nil {
+		return err
+	}
+	scorer.pairRuleEnablement = enabled
+	return nil
 }
 
 func (scorer *Scorer) Ready(ctx context.Context) error {
@@ -155,7 +170,7 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 			}
 		}
 		if scorer.pairRulesEnabled {
-			fired, err := EvaluatePairRules(event, scoredAt)
+			fired, err := EvaluatePairRulesWithEnabled(event, scoredAt, scorer.pairRuleEnablement)
 			if err != nil {
 				return nil, fmt.Errorf("evaluate pair rules for %s: %w", event.Payload.PairKey, err)
 			}

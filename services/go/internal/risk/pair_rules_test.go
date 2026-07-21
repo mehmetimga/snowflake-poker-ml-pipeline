@@ -93,6 +93,25 @@ func TestPairRuleDefinitionsMatchGovernedFile(t *testing.T) {
 	}
 }
 
+func TestRuleRolloutExactlyCoversGovernedRules(t *testing.T) {
+	config, err := LoadRuleRollout("../../../../schemas/rules/rule-rollout-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := config.GoRuleEnablement()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RolloutID != "rules-v2-shadow-v1" || len(enabled) != len(PairRuleDefinitions()) {
+		t.Fatalf("unexpected rollout identity or Go rule count: %+v", config)
+	}
+	for _, definition := range PairRuleDefinitions() {
+		if !enabled[definition.RuleID] {
+			t.Fatalf("governed baseline unexpectedly disables %s", definition.RuleID)
+		}
+	}
+}
+
 func TestPairRulesMatchCrossLanguageGoldenFixture(t *testing.T) {
 	fixture := loadPairRulesGolden(t)
 	event := goldenPairRuleEvent(t, fixture)

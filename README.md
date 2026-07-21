@@ -13,6 +13,7 @@ Planning documents:
 - [How the Flink real-time feature pipeline works](docs/flink-realtime-feature-pipeline.md)
 - [Data science and ML/AI model development guide](docs/data-science-model-development-guide.md)
 - [ML/AI recommendations implementation plan](docs/ml-ai-recommendations-implementation-plan.md)
+- [Rules v2 governance, evaluation, monitoring, and rollback](docs/rule-governance-evaluation.md)
 - [Realtime model input contract](docs/realtime-model-input-contract.md)
 
 ## What's in here

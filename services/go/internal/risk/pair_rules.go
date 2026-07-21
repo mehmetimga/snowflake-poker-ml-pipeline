@@ -120,6 +120,13 @@ func RulesOnlyPairScore(event PairFeatureEvent) (float64, error) {
 // EvaluatePairRules emits independent observations for fired rules. It
 // performs no I/O and does not receive a model probability.
 func EvaluatePairRules(event PairFeatureEvent, emittedAt time.Time) ([]RuleEvidenceEvent, error) {
+	return EvaluatePairRulesWithEnabled(event, emittedAt, nil)
+}
+
+// EvaluatePairRulesWithEnabled evaluates only explicitly enabled rules. A nil
+// map preserves the legacy all-enabled behavior. The filter can only remove
+// evidence; it is never passed to model inference or calibration.
+func EvaluatePairRulesWithEnabled(event PairFeatureEvent, emittedAt time.Time, enabled map[string]bool) ([]RuleEvidenceEvent, error) {
 	if err := event.Validate(ruleFeatureVersion); err != nil {
 		return nil, err
 	}
@@ -129,6 +136,9 @@ func EvaluatePairRules(event PairFeatureEvent, emittedAt time.Time) ([]RuleEvide
 	}
 	evidenceEvents := make([]RuleEvidenceEvent, 0, len(pairRuleDefinitions))
 	for _, definition := range pairRuleDefinitions {
+		if enabled != nil && !enabled[definition.RuleID] {
+			continue
+		}
 		observed := values[definition.FeatureName]
 		if !pairRuleFires(definition, observed) {
 			continue

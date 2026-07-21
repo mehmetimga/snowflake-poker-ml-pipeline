@@ -258,7 +258,18 @@ func TestEnablingPairRulesDoesNotChangeModelProbabilityOrDecision(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	disabled.pairRulesEnabled = false
+	rollout, err := LoadRuleRollout("../../../../schemas/rules/rule-rollout-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range rollout.Rules {
+		if rollout.Rules[index].Runtime == "go-risk-scorer" {
+			rollout.Rules[index].Enabled = false
+		}
+	}
+	if err := disabled.SetRuleRollout(rollout); err != nil {
+		t.Fatal(err)
+	}
 
 	withRules, err := enabled.ScoreHand(context.Background(), events)
 	if err != nil {

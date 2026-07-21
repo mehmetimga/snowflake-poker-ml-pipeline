@@ -13,6 +13,7 @@ final class StatefulPairRuleFunction extends KeyedProcessFunction<String, String
     private final long stateTtlHours;
     private final String sourceTopic;
     private final StatefulFoldRuleEngine.Config config;
+    private final boolean enabled;
     private transient ValueState<String> state;
     private transient Counter evaluations;
     private transient Counter firings;
@@ -26,10 +27,12 @@ final class StatefulPairRuleFunction extends KeyedProcessFunction<String, String
     StatefulPairRuleFunction(
             long stateTtlHours,
             String sourceTopic,
-            StatefulFoldRuleEngine.Config config) {
+            StatefulFoldRuleEngine.Config config,
+            boolean enabled) {
         this.stateTtlHours = stateTtlHours;
         this.sourceTopic = sourceTopic;
         this.config = config;
+        this.enabled = enabled;
     }
 
     @Override
@@ -51,6 +54,10 @@ final class StatefulPairRuleFunction extends KeyedProcessFunction<String, String
     @Override
     public void processElement(String value, Context context, Collector<String> output) {
         try {
+            if (!enabled) {
+                output.collect(value);
+                return;
+            }
             JsonNode event = PairEventJson.parse(value);
             StatefulFoldRuleEngine.Evaluation result = StatefulFoldRuleEngine.evaluate(
                     state.value(), event, context.timerService().currentWatermark(), config);

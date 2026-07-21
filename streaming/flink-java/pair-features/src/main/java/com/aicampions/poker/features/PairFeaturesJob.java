@@ -84,7 +84,8 @@ public final class PairFeaturesJob {
                         new StatefulPairRuleFunction(
                                 config.statefulRuleStateTtlHours(),
                                 config.outputTopic(),
-                                statefulRuleConfig),
+                                statefulRuleConfig,
+                                config.statefulRuleEnabled()),
                         Types.STRING)
                 .name("stateful-pair-rules")
                 .uid("stateful-pair-rules-v1");
@@ -154,6 +155,7 @@ public final class PairFeaturesJob {
             long statefulRuleAllowedLatenessMs,
             long statefulRuleCorrectionHorizonHours,
             long statefulRuleStateTtlHours,
+            boolean statefulRuleEnabled,
             long checkpointIntervalMs,
             int parallelism,
             Properties kafkaProperties) {
@@ -188,6 +190,8 @@ public final class PairFeaturesJob {
                     args, "stateful-rule-correction-horizon-hours", 48L, ruleWindow);
             long ruleTtl = longValue(
                     args, "stateful-rule-state-ttl-hours", 72L, correctionHorizon);
+            boolean ruleEnabled = booleanValue(
+                    args, environment, "stateful-rule-enabled", "FLINK_STATEFUL_RULE_ENABLED", true);
             long checkpoint = longValue(args, "checkpoint-interval-ms", 30_000L, 0L);
             int parallelism = Math.toIntExact(longValue(args, "parallelism", 1L, 1L));
             return new JobConfig(
@@ -195,6 +199,7 @@ public final class PairFeaturesJob {
                     outOfOrderness, idle, ttl,
                     ruleWindow, ruleMinimumHands, ruleMinimumDirectional, ruleRate,
                     ruleLateness, correctionHorizon, ruleTtl,
+                    ruleEnabled,
                     checkpoint, parallelism,
                     kafkaProperties(environment));
         }
@@ -203,9 +208,9 @@ public final class PairFeaturesJob {
             return String.format(
                     "{\"job\":\"pair-features\",\"input\":\"%s\","
                             + "\"output\":\"%s\",\"feature_version\":\"%s\","
-                            + "\"stateful_rule\":\"%s\"}",
+                            + "\"stateful_rule\":\"%s\",\"stateful_rule_enabled\":%s}",
                     inputTopic, outputTopic, PairEventJson.FEATURE_VERSION,
-                    StatefulFoldRuleEngine.RULE_ID);
+                    StatefulFoldRuleEngine.RULE_ID, statefulRuleEnabled);
         }
 
         private static Map<String, String> parseArguments(String[] arguments) {
@@ -259,6 +264,20 @@ public final class PairFeaturesJob {
                         "--" + key + " must be in [" + minimum + ", " + maximum + "]");
             }
             return value;
+        }
+
+        private static boolean booleanValue(
+                Map<String, String> args,
+                Map<String, String> environment,
+                String argument,
+                String environmentName,
+                boolean fallback) {
+            String raw = value(
+                    args, environment, argument, environmentName, Boolean.toString(fallback));
+            if (!raw.equalsIgnoreCase("true") && !raw.equalsIgnoreCase("false")) {
+                throw new IllegalArgumentException("--" + argument + " must be true or false");
+            }
+            return Boolean.parseBoolean(raw);
         }
 
         private static Properties kafkaProperties(Map<String, String> environment) {

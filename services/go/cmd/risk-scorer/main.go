@@ -15,6 +15,7 @@ import (
 
 func main() {
 	modelDir := flag.String("model-dir", "../../models/pair-catboost-full-v2", "model artifact directory")
+	ruleRolloutPath := flag.String("rule-rollout", "../../schemas/rules/rule-rollout-v1.json", "governed Rules v2 enablement and rollback JSON")
 	tritonURL := flag.String("triton-url", "http://127.0.0.1:8000", "Triton V2 HTTP base URL")
 	listenAddress := flag.String("listen", ":8080", "HTTP listen address")
 	assemblyTTL := flag.Duration("assembly-ttl", 30*time.Minute, "complete-hand correction cache TTL")
@@ -36,6 +37,13 @@ func main() {
 	scorer, err := risk.NewScorerWithBuildVersion(bundle, backend, nil, *buildVersion)
 	if err != nil {
 		log.Fatalf("configure scorer: %v", err)
+	}
+	ruleRollout, err := risk.LoadRuleRollout(*ruleRolloutPath)
+	if err != nil {
+		log.Fatalf("load rule rollout: %v", err)
+	}
+	if err := scorer.SetRuleRollout(ruleRollout); err != nil {
+		log.Fatalf("configure rule rollout: %v", err)
 	}
 	assembler, err := risk.NewHandAssembler(bundle.Contract.Batching.ExpectedPairsPerSixPlayerHand, *assemblyTTL)
 	if err != nil {
@@ -89,7 +97,7 @@ func main() {
 			}
 		}
 	}()
-	log.Printf("risk-scorer model=%s run=%s listen=%s triton=%s", bundle.Contract.ModelName, bundle.Contract.RunID, *listenAddress, *tritonURL)
+	log.Printf("risk-scorer model=%s run=%s rule_rollout=%s listen=%s triton=%s", bundle.Contract.ModelName, bundle.Contract.RunID, ruleRollout.RolloutID, *listenAddress, *tritonURL)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve HTTP: %v", err)
 	}

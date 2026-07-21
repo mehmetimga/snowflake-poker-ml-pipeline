@@ -20,6 +20,7 @@ class JobConfigTest {
                     "--state-ttl-hours", "24",
                     "--stateful-rule-window-hours", "12",
                     "--stateful-rule-rate-threshold", "0.75",
+                    "--stateful-rule-enabled", "false",
                     "--stateful-rule-correction-horizon-hours", "24",
                     "--stateful-rule-state-ttl-hours", "36"
                 },
@@ -33,6 +34,7 @@ class JobConfigTest {
         assertEquals(24, config.stateTtlHours());
         assertEquals(12, config.statefulRuleWindowHours());
         assertEquals(0.75, config.statefulRuleRateThreshold());
+        assertEquals(false, config.statefulRuleEnabled());
         assertEquals(24, config.statefulRuleCorrectionHorizonHours());
         assertEquals(36, config.statefulRuleStateTtlHours());
     }
@@ -43,5 +45,13 @@ class JobConfigTest {
                 IllegalArgumentException.class,
                 () -> PairFeaturesJob.JobConfig.parse(
                         new String[] {"--state-ttl-hours", "0"}, Map.of()));
+    }
+
+    @Test
+    void invalidRuleEnablementIsRejected() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PairFeaturesJob.JobConfig.parse(
+                        new String[] {"--stateful-rule-enabled", "maybe"}, Map.of()));
     }
 }

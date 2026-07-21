@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "rollout_id": "rules-v2-shadow-v1",
+  "rule_set": "rules-v2",
+  "effective_from": "2026-07-21T00:00:00Z",
+  "mode": "shadow",
+  "probability_behavior": "rule evidence is never an input to or blend with CatBoost probability",
+  "rules": [
+    {
+      "rule_id": "pair.one-folded-other-won",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.same-device",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.same-network",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.outcome-asymmetry",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.a-fold-b-win-rate",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.b-fold-a-win-rate",
+      "rule_version": 1,
+      "runtime": "go-risk-scorer",
+      "enabled": true
+    },
+    {
+      "rule_id": "pair.repeated-fold-to-partner-wins",
+      "rule_version": 1,
+      "runtime": "java-flink-pair-features",
+      "enabled": true
+    }
+  ],
+  "rollback": {
+    "action": "disable selected rule IDs and replay from the last committed Kafka offsets",
+    "preserve_historical_evidence": true,
+    "delete_historical_evidence": false,
+    "model_inference_reconfiguration_required": false,
+    "model_probability_must_match_bit_for_bit": true,
+    "review_policy_reconfiguration": "remove disabled rule IDs from routing only after the evidence producer is disabled",
+    "stateful_rule_procedure": "take a Flink savepoint, disable the rule, redeploy, and retain the savepoint through the audit window",
+    "stateless_rule_procedure": "disable the rule in the Go rollout configuration and restart the consumer from committed offsets"
+  }
+}

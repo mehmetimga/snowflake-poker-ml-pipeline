@@ -23,6 +23,7 @@ func main() {
 	loadDotEnv("../../.env")
 	modelDir := flag.String("model-dir", "../../models/pair-catboost-full-v2", "model artifact directory")
 	reviewPolicyPath := flag.String("review-policy", envDefault("RISK_REVIEW_POLICY_PATH", "../../schemas/policies/review-policy-v1.json"), "governed review-routing policy JSON")
+	ruleRolloutPath := flag.String("rule-rollout", envDefault("RISK_RULE_ROLLOUT_PATH", "../../schemas/rules/rule-rollout-v1.json"), "governed Rules v2 enablement and rollback JSON")
 	tritonURL := flag.String("triton-url", envDefault("TRITON_HTTP_URL", "http://127.0.0.1:8000"), "Triton V2 HTTP base URL")
 	brokers := flag.String("bootstrap-servers", envDefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"), "comma-separated Kafka brokers")
 	groupID := flag.String("group-id", envDefault("KAFKA_RISK_SCORER_GROUP_ID", "poker-go-risk-scorer-v1"), "Kafka consumer group")
@@ -60,6 +61,13 @@ func main() {
 	scorer, err := risk.NewScorerWithBuildVersion(bundle, backend, nil, *buildVersion)
 	if err != nil {
 		log.Fatalf("configure scorer: %v", err)
+	}
+	ruleRollout, err := risk.LoadRuleRollout(*ruleRolloutPath)
+	if err != nil {
+		log.Fatalf("load rule rollout: %v", err)
+	}
+	if err := scorer.SetRuleRollout(ruleRollout); err != nil {
+		log.Fatalf("configure rule rollout: %v", err)
 	}
 	assembler, err := risk.NewHandAssembler(bundle.Contract.Batching.ExpectedPairsPerSixPlayerHand, *assemblyTTL)
 	if err != nil {
@@ -104,7 +112,7 @@ func main() {
 		log.Fatalf("Triton readiness failed: %v", err)
 	}
 	cancel()
-	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
+	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d rule_rollout=%s input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, ruleRollout.RolloutID, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
 	scores, err := kafkaClient.Run(ctx, processor, *maxScores)
 	if err != nil {
 		log.Fatalf("stream stopped: %v", err)
