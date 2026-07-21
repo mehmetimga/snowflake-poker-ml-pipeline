@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poker-ml.example/schemas/model_candidate_evidence.schema.json",
+  "title": "Model Candidate Evidence",
+  "description": "Model-family-neutral, hash-bound evidence required for registry admission.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate",
+    "scope",
+    "artifact",
+    "data",
+    "evaluation",
+    "evidence",
+    "runtime",
+    "governance",
+    "document_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_name", "run_id", "model_family"],
+      "properties": {
+        "model_name": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1},
+        "model_family": {"type": "string", "minLength": 1}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "product_id", "benchmark"],
+      "properties": {
+        "tenant_id": {"type": "string", "minLength": 1},
+        "product_id": {"type": "string", "minLength": 1},
+        "benchmark": {"type": "string", "minLength": 1}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "manifest_path", "manifest_sha256"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "manifest_path": {"const": "artifact_manifest.json"},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "dataset_manifest_uri",
+        "dataset_manifest_sha256",
+        "feature_definition_version"
+      ],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "dataset_manifest_uri": {"type": "string", "minLength": 1},
+        "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_definition_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmark",
+        "split",
+        "metric_name",
+        "metric_value",
+        "metric_json_path",
+        "quality_gate",
+        "quality_gate_json_path",
+        "reasons"
+      ],
+      "properties": {
+        "benchmark": {"type": "string", "minLength": 1},
+        "split": {"const": "test"},
+        "metric_name": {"type": "string", "minLength": 1},
+        "metric_value": {"type": "number"},
+        "metric_json_path": {"$ref": "#/$defs/jsonPath"},
+        "quality_gate": {"enum": ["passed", "failed"]},
+        "quality_gate_json_path": {"$ref": "#/$defs/jsonPath"},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metrics", "predictions"],
+      "properties": {
+        "metrics": {"$ref": "#/$defs/artifactReference"},
+        "predictions": {"$ref": "#/$defs/artifactReference"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scoring_contract", "decision_policy", "operational_report"],
+      "properties": {
+        "scoring_contract": {
+          "oneOf": [{"$ref": "#/$defs/artifactReference"}, {"type": "null"}]
+        },
+        "decision_policy": {
+          "oneOf": [{"$ref": "#/$defs/artifactReference"}, {"type": "null"}]
+        },
+        "operational_report": {
+          "oneOf": [{"$ref": "#/$defs/externalReference"}, {"type": "null"}]
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_stage",
+        "private_challenge",
+        "manual_approval",
+        "rollback_required"
+      ],
+      "properties": {
+        "requested_stage": {"enum": ["production", "candidate"]},
+        "private_challenge": {"enum": ["passed", "pending", "not_run"]},
+        "manual_approval": {
+          "enum": [
+            "approved",
+            "grandfathered_initial_champion",
+            "pending",
+            "not_requested"
+          ]
+        },
+        "rollback_required": {"const": true}
+      }
+    },
+    "document_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "jsonPath": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "artifactReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "externalReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

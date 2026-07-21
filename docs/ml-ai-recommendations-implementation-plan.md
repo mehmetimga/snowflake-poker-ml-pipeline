@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 4 |
+| Plan version | 5 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase A — generic candidate registry schema |
+| Immediate next phase | Phase B — versioned rule-evidence contract |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -106,7 +106,7 @@ a successful safety outcome, not unfinished implementation.
 
 ## 4. Phase A — CatBoost stability report and model card
 
-Status: `IN PROGRESS`
+Status: `COMPLETE`
 
 Purpose: quantify uncertainty around the champion and create a standard
 evidence package for all future candidates without changing online scoring.
@@ -234,11 +234,18 @@ The current registry builder knows the champion and one ensemble candidate.
 Generalize candidate registration so future tabular, graph, sequence, or hybrid
 artifacts implement one common manifest contract.
 
-- [ ] Define a generic candidate evidence schema.
-- [ ] Require dataset, feature, predictions, metrics, and artifact hashes.
-- [ ] Preserve exactly one active champion per tenant/product/benchmark scope.
-- [ ] Reject a candidate whose operational report belongs to another run.
-- [ ] Preserve manual approval and rollback requirements.
+- [x] Define a generic candidate evidence schema.
+- [x] Require dataset, feature, predictions, metrics, and artifact hashes.
+- [x] Preserve exactly one active champion per tenant/product/benchmark scope.
+- [x] Reject a candidate whose operational report belongs to another run.
+- [x] Preserve manual approval and rollback requirements.
+
+The language-neutral contract is
+[`schemas/model_candidate_evidence.schema.json`](../schemas/model_candidate_evidence.schema.json).
+`pipeline/ops/candidate.py` validates the schema's cross-file identities and
+hashes, while `pipeline/ops/registry.py` consumes only candidate evidence and
+does not parse a model family's private metrics layout. The current CatBoost
+and OOF-stack layouts are adapted at the script boundary.
 
 ### A5. Acceptance gate
 
@@ -266,7 +273,7 @@ Production effect: none. CatBoost run `pair_7a1c58c1046b` remains active.
 
 ## 5. Phase B — Versioned Rules v2
 
-Status: `PENDING` after Phase A
+Status: `NEXT`
 
 Purpose: add explainable, governed evidence without replacing or silently
 changing CatBoost probability.
@@ -619,10 +626,10 @@ A phase is not complete until it has:
 - [ ] rollback instructions; and
 - [ ] an updated status in this plan.
 
-## 12. Immediate implementation slice
+## 12. Execution slices and immediate next step
 
-Begin with Phase A only. It has no external dependency and does not alter the
-production score.
+Phase A was implemented without altering the production score. The completed
+slices are retained here as the engineering record.
 
 First pull-request-sized slice:
 
@@ -697,6 +704,35 @@ for `fold_benefit`. The four family test slices contain only 15–23 positives,
 so their intervals remain wide. Treat these as scenario-generalization
 evidence, not as independently promotable models.
 
+Fifth pull-request-sized slice:
+
+1. [x] Publish a language-neutral candidate evidence JSON Schema.
+2. [x] Bind dataset, feature, metrics, predictions, model artifacts, and their
+   hashes into each candidate document.
+3. [x] Make registry schema v2 consume the common contract instead of
+   model-family-specific metric layouts.
+4. [x] Enforce one active champion per tenant/product/benchmark scope.
+5. [x] Reject mismatched operational model, run, artifact, or report hashes.
+6. [x] Retain manual approval, disabled automatic promotion, and exact rollback
+   identity.
+7. [x] Adapt the current CatBoost and OOF-stack artifacts and add the registry
+   tests to `phase12-check`.
+
+Immediate next slice — Phase B1:
+
+1. [ ] Define `poker.rule-evidence.v1` in Python and Go.
+2. [ ] Specify tenant/product scope, deterministic event IDs, rule ownership,
+   version/effective time, entity and hand identity, severity, raw score,
+   structured evidence, feature version, and trace lineage.
+3. [ ] Reject labels, private challenge fields, final model probability, and
+   decision-policy output from the rule-evidence payload.
+4. [ ] Add shared JSON fixtures and Python/Go round-trip and replay-idempotency
+   tests.
+5. [ ] Reference rule-evidence IDs from risk-score and alert contracts without
+   changing CatBoost probability.
+6. [ ] Add the Snowflake table and tenant/model-run lineage migration only
+   after the event contract passes locally.
+
 ## 13. Progress log
 
 Add dated entries here as phases move:
@@ -709,3 +745,4 @@ Add dated entries here as phases move:
 | 2026-07-20 | A | Added versioned segment definitions, configured reliability floors, whole-hand confidence intervals, and suppression for statistically thin slices. Added a hash-bound JSON model card and generated Markdown view tied to dataset, model, stability, registry, deployment, drift, and operational evidence. | `make phase12-check`: passed; 6/11 segments reliable, 5/11 suppressed; model-card hashes, identities, and Markdown parity passed; stability tests: 5 passed; model-card tests: 1 passed | Phase A remains in progress; validation multi-seed evidence, generator/scenario holdouts, and generic registry schema are next |
 | 2026-07-21 | A | Added validation-only five-seed CatBoost robustness evidence and bound its warning into the governed model card. The loader allowlists only train/validation; deterministic recomputation passed without test, challenge, or stored prediction reads. Also moved the Go operational build cache to a writable temporary directory for managed-workspace execution. | Seeds `11,23,42,67,101`; validation PR-AUC `[0.145587, 0.225296]`; relative spread `0.416905`; status `warning`; seed tests: 2 passed; `--recompute`: passed; `make phase12-check`: passed | Do not select the best seed or change production. Phase A remains in progress; generator/scenario holdouts and generic registry schema are next |
 | 2026-07-21 | A | Added independent generator-seed summaries and four true leave-one-scenario-family-out CatBoost evaluations. Scenario lineage is stored only in a private evaluation sidecar; held-out hands are absent from training/calibration and challenge is never loaded. Bound results into the governed model card. | Generator seeds: train `42`, validation `10042`, test `20042`; unseen-family PR-AUC: `soft_play=0.078057`, `chip_dump=0.318533`, `squeeze_collude=0.230247`, `fold_benefit=0.429689`; 300 hand bootstraps; scenario tests: 2 passed; deterministic `--recompute`: passed; `make phase12-check`: passed | No scenario model selected and no production change. Phase A remains in progress; generic candidate registry schema is next |
+| 2026-07-21 | A | Completed registry generalization with a JSON Schema and hash-bound model-family-neutral candidate evidence. Registry schema v2 enforces one champion per tenant/product/benchmark scope, exact operational run binding, manual approval, immutable candidate evidence, and rollback identity. Current model-specific metric paths exist only in the legacy adapter. | Registry tests: 6 passed; real registry build/check: passed; complete `make phase12-check`: passed; production remains `pair-catboost-v1:pair_7a1c58c1046b`; OOF stack remains `rejected` | Phase A complete with no production change. Phase B rule-evidence contract is next |
