@@ -159,30 +159,65 @@ The account now runs:
 
 | Component | Immutable release | Live result |
 |---|---|---|
-| Go risk service | `poker-risk:21ebb31c01d6` | ready; model run `pair_7a1c58c1046b` |
-| Flink service | `poker-flink:603ff5dbd89f` | three containers ready; both jobs running |
+| Go risk service | `poker-risk:8807659415f7` | ready; zero input lag on all six partitions; model run `pair_7a1c58c1046b` |
+| Flink service | `poker-flink:42fe62acc2d1` | three containers ready; both restored jobs running and checkpointing |
 | Triton sidecar | `tritonserver:25.12-py3` | ready; CPU ONNX model loaded |
 
-The Flink revision includes the closure-serialization hotfix required by the
-stateful pair rule. Both jobs completed checkpoint 5 after the accepted replay.
-The controlled target and watermark batches published 140 canonical records
-with 140 broker acknowledgements and no producer duplicates. The target ten
-hands produced exactly 150 versioned pair rows, ten unique hand scores, and ten
-review decisions. Every score contained 15 pair scores, six player scores, and
-the governed run ID; every decision referenced its score and hand correctly.
-The current scorer container run recorded no `stream stopped` event.
+The pre-upgrade jobs remained running while a private, bounded SPCS controller
+created these savepoints without exposing Flink REST publicly:
 
-Two negative runs are intentionally excluded from acceptance counts:
+```text
+context file:/opt/flink/state/savepoints/savepoint-b9cfc0-0055eed2478b
+pair    file:/opt/flink/state/savepoints/savepoint-3afb63-00d800620756
+```
+
+The replacement service restored Kafka split offsets and keyed RocksDB state
+into context job `5aa19a1c1043c6078bb5725cf15c3ff3` and pair job
+`4a461ee41f659f4da98734b8eaf5f8a8`. Both jobs then completed new periodic
+checkpoints. The controller job was private, synchronous, bounded, and left the
+source jobs running until the replacement was explicitly deployed.
+
+The first post-restore diagnostic found conflicting records with the same
+derived event ID. The SPCS inventory contained only one context job, while a
+host process check found an orphan local Flink smoke job connected to the same
+Confluent brokers. Stopping that process removed the second producer. Operators
+must therefore confirm no local poker Flink process is active before a governed
+replay; local integration jobs should use isolated topics.
+
+Validation was strengthened so exact at-least-once retries are counted, while
+the same event ID with a different payload always fails. Pair-feature checks
+apply the same invariant to their enriched input instead of silently selecting
+the last collision. The Go input contract now dead-letters a pair whose
+`emitted_at` precedes `occurred_at`. Scoring uses a logical `scored_at` no earlier
+than any validated input emission, which preserves causal evidence under small
+producer clock skew without changing CatBoost probability.
+
+Final acceptance dataset `spcs-c1-final-8807659` produced:
+
+- 29/29 acknowledged canonical inputs with zero producer duplicates;
+- 24 raw and 24 unique player-hand enrichments with zero exact duplicates;
+- 60 pair rows for four complete hands and exact offline/online payload parity;
+- four scores, four review decisions, and 22 rule-evidence events;
+- 15 pair scores and six player scores in every hand score;
+- zero broken decision references and zero missing evidence references; and
+- zero risk-consumer lag on all six pair-topic partitions.
+
+The final risk build is `8807659415f7`. Intermediate build `ede123f11f5a`
+correctly added causal input rejection but did not handle an internally valid
+near-future input timestamp; it is retained as immutable incident evidence and
+is not the accepted release.
+
+Negative and diagnostic runs are intentionally excluded from acceptance counts:
 
 - a multi-partition accelerated replay exceeded the configured 30-second
   event-time disorder budget and was fail-closed into the DLQ; and
 - a future-dated test was rejected because governed evidence cannot be emitted
-  before its business event occurs.
+  before its business event occurs; and
+- watermark-only hands used to advance restored event time were not counted as
+  accepted target hands or scores.
 
-The remaining C1 gate is a controlled savepoint for both jobs, service restart
-with the two savepoint URIs, and a post-restore deterministic replay. Periodic
-checkpoints and retained block storage are live, but they are not a substitute
-for that savepoint restore evidence.
+Phase C1 is complete. The live service remains shadow-only: no model promotion,
+decision threshold change, hard rule, or automated enforcement was introduced.
 
 ## Source references
 
