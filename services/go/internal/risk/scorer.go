@@ -133,9 +133,14 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 	players := make(map[string]struct{})
 	pairKeys := make(map[string]struct{})
 	rows := make([][]float32, 0, expected)
+	scoredAt := scorer.clock().UTC()
 	for _, event := range events {
 		if err := event.Validate(scorer.bundle.Contract.FeatureDefinitionVersion); err != nil {
 			return nil, err
+		}
+		inputEmittedAt, _ := time.Parse(time.RFC3339Nano, event.EmittedAt)
+		if inputEmittedAt.After(scoredAt) {
+			scoredAt = inputEmittedAt
 		}
 		actual := []string{event.TenantID, event.ProductID, event.DatasetID, event.DatasetSplit, event.Payload.HandID, event.Payload.TableID, event.Payload.PlayedAt}
 		if !equalStrings(identity, actual) {
@@ -161,7 +166,6 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 		return nil, err
 	}
 
-	scoredAt := scorer.clock().UTC()
 	ruleEvidenceEvents := make([]RuleEvidenceEvent, 0)
 	ruleEvidenceIDs := make(map[string]struct{})
 	appendEvidence := func(event RuleEvidenceEvent) error {

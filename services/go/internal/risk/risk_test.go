@@ -240,6 +240,32 @@ func TestScorerCalibratesAndAggregatesCompleteHand(t *testing.T) {
 	}
 }
 
+func TestScorerUsesCausalLogicalTimeWhenInputClockIsAhead(t *testing.T) {
+	events := testEvents()
+	for index := range events {
+		events[index].EmittedAt = "2026-07-20T02:00:00Z"
+	}
+	events[0].Payload.Context["same_device"] = true
+	scorer, err := NewScorer(testBundle(t), &fakeBackend{}, func() time.Time {
+		return time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scorer.ScoreHand(context.Background(), events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ScoredAt != "2026-07-20T02:00:00Z" {
+		t.Fatalf("scored_at did not preserve input causality: %s", result.ScoredAt)
+	}
+	if len(result.RuleEvidenceEvents) == 0 ||
+		result.RuleEvidenceEvents[0].EmittedAt != result.ScoredAt {
+		t.Fatalf("rule evidence did not use causal logical time: %+v", result.RuleEvidenceEvents)
+	}
+}
+
 func TestEnablingPairRulesDoesNotChangeModelProbabilityOrDecision(t *testing.T) {
 	events := testEvents()
 	events[0].Payload.CurrentHand["one_folded_other_won"] = true
