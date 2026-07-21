@@ -4,7 +4,10 @@ This Java 17 / Flink 1.19.1 job consumes
 `poker.hand-player-context.v1`, computes prior-only user history, reassembles
 complete hands, expands a six-player hand into 15 unordered pairs, and writes
 versioned snapshots to `poker.pair-features.v1` keyed by `player_a:player_b`.
-It performs no synchronous database reads.
+It also evaluates the first checkpointed Rules v2 window and embeds any fired
+`poker.rule-evidence.v1` event in `upstream_rule_evidence`. The Go scorer later
+publishes that evidence with its score and alert. The job performs no
+synchronous database reads.
 
 For a beginner-oriented explanation of streams, keyed state, event time,
 watermarks, prior-only features, and the downstream `[15, 58]` model tensor,
@@ -29,6 +32,11 @@ read [How the Flink real-time feature pipeline works](../../../docs/flink-realti
   to make cross-language parity deterministic.
 - State has a configurable processing-time TTL. Stable operator UIDs preserve
   savepoint compatibility within the v1 topology.
+- `pair.repeated-fold-to-partner-wins:v1` uses a scoped pair key and a rolling
+  24-hour event-time window. It requires at least five hands, three fold/win
+  observations in one direction, and a directional rate of at least `0.6`.
+- Stateful rule evidence is transport metadata and is not added to the 58-value
+  CatBoost feature vector or blended into probability.
 
 The corresponding offline oracle is
 `pipeline/features/pair_features.py`. `scripts/check_pair_features.py` validates
@@ -70,6 +78,13 @@ Important options:
 | `--out-of-orderness-ms` | `30000` |
 | `--idle-source-timeout-ms` | `60000` |
 | `--state-ttl-hours` | `720` |
+| `--stateful-rule-window-hours` | `24` |
+| `--stateful-rule-minimum-hands` | `5` |
+| `--stateful-rule-minimum-directional-count` | `3` |
+| `--stateful-rule-rate-threshold` | `0.6` |
+| `--stateful-rule-allowed-lateness-ms` | `120000` |
+| `--stateful-rule-correction-horizon-hours` | `48` |
+| `--stateful-rule-state-ttl-hours` | `72` |
 | `--checkpoint-interval-ms` | `30000` |
 | `--parallelism` | `1` |
 
@@ -86,3 +101,8 @@ python scripts/ingest_pair_features.py \
 
 Production deployment still needs durable checkpoint storage and a savepoint
 restore drill before this topology is promoted beyond the test stream.
+
+Flink metrics added by the stateful rule include evaluation, firing,
+duplicate, correction, stale, and late counters plus state-size and event-time
+lag gauges. Flink's standard checkpoint duration/failure metrics remain the
+source for checkpoint health.

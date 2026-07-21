@@ -139,13 +139,31 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 
 	scoredAt := scorer.clock().UTC()
 	ruleEvidenceEvents := make([]RuleEvidenceEvent, 0)
-	if scorer.pairRulesEnabled {
-		for _, event := range events {
+	ruleEvidenceIDs := make(map[string]struct{})
+	appendEvidence := func(event RuleEvidenceEvent) error {
+		if _, duplicate := ruleEvidenceIDs[event.EventID]; duplicate {
+			return fmt.Errorf("duplicate rule evidence ID %s across pair snapshots", event.EventID)
+		}
+		ruleEvidenceIDs[event.EventID] = struct{}{}
+		ruleEvidenceEvents = append(ruleEvidenceEvents, event)
+		return nil
+	}
+	for _, event := range events {
+		for _, upstream := range event.UpstreamRuleEvidence {
+			if err := appendEvidence(upstream); err != nil {
+				return nil, err
+			}
+		}
+		if scorer.pairRulesEnabled {
 			fired, err := EvaluatePairRules(event, scoredAt)
 			if err != nil {
 				return nil, fmt.Errorf("evaluate pair rules for %s: %w", event.Payload.PairKey, err)
 			}
-			ruleEvidenceEvents = append(ruleEvidenceEvents, fired...)
+			for _, evidence := range fired {
+				if err := appendEvidence(evidence); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 

@@ -18,6 +18,13 @@ governed, inference-safe pair signals before Triton inference and emits one
 separate evidence record for each fired rule. Rule evidence is never blended
 into the model probability.
 
+Pair snapshots may also carry Java/Flink stateful observations in
+`upstream_rule_evidence`. The scorer validates tenant/product/dataset scope,
+pair and hand identity, snapshot revision, feature version, and deterministic
+event identity before combining those events with its local stateless evidence.
+The metadata is excluded from preprocessing, so the `[15, 58]` model tensor is
+unchanged.
+
 Run from the repository root:
 
 ```bash

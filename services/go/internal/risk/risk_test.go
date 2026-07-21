@@ -156,6 +156,15 @@ func TestPairFeatureRejectsPrivateTruth(t *testing.T) {
 	}
 }
 
+func TestPairFeatureRejectsUnboundedUpstreamRuleEvidence(t *testing.T) {
+	event := testEvents()[0]
+	event.UpstreamRuleEvidence = make([]RuleEvidenceEvent, 33)
+	if err := event.Validate("pair-features-v1"); err == nil ||
+		!strings.Contains(err.Error(), "at most 32") {
+		t.Fatalf("expected bounded upstream rule-evidence error, got %v", err)
+	}
+}
+
 func TestAssemblerEmitsCompleteHandAndCorrection(t *testing.T) {
 	assembler, err := NewHandAssembler(15, time.Hour)
 	if err != nil {
@@ -268,6 +277,51 @@ func TestEnablingPairRulesDoesNotChangeModelProbabilityOrDecision(t *testing.T) 
 	if len(withRules.RuleEvidenceEvents) != 6 || len(withRules.RuleEvidenceEventIDs) != 6 ||
 		len(withoutRules.RuleEvidenceEvents) != 0 || len(withoutRules.RuleEvidenceEventIDs) != 0 {
 		t.Fatalf("unexpected rule evidence counts enabled=%d disabled=%d", len(withRules.RuleEvidenceEvents), len(withoutRules.RuleEvidenceEvents))
+	}
+}
+
+func TestScorerCarriesValidatedUpstreamFlinkRuleEvidence(t *testing.T) {
+	events := testEvents()
+	evidence, err := BuildRuleEvidenceEvent(RuleEvidenceInput{
+		TenantID: events[0].TenantID, ProductID: events[0].ProductID,
+		DatasetID: events[0].DatasetID, DatasetSplit: events[0].DatasetSplit,
+		TraceID: events[0].TraceID,
+		RuleID:  "pair.repeated-fold-to-partner-wins", RuleVersion: 1,
+		RuleOwner: "risk-analytics", EntityType: "pair",
+		EntityKey: events[0].Payload.PairKey, HandID: events[0].Payload.HandID,
+		ObservationRevision: events[0].Payload.SnapshotRevision,
+		Severity:            "high", RawScore: 60,
+		Evidence: map[string]any{
+			"window_hand_count": 5, "directional_fold_win_rate": 0.6,
+		},
+		EffectiveAt:              events[0].Payload.PlayedAt,
+		EmittedAt:                "2026-07-20T00:00:01Z",
+		FeatureDefinitionVersion: events[0].Payload.FeatureDefinitionVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events[0].UpstreamRuleEvidence = []RuleEvidenceEvent{evidence}
+	scorer, err := NewScorer(testBundle(t), &fakeBackend{}, func() time.Time {
+		return time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scorer.pairRulesEnabled = false
+	result, err := scorer.ScoreHand(context.Background(), events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RuleEvidenceEvents) != 1 || result.RuleEvidenceEvents[0].EventID != evidence.EventID ||
+		len(result.RuleEvidenceEventIDs) != 1 || result.RuleEvidenceEventIDs[0] != evidence.EventID {
+		t.Fatal("upstream Flink evidence was not retained when local pair rules were disabled")
+	}
+
+	events[0].UpstreamRuleEvidence[0].Payload.ObservationRevision = 2
+	if _, err := scorer.ScoreHand(context.Background(), events); err == nil ||
+		!strings.Contains(err.Error(), "upstream rule evidence") {
+		t.Fatalf("expected mismatched upstream evidence rejection, got %v", err)
 	}
 }
 

@@ -142,6 +142,13 @@ version, source revision, snapshot revision, timestamp, and trace fields. These
 fields validate ownership, completeness, ordering, lineage, corrections, and
 deduplication. They are not direct CatBoost input columns.
 
+The event may also carry `upstream_rule_evidence`, a bounded list of complete
+`poker.rule-evidence.v1` records produced by stateful Flink rules. The Go scorer
+validates that each record has the same tenant, product, dataset, split, trace,
+hand, pair, revision, effective time, and feature version as its feature event.
+This is transport and audit metadata only: it is never flattened into the
+model vector and cannot change CatBoost probability.
+
 For a six-player hand, the Go scorer waits for all 15 unique pair snapshots for
 the same tenant and hand. A higher `snapshot_revision` can replace a prior
 snapshot and trigger deterministic re-scoring during the correction window.
@@ -305,6 +312,7 @@ The following values are required for processing but not included in the
 - Context and snapshot revision numbers.
 - Raw event timestamps; only derived age and recency values are used.
 - Kafka partition, offset, producer, and ingestion metadata.
+- Validated upstream rule-evidence records and their deterministic IDs.
 
 Keeping identity outside the model prevents user, pair, table, tenant, or split
 memorization. These fields still enforce isolation, deterministic replay,

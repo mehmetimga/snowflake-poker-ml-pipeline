@@ -28,6 +28,12 @@ observations remain separate events so a rule can be versioned, disabled, or
 audited without changing model calibration. B2 evaluates the six governed
 pair rules and populates these references in Go scoring.
 
+B3 adds `pair.repeated-fold-to-partner-wins:v1` in Java/Flink. Flink embeds the
+complete event in the pair snapshot's optional `upstream_rule_evidence` field;
+the Go scorer validates it and publishes it before the referencing score. This
+keeps cross-topic acknowledgement and input-offset commit behavior in one
+service.
+
 ## Pair rules v1
 
 The frozen definitions are in
@@ -50,6 +56,20 @@ The independently measurable rules-only benchmark remains exactly:
 The two directional evidence events therefore describe separate observations,
 while the legacy benchmark continues to use their maximum. Evidence scores are
 not summed into either the benchmark or CatBoost probability.
+
+## Stateful pair rule v1
+
+The frozen definition is
+[`schemas/rules/stateful-pair-rules-v1.json`](../schemas/rules/stateful-pair-rules-v1.json).
+The offline Python oracle and Java transition consume the same golden sequence
+in
+[`schemas/examples/stateful-fold-rule-v1.golden.json`](../schemas/examples/stateful-fold-rule-v1.golden.json).
+
+The rule uses a 24-hour rolling event-time window, five-hand eligibility floor,
+three-event directional count, `0.6` directional-rate threshold, two-minute
+allowed lateness, 48-hour correction horizon, and 72-hour state TTL. It emits
+soft evidence only. It does not trigger an enforcement action or alter model
+probability.
 
 ## Payload
 
@@ -127,4 +147,11 @@ probability-invariance gate with:
 
 ```bash
 make phase-b2-check
+```
+
+Run the B3 Python/Java golden parity, checkpoint-state round trip, correction,
+lateness, and Go transport gate with:
+
+```bash
+make phase-b3-check
 ```

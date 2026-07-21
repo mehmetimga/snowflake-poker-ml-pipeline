@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from pipeline.events import (
     CurrentHandPairFeatures,
@@ -16,6 +17,7 @@ from pipeline.events import (
     PairFeaturePayload,
     PairHistoryFeatures,
     UserHistoryFeatures,
+    build_rule_evidence_event,
 )
 from pipeline.ml.pair_model import rules_only_score
 from pipeline.rules import (
@@ -212,3 +214,35 @@ def test_rule_replay_is_idempotent_and_zero_signals_do_not_fire() -> None:
 
     assert evaluate_pair_rules(zero_event, emitted_at=emitted_at) == []
     assert rules_only_pair_score(zero_event) == 0.0
+
+
+def test_pair_feature_transport_validates_upstream_flink_rule_evidence() -> None:
+    event, _ = _golden_event()
+    evidence = build_rule_evidence_event(
+        tenant_id=event.tenant_id,
+        product_id=event.product_id,
+        dataset_id=event.dataset_id,
+        dataset_split=event.dataset_split,
+        trace_id=event.trace_id,
+        rule_id="pair.repeated-fold-to-partner-wins",
+        rule_version=1,
+        rule_owner="risk-analytics",
+        entity_type="pair",
+        entity_key=event.payload.pair_key,
+        hand_id=event.payload.hand_id,
+        observation_revision=event.payload.snapshot_revision,
+        severity="high",
+        raw_score=60,
+        evidence={"window_hand_count": 5, "directional_fold_win_rate": 0.6},
+        effective_at=event.payload.played_at,
+        emitted_at=event.emitted_at,
+    )
+    value = event.model_dump(mode="json")
+    value["upstream_rule_evidence"] = [evidence.model_dump(mode="json")]
+
+    validated = PairFeatureEvent.model_validate(value)
+    assert validated.upstream_rule_evidence[0]["event_id"] == str(evidence.event_id)
+
+    value["upstream_rule_evidence"][0]["payload"]["observation_revision"] = 4
+    with pytest.raises(ValidationError, match="deterministic replay identity"):
+        PairFeatureEvent.model_validate(value)

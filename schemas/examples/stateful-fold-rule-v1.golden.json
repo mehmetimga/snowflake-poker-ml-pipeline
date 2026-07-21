@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "tenant_id": "tenant-golden",
+    "product_id": "poker",
+    "dataset_id": "stateful-rules-golden-v1",
+    "dataset_split": "validation",
+    "pair_key": "player-a:player-b",
+    "trace_id": "20000000-0000-5000-8000-000000000002"
+  },
+  "operations": [
+    {"event_id": "10000000-0000-5000-8000-000000000001", "hand_id": "hand-1", "played_at": "2026-07-21T00:00:00Z", "emitted_at": "2026-07-21T00:00:01Z", "snapshot_revision": 1, "a_fold_b_win": true,  "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 1, "expected_count": 1, "expected_rate": 1.0, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000002", "hand_id": "hand-2", "played_at": "2026-07-21T01:00:00Z", "emitted_at": "2026-07-21T01:00:01Z", "snapshot_revision": 1, "a_fold_b_win": true,  "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 2, "expected_count": 2, "expected_rate": 1.0, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000003", "hand_id": "hand-3", "played_at": "2026-07-21T02:00:00Z", "emitted_at": "2026-07-21T02:00:01Z", "snapshot_revision": 1, "a_fold_b_win": false, "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 3, "expected_count": 2, "expected_rate": 0.666666667, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000004", "hand_id": "hand-4", "played_at": "2026-07-21T03:00:00Z", "emitted_at": "2026-07-21T03:00:01Z", "snapshot_revision": 1, "a_fold_b_win": true,  "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 4, "expected_count": 3, "expected_rate": 0.75, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000005", "hand_id": "hand-5", "played_at": "2026-07-21T04:00:00Z", "emitted_at": "2026-07-21T04:00:01Z", "snapshot_revision": 1, "a_fold_b_win": false, "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 5, "expected_count": 3, "expected_rate": 0.6, "expected_rule_event_id": "cf54d9fb-7d5a-5493-b1d7-0b5f57bc5c6b"},
+    {"event_id": "10000000-0000-5000-8000-000000000005", "hand_id": "hand-5", "played_at": "2026-07-21T04:00:00Z", "emitted_at": "2026-07-21T04:00:01Z", "snapshot_revision": 1, "a_fold_b_win": false, "b_fold_a_win": false, "expected_status": "duplicate", "expected_hands": 5, "expected_count": 3, "expected_rate": 0.6, "expected_rule_event_id": "cf54d9fb-7d5a-5493-b1d7-0b5f57bc5c6b"},
+    {"event_id": "10000000-0000-5000-8000-000000000103", "hand_id": "hand-3", "played_at": "2026-07-21T02:00:00Z", "emitted_at": "2026-07-21T05:00:01Z", "snapshot_revision": 2, "a_fold_b_win": true,  "b_fold_a_win": false, "expected_status": "corrected", "expected_hands": 3, "expected_count": 3, "expected_rate": 1.0, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000003", "hand_id": "hand-3", "played_at": "2026-07-21T02:00:00Z", "emitted_at": "2026-07-21T02:00:01Z", "snapshot_revision": 1, "a_fold_b_win": false, "b_fold_a_win": false, "expected_status": "stale",     "expected_hands": 0, "expected_count": 0, "expected_rate": 0.0, "expected_rule_event_id": null},
+    {"event_id": "10000000-0000-5000-8000-000000000006", "hand_id": "hand-6", "played_at": "2026-07-21T05:00:00Z", "emitted_at": "2026-07-21T05:00:01Z", "snapshot_revision": 1, "a_fold_b_win": false, "b_fold_a_win": false, "expected_status": "accepted",  "expected_hands": 6, "expected_count": 4, "expected_rate": 0.666666667, "expected_rule_event_id": "5e8253c7-e6b7-550d-b977-e117b28dbd29"},
+    {"event_id": "10000000-0000-5000-8000-000000000099", "hand_id": "hand-old", "played_at": "2026-07-18T00:00:00Z", "emitted_at": "2026-07-21T06:00:01Z", "snapshot_revision": 1, "a_fold_b_win": true, "b_fold_a_win": false, "watermark": "2026-07-21T06:00:00Z", "expected_status": "too_late", "expected_hands": 0, "expected_count": 0, "expected_rate": 0.0, "expected_rule_event_id": null}
+  ]
+}

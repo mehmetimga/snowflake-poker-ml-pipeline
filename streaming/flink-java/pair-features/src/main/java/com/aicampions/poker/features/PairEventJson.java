@@ -102,6 +102,20 @@ final class PairEventJson {
         return requireText(parse(value), "pair_key");
     }
 
+    static String scopedPairKey(String value) {
+        return scopedPairKey(parse(value));
+    }
+
+    static String scopedPairKey(JsonNode root) {
+        return String.join(
+                "\u001f",
+                requireText(root, "tenant_id"),
+                requireText(root, "product_id"),
+                requireText(root, "dataset_id"),
+                requireText(root, "dataset_split"),
+                requireText(root.path("payload"), "pair_key"));
+    }
+
     static long occurredAtMs(String value) {
         return parseInstant(requireText(parse(value), "occurred_at")).toEpochMilli();
     }

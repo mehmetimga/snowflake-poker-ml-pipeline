@@ -5,6 +5,13 @@ from .pair_evidence import (
     evaluate_pair_rules,
     rules_only_pair_score,
 )
+from .stateful_pair import (
+    REPEATED_FOLD_RULE_CONFIG,
+    RepeatedFoldRuleConfig,
+    RepeatedFoldWindowRule,
+    StatefulPairObservation,
+    StatefulRuleResult,
+)
 from .types import PlayerHandStats, RuleFlags, RuleWeights
 
 __all__ = [
@@ -15,6 +22,11 @@ __all__ = [
     "PairRuleDefinition",
     "evaluate_pair_rules",
     "rules_only_pair_score",
+    "REPEATED_FOLD_RULE_CONFIG",
+    "RepeatedFoldRuleConfig",
+    "RepeatedFoldWindowRule",
+    "StatefulPairObservation",
+    "StatefulRuleResult",
     "PlayerHandStats",
     "RuleFlags",
     "RuleWeights",

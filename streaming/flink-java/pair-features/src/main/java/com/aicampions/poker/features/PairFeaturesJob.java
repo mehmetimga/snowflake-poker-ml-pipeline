@@ -71,13 +71,31 @@ public final class PairFeaturesJob {
                 .name("rolling-pair-features")
                 .uid("rolling-pair-features-v1");
 
+        StatefulFoldRuleEngine.Config statefulRuleConfig = new StatefulFoldRuleEngine.Config(
+                Math.multiplyExact(config.statefulRuleWindowHours(), 3_600_000L),
+                config.statefulRuleMinimumHands(),
+                config.statefulRuleMinimumDirectionalCount(),
+                config.statefulRuleRateThreshold(),
+                config.statefulRuleAllowedLatenessMs(),
+                Math.multiplyExact(config.statefulRuleCorrectionHorizonHours(), 3_600_000L));
+        SingleOutputStreamOperator<String> scoringPairs = pairFeatures
+                .keyBy(PairEventJson::scopedPairKey, Types.STRING)
+                .process(
+                        new StatefulPairRuleFunction(
+                                config.statefulRuleStateTtlHours(),
+                                config.outputTopic(),
+                                statefulRuleConfig),
+                        Types.STRING)
+                .name("stateful-pair-rules")
+                .uid("stateful-pair-rules-v1");
+
         KafkaSink<String> outputSink = KafkaSink.<String>builder()
                 .setBootstrapServers(config.bootstrapServers())
                 .setKafkaProducerConfig(config.kafkaProperties())
                 .setRecordSerializer(new KeyedJsonKafkaSerializer(config.outputTopic(), true))
                 .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
                 .build();
-        pairFeatures.sinkTo(outputSink)
+        scoringPairs.sinkTo(outputSink)
                 .name("pair-feature-sink")
                 .uid("pair-feature-sink-v1");
 
@@ -85,7 +103,8 @@ public final class PairFeaturesJob {
                 .union(
                         userHistory.getSideOutput(DeadLetters.TAG),
                         pairObservations.getSideOutput(DeadLetters.TAG),
-                        pairFeatures.getSideOutput(DeadLetters.TAG));
+                        pairFeatures.getSideOutput(DeadLetters.TAG),
+                        scoringPairs.getSideOutput(DeadLetters.TAG));
         KafkaSink<String> deadLetterSink = KafkaSink.<String>builder()
                 .setBootstrapServers(config.bootstrapServers())
                 .setKafkaProducerConfig(config.kafkaProperties())
@@ -128,6 +147,13 @@ public final class PairFeaturesJob {
             long outOfOrdernessMs,
             long idleSourceTimeoutMs,
             long stateTtlHours,
+            long statefulRuleWindowHours,
+            int statefulRuleMinimumHands,
+            int statefulRuleMinimumDirectionalCount,
+            double statefulRuleRateThreshold,
+            long statefulRuleAllowedLatenessMs,
+            long statefulRuleCorrectionHorizonHours,
+            long statefulRuleStateTtlHours,
             long checkpointIntervalMs,
             int parallelism,
             Properties kafkaProperties) {
@@ -149,19 +175,37 @@ public final class PairFeaturesJob {
             long outOfOrderness = longValue(args, "out-of-orderness-ms", 30_000L, 0L);
             long idle = longValue(args, "idle-source-timeout-ms", 60_000L, 1L);
             long ttl = longValue(args, "state-ttl-hours", 720L, 1L);
+            long ruleWindow = longValue(args, "stateful-rule-window-hours", 24L, 1L);
+            int ruleMinimumHands = Math.toIntExact(
+                    longValue(args, "stateful-rule-minimum-hands", 5L, 1L));
+            int ruleMinimumDirectional = Math.toIntExact(
+                    longValue(args, "stateful-rule-minimum-directional-count", 3L, 1L));
+            double ruleRate = doubleValue(
+                    args, "stateful-rule-rate-threshold", 0.6, 0.0, 1.0);
+            long ruleLateness = longValue(
+                    args, "stateful-rule-allowed-lateness-ms", 120_000L, 0L);
+            long correctionHorizon = longValue(
+                    args, "stateful-rule-correction-horizon-hours", 48L, ruleWindow);
+            long ruleTtl = longValue(
+                    args, "stateful-rule-state-ttl-hours", 72L, correctionHorizon);
             long checkpoint = longValue(args, "checkpoint-interval-ms", 30_000L, 0L);
             int parallelism = Math.toIntExact(longValue(args, "parallelism", 1L, 1L));
             return new JobConfig(
                     bootstrap, input, output, dlq, group, fromBeginning, bounded,
-                    outOfOrderness, idle, ttl, checkpoint, parallelism,
+                    outOfOrderness, idle, ttl,
+                    ruleWindow, ruleMinimumHands, ruleMinimumDirectional, ruleRate,
+                    ruleLateness, correctionHorizon, ruleTtl,
+                    checkpoint, parallelism,
                     kafkaProperties(environment));
         }
 
         String safeSummary() {
             return String.format(
                     "{\"job\":\"pair-features\",\"input\":\"%s\","
-                            + "\"output\":\"%s\",\"feature_version\":\"%s\"}",
-                    inputTopic, outputTopic, PairEventJson.FEATURE_VERSION);
+                            + "\"output\":\"%s\",\"feature_version\":\"%s\","
+                            + "\"stateful_rule\":\"%s\"}",
+                    inputTopic, outputTopic, PairEventJson.FEATURE_VERSION,
+                    StatefulFoldRuleEngine.RULE_ID);
         }
 
         private static Map<String, String> parseArguments(String[] arguments) {
@@ -198,6 +242,21 @@ public final class PairFeaturesJob {
             long value = Long.parseLong(args.getOrDefault(key, Long.toString(fallback)));
             if (value < minimum) {
                 throw new IllegalArgumentException("--" + key + " must be >= " + minimum);
+            }
+            return value;
+        }
+
+        private static double doubleValue(
+                Map<String, String> args,
+                String key,
+                double fallback,
+                double minimum,
+                double maximum) {
+            double value = Double.parseDouble(
+                    args.getOrDefault(key, Double.toString(fallback)));
+            if (!Double.isFinite(value) || value < minimum || value > maximum) {
+                throw new IllegalArgumentException(
+                        "--" + key + " must be in [" + minimum + ", " + maximum + "]");
             }
             return value;
         }

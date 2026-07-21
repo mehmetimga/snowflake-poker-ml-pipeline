@@ -418,6 +418,9 @@ class PairFeatureEvent(_ContractModel):
     emitted_at: datetime
     trace_id: uuid.UUID
     payload: PairFeaturePayload
+    upstream_rule_evidence: list[dict[str, Any]] = Field(
+        default_factory=list, max_length=32
+    )
 
     @model_validator(mode="after")
     def validate_times(self) -> "PairFeatureEvent":
@@ -425,6 +428,28 @@ class PairFeatureEvent(_ContractModel):
             raise ValueError("event timestamps must include timezone information")
         if self.occurred_at != self.payload.played_at:
             raise ValueError("derived occurred_at must equal hand played_at")
+        seen: set[uuid.UUID] = set()
+        for raw in self.upstream_rule_evidence:
+            evidence = RuleEvidenceEvent.model_validate(raw)
+            if evidence.event_id in seen:
+                raise ValueError("upstream rule-evidence references must be unique")
+            seen.add(evidence.event_id)
+            if (
+                evidence.tenant_id != self.tenant_id
+                or evidence.product_id != self.product_id
+                or evidence.dataset_id != self.dataset_id
+                or evidence.dataset_split != self.dataset_split
+                or evidence.trace_id != self.trace_id
+                or evidence.payload.entity_type != "pair"
+                or evidence.payload.entity_key != self.payload.pair_key
+                or evidence.payload.hand_id != self.payload.hand_id
+                or evidence.payload.observation_revision
+                != self.payload.snapshot_revision
+                or evidence.payload.effective_at != self.payload.played_at
+                or evidence.payload.feature_definition_version
+                != self.payload.feature_definition_version
+            ):
+                raise ValueError("upstream rule evidence does not match pair snapshot")
         return self
 
 

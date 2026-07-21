@@ -24,17 +24,18 @@ var forbiddenInferenceFields = map[string]struct{}{
 }
 
 type PairFeatureEvent struct {
-	EventID       string             `json:"event_id"`
-	EventType     string             `json:"event_type"`
-	SchemaVersion int                `json:"schema_version"`
-	TenantID      string             `json:"tenant_id"`
-	ProductID     string             `json:"product_id"`
-	DatasetID     string             `json:"dataset_id"`
-	DatasetSplit  string             `json:"dataset_split"`
-	OccurredAt    string             `json:"occurred_at"`
-	EmittedAt     string             `json:"emitted_at"`
-	TraceID       string             `json:"trace_id"`
-	Payload       PairFeaturePayload `json:"payload"`
+	EventID              string              `json:"event_id"`
+	EventType            string              `json:"event_type"`
+	SchemaVersion        int                 `json:"schema_version"`
+	TenantID             string              `json:"tenant_id"`
+	ProductID            string              `json:"product_id"`
+	DatasetID            string              `json:"dataset_id"`
+	DatasetSplit         string              `json:"dataset_split"`
+	OccurredAt           string              `json:"occurred_at"`
+	EmittedAt            string              `json:"emitted_at"`
+	TraceID              string              `json:"trace_id"`
+	Payload              PairFeaturePayload  `json:"payload"`
+	UpstreamRuleEvidence []RuleEvidenceEvent `json:"upstream_rule_evidence,omitempty"`
 }
 
 type PairFeaturePayload struct {
@@ -123,6 +124,28 @@ func (event PairFeatureEvent) Validate(expectedFeatureVersion string) error {
 		}
 		if err := rejectPrivateFields(group); err != nil {
 			return err
+		}
+	}
+	if len(event.UpstreamRuleEvidence) > 32 {
+		return fmt.Errorf("upstream rule evidence must contain at most 32 records")
+	}
+	seenEvidence := make(map[string]struct{}, len(event.UpstreamRuleEvidence))
+	for _, evidence := range event.UpstreamRuleEvidence {
+		if err := evidence.Validate(); err != nil {
+			return fmt.Errorf("invalid upstream rule evidence: %w", err)
+		}
+		if _, duplicate := seenEvidence[evidence.EventID]; duplicate {
+			return fmt.Errorf("upstream rule-evidence references must be unique")
+		}
+		seenEvidence[evidence.EventID] = struct{}{}
+		if evidence.TenantID != event.TenantID || evidence.ProductID != event.ProductID ||
+			evidence.DatasetID != event.DatasetID || evidence.DatasetSplit != event.DatasetSplit ||
+			evidence.TraceID != event.TraceID || evidence.Payload.EntityType != "pair" ||
+			evidence.Payload.EntityKey != payload.PairKey || evidence.Payload.HandID != payload.HandID ||
+			evidence.Payload.ObservationRevision != payload.SnapshotRevision ||
+			evidence.Payload.EffectiveAt != payload.PlayedAt ||
+			evidence.Payload.FeatureDefinitionVersion != payload.FeatureDefinitionVersion {
+			return fmt.Errorf("upstream rule evidence does not match pair snapshot")
 		}
 	}
 	return nil

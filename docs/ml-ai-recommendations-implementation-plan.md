@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 7 |
+| Plan version | 8 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase B3 — first stateful Flink rule |
+| Immediate next phase | Phase B4 — decision-policy separation |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -340,18 +340,26 @@ need a database lookup or new Flink state.
 Add a Flink rule only when it needs ordered state not already summarized by the
 pair-feature event. Candidate stateful patterns:
 
-- [ ] repeated fold-to-partner wins in a time window;
+- [x] repeated fold-to-partner wins in a time window;
 - [ ] persistent one-direction chip flow;
 - [ ] synchronized table or session movement;
 - [ ] coordinated action timing;
 - [ ] changing shared device/network relationships.
 
-For each rule:
+The first vertical slice is complete. Additional candidates remain deferred
+until shadow data shows they add useful, non-duplicative evidence. For the
+implemented repeated-fold rule:
 
-- [ ] define key, state, watermark, lateness, TTL, and correction semantics;
-- [ ] add duplicate and replay tests;
-- [ ] add online/offline reference parity; and
-- [ ] expose firing rate, lag, and state-size metrics.
+- [x] define key, state, watermark, lateness, TTL, and correction semantics;
+- [x] add duplicate, stale-revision, correction, late-event, and restart tests;
+- [x] add Python-offline/Java-online golden parity; and
+- [x] expose evaluation, firing, duplicate, correction, stale, late-event,
+  event-time-lag, and state-size metrics.
+
+The rule is soft evidence only. Flink embeds its complete governed evidence in
+the pair-feature event; Go validates it and publishes evidence before the score
+and alert in the existing acknowledged output batch. It does not alter the
+58-value CatBoost vector or calibrated probability.
 
 ### B4. Decision-policy separation
 
@@ -756,18 +764,34 @@ Completed slice — Phase B2:
 7. [x] Keep a separately measurable rules-only benchmark; do not create a
    manually weighted probability blend.
 
-Immediate next slice — Phase B3:
+Completed slice — Phase B3:
 
-1. [ ] Select one stateful pattern for the first vertical slice; start with
+1. [x] Select one stateful pattern for the first vertical slice; start with
    repeated fold-to-partner wins in a bounded event-time window.
-2. [ ] Freeze its rule identity, semantics, key, window, watermark, lateness,
+2. [x] Freeze its rule identity, semantics, key, window, watermark, lateness,
    TTL, correction behavior, severity, and rollout date.
-3. [ ] Add an offline Python reference evaluator over ordered pair events.
-4. [ ] Add matching keyed Java/Flink state and emit the existing
-   `poker.rule-evidence.v1` contract.
-5. [ ] Prove duplicate, restart, late-event, correction, and Python/Flink
+3. [x] Add an offline Python reference evaluator over ordered pair events.
+4. [x] Add matching checkpointed keyed Java/Flink state and carry the existing
+   `poker.rule-evidence.v1` contract to the Go transactional output boundary.
+5. [x] Prove duplicate, restart, late-event, correction, and Python/Flink
    replay parity before enabling the rule in a deployed job.
-6. [ ] Add firing-rate, event-time lag, state-size, and checkpoint metrics.
+6. [x] Add evaluation/firing counters, event-time lag, keyed state size, and
+   checkpointed state coverage.
+
+Immediate next slice — Phase B4:
+
+1. [ ] Define a versioned decision-policy contract separate from model scores
+   and rule evidence.
+2. [ ] Classify every current B2/B3 rule as soft evidence; configure no hard
+   enforcement rule until risk owners approve one.
+3. [ ] Define mandatory-review semantics for any future hard policy rule,
+   including explicit reason codes and independent audit records.
+4. [ ] Keep malformed/late data on quality and DLQ paths rather than turning
+   it into fraud evidence.
+5. [ ] Add Go policy evaluation, deterministic decision IDs, replay tests,
+   rule-version lineage, and probability-invariance tests.
+6. [ ] Add policy firing-rate and review-volume gates before any shadow
+   deployment.
 
 ## 13. Progress log
 
@@ -784,3 +808,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | A | Completed registry generalization with a JSON Schema and hash-bound model-family-neutral candidate evidence. Registry schema v2 enforces one champion per tenant/product/benchmark scope, exact operational run binding, manual approval, immutable candidate evidence, and rollback identity. Current model-specific metric paths exist only in the legacy adapter. | Registry tests: 6 passed; real registry build/check: passed; complete `make phase12-check`: passed; production remains `pair-catboost-v1:pair_7a1c58c1046b`; OOF stack remains `rejected` | Phase A complete with no production change. Phase B rule-evidence contract is next |
 | 2026-07-21 | B1 | Added `poker.rule-evidence.v1` in Python and Go, a shared cross-language UUIDv5 fixture, recursive label/model/policy leakage rejection, score/alert evidence references, managed Kafka topic configuration, and idempotent warehouse event plus score/model-run lineage persistence. | `make phase-b1-check`: 14 Python tests and Go risk/stream suites passed; `go test ./...`: passed; `make phase12-check`: passed; shared revision-aware ID `8bcfb4e4-2113-52c3-85c2-a6ca4cb19823`; migration `011_rule_evidence.sql` exercised through DuckDB | B1 complete. No rules are evaluated and CatBoost probability is unchanged; B2 Go pair-rule parity is next |
 | 2026-07-21 | B2 | Froze six pair-rule definitions, added a pure Python reference and matching pre-inference Go evaluator, retained the exact rules-only formula, emitted deterministic evidence with score/alert references, and published evidence before its score and alert in one acknowledged batch. | `make phase-b2-check`: 18 Python tests plus Go risk/stream suites passed; cross-language golden score `0.8475`; replay IDs matched and higher snapshot revisions produced distinct IDs; enabled/disabled Go scorer probabilities and decisions matched; `go test ./...`: passed; `make phase12-check`: passed | B2 complete with no probability blend and no production deployment change. Phase B remains in progress; the first stateful Java/Flink rule is next |
+| 2026-07-21 | B3 | Implemented the first stateful rule, `pair.repeated-fold-to-partner-wins`, as a 24-hour event-time window with scoped keyed state, deterministic corrections, lateness handling, 72-hour TTL, metrics, and Python/Java replay parity. Flink carries complete evidence to Go, which validates and publishes it atomically with the corresponding score/alert batch. | `make phase-b3-check`: 22 Python tests, 7 Java tests, and Go risk/stream suites passed; shared golden evidence IDs matched across Python and Java; checkpoint restore, duplicate, correction, stale, late-event, transport-validation, and probability-invariance paths passed | First B3 vertical slice complete with no deployed-job or probability change. Other stateful candidates are deferred pending shadow evidence; B4 decision-policy separation is next |

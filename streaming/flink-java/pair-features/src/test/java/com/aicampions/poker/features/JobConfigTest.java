@@ -17,7 +17,11 @@ class JobConfigTest {
                     "--from-beginning",
                     "--bounded",
                     "--checkpoint-interval-ms", "0",
-                    "--state-ttl-hours", "24"
+                    "--state-ttl-hours", "24",
+                    "--stateful-rule-window-hours", "12",
+                    "--stateful-rule-rate-threshold", "0.75",
+                    "--stateful-rule-correction-horizon-hours", "24",
+                    "--stateful-rule-state-ttl-hours", "36"
                 },
                 Map.of());
 
@@ -27,6 +31,10 @@ class JobConfigTest {
         assertTrue(config.bounded());
         assertEquals(0, config.checkpointIntervalMs());
         assertEquals(24, config.stateTtlHours());
+        assertEquals(12, config.statefulRuleWindowHours());
+        assertEquals(0.75, config.statefulRuleRateThreshold());
+        assertEquals(24, config.statefulRuleCorrectionHorizonHours());
+        assertEquals(36, config.statefulRuleStateTtlHours());
     }
 
     @Test

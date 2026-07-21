@@ -322,6 +322,7 @@ enriched player row
   -> keyBy(player_id) -> prior user history
   -> keyBy(hand_id)   -> collect six rows and create 15 pairs
   -> keyBy(pair_key)  -> prior pair history and final feature event
+  -> keyBy(scoped pair key) -> rolling Rules v2 state and evidence transport
 ```
 
 ### 5.1 Prior-only user history
@@ -381,7 +382,28 @@ If the same Kafka record is delivered again, or a correction arrives for the
 same hand, the frozen snapshot is reused and the pair aggregate is not updated
 again.
 
-### 5.4 Streaming algorithms used in Flink
+### 5.4 Stateful Rules v2 window
+
+[StatefulPairRuleFunction.java](../streaming/flink-java/pair-features/src/main/java/com/aicampions/poker/features/StatefulPairRuleFunction.java)
+adds the first rule that cannot be evaluated from a single snapshot. Its key
+includes tenant, product, dataset, split, and canonical pair, preventing state
+from crossing security or benchmark boundaries.
+
+`pair.repeated-fold-to-partner-wins:v1` keeps the latest revision of each hand
+for 48 hours and evaluates a rolling 24-hour event-time window. It fires when
+the window has at least five hands and one fold/win direction has at least
+three occurrences and rate `>= 0.6`. Duplicate input replays deterministic
+evidence; a higher revision replaces the retained hand; a lower revision is
+stale; and an unseen event older than watermark minus two minutes does not
+mutate state.
+
+The complete rule contract is embedded in the pair event's optional
+`upstream_rule_evidence` array. This array is transport metadata, not part of
+the 58-value model tensor. Go validates its scope, hand, revision, feature
+version, and deterministic ID, then publishes it in the same acknowledged
+batch as the referencing score and optional alert.
+
+### 5.5 Streaming algorithms used in Flink
 
 These are algorithms, but they are deterministic stream-processing algorithms,
 not trained ML models:
@@ -396,6 +418,7 @@ not trained ML models:
 | Combination generation | Hand assembly | Turn six player rows into 15 canonical pairs |
 | Deterministic event-time ordering | Pair timers | Make replay stable under cross-partition disorder |
 | Prior-only snapshotting | User/pair state | Prevent a hand from leaking into its own input features |
+| Rolling Rules v2 window | Scoped pair state | Detect repeated directional fold/win behavior in event time |
 | UUIDv5 identity | Output builders | Produce stable IDs for replay and downstream upsert |
 
 Feature formulas and nine-decimal cross-language rounding live in
@@ -494,7 +517,8 @@ outputs.
 | Primary v1 model | CatBoost exported to ONNX | Yes | No; Go/ONNX or optional Triton |
 | Calibration | Platt scaling | Yes | No; Go scorer |
 | Decision policy | frozen probability threshold and aggregation | Yes | No; Go scorer |
-| Explainability/rules | evidence codes and deterministic rules | Yes | No; scorer/sink path |
+| Stateless explainability rules | deterministic snapshot evidence | Yes | No; Go scorer |
+| Stateful explainability rules | keyed rolling event-time windows | Yes | Yes; Java/Flink |
 | Deep sequence models | LSTM/Transformer research challengers | Not in v1 hot path | No; offline training |
 | Graph models | VGAE/HGT research challengers | Not in v1 hot path | No; DGX/offline training |
 
@@ -511,6 +535,7 @@ A checkpoint should include:
 
 - Kafka source offsets;
 - all keyed user, hand, context, and pair state;
+- latest-hand state for the rolling Rules v2 window;
 - pending event-time timers; and
 - sink progress supported by the configured delivery guarantee.
 
