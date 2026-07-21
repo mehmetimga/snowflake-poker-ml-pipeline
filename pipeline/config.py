@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     kafka_risk_scores_topic: str = Field(
         "poker.risk-scores.v1", alias="KAFKA_RISK_SCORES_TOPIC"
     )
+    kafka_rule_evidence_topic: str = Field(
+        "poker.rule-evidence.v1", alias="KAFKA_RULE_EVIDENCE_TOPIC"
+    )
     kafka_risk_alerts_topic: str = Field(
         "poker.risk-alerts.v1", alias="KAFKA_RISK_ALERTS_TOPIC"
     )

@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 5 |
+| Plan version | 7 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase B — versioned rule-evidence contract |
+| Immediate next phase | Phase B3 — first stateful Flink rule |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -273,7 +273,7 @@ Production effect: none. CatBoost run `pair_7a1c58c1046b` remains active.
 
 ## 5. Phase B — Versioned Rules v2
 
-Status: `NEXT`
+Status: `IN PROGRESS`
 
 Purpose: add explainable, governed evidence without replacing or silently
 changing CatBoost probability.
@@ -292,6 +292,7 @@ rule_owner
 entity_type
 entity_key
 hand_id
+observation_revision
 severity
 raw_score
 evidence
@@ -302,31 +303,37 @@ trace_id
 
 Recommended Kafka topic: `poker.rule-evidence.v1`.
 
-- [ ] Add the Python event contract and forbidden-field validation.
-- [ ] Add the equivalent Go structure and validation.
-- [ ] Add schema examples and round-trip fixtures.
-- [ ] Use deterministic IDs so replay is idempotent.
-- [ ] Reference rule evidence from score and alert events.
-- [ ] Add Snowflake persistence with tenant and model-run lineage.
+- [x] Add the Python event contract and forbidden-field validation.
+- [x] Add the equivalent Go structure and validation.
+- [x] Add schema examples and round-trip fixtures.
+- [x] Use deterministic IDs so replay is idempotent.
+- [x] Reference rule evidence from score and alert events.
+- [x] Add Snowflake persistence with tenant and model-run lineage.
+
+The contract, replay algorithm, safety boundary, Kafka routing, and warehouse
+lineage are documented in
+[`docs/rule-evidence-v1.md`](rule-evidence-v1.md). B1 established the contract;
+B2 now populates the evidence-reference array from inference-safe pair
+features without altering probability.
 
 ### B2. Port inference-safe pair rules to Go
 
 Port the existing pair baseline first:
 
-- [ ] one player folded while the other won;
-- [ ] same device;
-- [ ] same network;
-- [ ] outcome asymmetry;
-- [ ] A-fold/B-win rate;
-- [ ] B-fold/A-win rate.
+- [x] one player folded while the other won;
+- [x] same device;
+- [x] same network;
+- [x] outcome asymmetry;
+- [x] A-fold/B-win rate;
+- [x] B-fold/A-win rate.
 
 The current 58-value feature record already carries these inputs. They do not
 need a database lookup or new Flink state.
 
-- [ ] Create Python/Go golden parity fixtures.
-- [ ] Emit structured evidence, not only a weighted sum.
-- [ ] Keep the rules-only benchmark independently measurable.
-- [ ] Store rule versions with every affected risk score.
+- [x] Create Python/Go golden parity fixtures.
+- [x] Emit structured evidence, not only a weighted sum.
+- [x] Keep the rules-only benchmark independently measurable.
+- [x] Store rule versions with every affected risk score.
 
 ### B3. Stateful Flink rules
 
@@ -351,8 +358,8 @@ For each rule:
 - [ ] Hard policy rules create mandatory review with explicit reasons.
 - [ ] Soft behavioral rules attach evidence and analyst filters.
 - [ ] Data-quality violations remain DLQ events, not fraud evidence.
-- [ ] CatBoost calibrated probability stays unchanged in Rules v2.
-- [ ] No manually weighted probability blend is introduced.
+- [x] CatBoost calibrated probability stays unchanged in Rules v2.
+- [x] No manually weighted probability blend is introduced.
 
 If probability fusion is proposed later, it must use OOF predictions and the
 normal model promotion process.
@@ -361,9 +368,9 @@ normal model promotion process.
 
 Every rule must have:
 
-- [ ] owner and description;
-- [ ] version and effective date;
-- [ ] unit and replay tests;
+- [x] owner and description;
+- [x] version and effective date;
+- [x] unit and replay tests;
 - [ ] precision, recall, firing rate, and alert-volume report;
 - [ ] segment and drift monitoring;
 - [ ] rollback procedure; and
@@ -376,13 +383,13 @@ is not evaluated against circular truth.
 
 Phase B is complete when:
 
-- [ ] Python and Go rule outputs match exactly on golden fixtures;
-- [ ] Kafka replay produces the same evidence IDs and revisions;
-- [ ] no rule reads a database in the hot path;
-- [ ] all scores retain model, feature, policy, and rule versions;
+- [x] Python and Go rule outputs match exactly on golden fixtures;
+- [x] Kafka replay produces the same evidence IDs and revisions;
+- [x] no rule reads a database in the hot path;
+- [x] all scores retain model, feature, policy, and rule versions;
 - [ ] hard versus soft behavior is explicit;
 - [ ] rule dashboards and alerts exist; and
-- [ ] CatBoost predictions remain bit-for-bit unchanged.
+- [x] CatBoost predictions remain bit-for-bit unchanged.
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
@@ -718,20 +725,49 @@ Fifth pull-request-sized slice:
 7. [x] Adapt the current CatBoost and OOF-stack artifacts and add the registry
    tests to `phase12-check`.
 
-Immediate next slice — Phase B1:
+Completed slice — Phase B1:
 
-1. [ ] Define `poker.rule-evidence.v1` in Python and Go.
-2. [ ] Specify tenant/product scope, deterministic event IDs, rule ownership,
+1. [x] Define `poker.rule-evidence.v1` in Python and Go.
+2. [x] Specify tenant/product scope, deterministic event IDs, rule ownership,
    version/effective time, entity and hand identity, severity, raw score,
    structured evidence, feature version, and trace lineage.
-3. [ ] Reject labels, private challenge fields, final model probability, and
+3. [x] Reject labels, private challenge fields, final model probability, and
    decision-policy output from the rule-evidence payload.
-4. [ ] Add shared JSON fixtures and Python/Go round-trip and replay-idempotency
+4. [x] Add shared JSON fixtures and Python/Go round-trip and replay-idempotency
    tests.
-5. [ ] Reference rule-evidence IDs from risk-score and alert contracts without
+5. [x] Reference rule-evidence IDs from risk-score and alert contracts without
    changing CatBoost probability.
-6. [ ] Add the Snowflake table and tenant/model-run lineage migration only
+6. [x] Add the Snowflake table and tenant/model-run lineage migration only
    after the event contract passes locally.
+
+Completed slice — Phase B2:
+
+1. [x] Freeze rule IDs, owners, versions, thresholds, severities, and effective
+   dates for the six inference-safe pair rules.
+2. [x] Implement a pure Python reference evaluator using only the current-hand,
+   context, and prior pair-history feature groups.
+3. [x] Implement the matching Go evaluator before model inference.
+4. [x] Produce one structured `RuleEvidenceEvent` per fired rule and attach its
+   deterministic ID to the hand's score and optional alert.
+5. [x] Publish rule evidence in the same acknowledged output batch as the score
+   so offsets cannot commit partial audit evidence.
+6. [x] Add Python/Go golden parity fixtures, replay tests, output-order tests,
+   and probability-invariance tests.
+7. [x] Keep a separately measurable rules-only benchmark; do not create a
+   manually weighted probability blend.
+
+Immediate next slice — Phase B3:
+
+1. [ ] Select one stateful pattern for the first vertical slice; start with
+   repeated fold-to-partner wins in a bounded event-time window.
+2. [ ] Freeze its rule identity, semantics, key, window, watermark, lateness,
+   TTL, correction behavior, severity, and rollout date.
+3. [ ] Add an offline Python reference evaluator over ordered pair events.
+4. [ ] Add matching keyed Java/Flink state and emit the existing
+   `poker.rule-evidence.v1` contract.
+5. [ ] Prove duplicate, restart, late-event, correction, and Python/Flink
+   replay parity before enabling the rule in a deployed job.
+6. [ ] Add firing-rate, event-time lag, state-size, and checkpoint metrics.
 
 ## 13. Progress log
 
@@ -746,3 +782,5 @@ Add dated entries here as phases move:
 | 2026-07-21 | A | Added validation-only five-seed CatBoost robustness evidence and bound its warning into the governed model card. The loader allowlists only train/validation; deterministic recomputation passed without test, challenge, or stored prediction reads. Also moved the Go operational build cache to a writable temporary directory for managed-workspace execution. | Seeds `11,23,42,67,101`; validation PR-AUC `[0.145587, 0.225296]`; relative spread `0.416905`; status `warning`; seed tests: 2 passed; `--recompute`: passed; `make phase12-check`: passed | Do not select the best seed or change production. Phase A remains in progress; generator/scenario holdouts and generic registry schema are next |
 | 2026-07-21 | A | Added independent generator-seed summaries and four true leave-one-scenario-family-out CatBoost evaluations. Scenario lineage is stored only in a private evaluation sidecar; held-out hands are absent from training/calibration and challenge is never loaded. Bound results into the governed model card. | Generator seeds: train `42`, validation `10042`, test `20042`; unseen-family PR-AUC: `soft_play=0.078057`, `chip_dump=0.318533`, `squeeze_collude=0.230247`, `fold_benefit=0.429689`; 300 hand bootstraps; scenario tests: 2 passed; deterministic `--recompute`: passed; `make phase12-check`: passed | No scenario model selected and no production change. Phase A remains in progress; generic candidate registry schema is next |
 | 2026-07-21 | A | Completed registry generalization with a JSON Schema and hash-bound model-family-neutral candidate evidence. Registry schema v2 enforces one champion per tenant/product/benchmark scope, exact operational run binding, manual approval, immutable candidate evidence, and rollback identity. Current model-specific metric paths exist only in the legacy adapter. | Registry tests: 6 passed; real registry build/check: passed; complete `make phase12-check`: passed; production remains `pair-catboost-v1:pair_7a1c58c1046b`; OOF stack remains `rejected` | Phase A complete with no production change. Phase B rule-evidence contract is next |
+| 2026-07-21 | B1 | Added `poker.rule-evidence.v1` in Python and Go, a shared cross-language UUIDv5 fixture, recursive label/model/policy leakage rejection, score/alert evidence references, managed Kafka topic configuration, and idempotent warehouse event plus score/model-run lineage persistence. | `make phase-b1-check`: 14 Python tests and Go risk/stream suites passed; `go test ./...`: passed; `make phase12-check`: passed; shared revision-aware ID `8bcfb4e4-2113-52c3-85c2-a6ca4cb19823`; migration `011_rule_evidence.sql` exercised through DuckDB | B1 complete. No rules are evaluated and CatBoost probability is unchanged; B2 Go pair-rule parity is next |
+| 2026-07-21 | B2 | Froze six pair-rule definitions, added a pure Python reference and matching pre-inference Go evaluator, retained the exact rules-only formula, emitted deterministic evidence with score/alert references, and published evidence before its score and alert in one acknowledged batch. | `make phase-b2-check`: 18 Python tests plus Go risk/stream suites passed; cross-language golden score `0.8475`; replay IDs matched and higher snapshot revisions produced distinct IDs; enabled/disabled Go scorer probabilities and decisions matched; `go test ./...`: passed; `make phase12-check`: passed | B2 complete with no probability blend and no production deployment change. Phase B remains in progress; the first stateful Java/Flink rule is next |

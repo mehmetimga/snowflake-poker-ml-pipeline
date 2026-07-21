@@ -39,11 +39,12 @@ type HandScorer interface {
 }
 
 type Config struct {
-	InputTopic      string
-	RiskScoresTopic string
-	RiskAlertsTopic string
-	DeadLetterTopic string
-	AllowedTenants  []string
+	InputTopic        string
+	RiskScoresTopic   string
+	RuleEvidenceTopic string
+	RiskAlertsTopic   string
+	DeadLetterTopic   string
+	AllowedTenants    []string
 }
 
 type ProcessResult struct {
@@ -66,7 +67,7 @@ type Processor struct {
 }
 
 func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssembler, publisher Publisher, committer Committer, clock func() time.Time) (*Processor, error) {
-	if config.InputTopic == "" || config.RiskScoresTopic == "" || config.RiskAlertsTopic == "" || config.DeadLetterTopic == "" {
+	if config.InputTopic == "" || config.RiskScoresTopic == "" || config.RuleEvidenceTopic == "" || config.RiskAlertsTopic == "" || config.DeadLetterTopic == "" {
 		return nil, fmt.Errorf("all stream topics are required")
 	}
 	if scorer == nil || assembler == nil || publisher == nil || committer == nil {
@@ -139,7 +140,7 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	if err != nil {
 		return ProcessResult{}, fmt.Errorf("build outputs for hand %s: %w", event.Payload.HandID, err)
 	}
-	outputs, err := processor.outputRecords(scoreEvent, alertEvent)
+	outputs, err := processor.outputRecords(result.RuleEvidenceEvents, scoreEvent, alertEvent)
 	if err != nil {
 		return ProcessResult{}, err
 	}
@@ -156,12 +157,32 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	}, err
 }
 
-func (processor *Processor) outputRecords(score risk.RiskScoreEvent, alert *risk.RiskAlertEvent) ([]OutputRecord, error) {
+func (processor *Processor) outputRecords(ruleEvidence []risk.RuleEvidenceEvent, score risk.RiskScoreEvent, alert *risk.RiskAlertEvent) ([]OutputRecord, error) {
+	if len(ruleEvidence) != len(score.Payload.RuleEvidenceEventIDs) {
+		return nil, fmt.Errorf("rule evidence batch does not match score references")
+	}
+	outputs := make([]OutputRecord, 0, len(ruleEvidence)+2)
+	for index, event := range ruleEvidence {
+		if err := event.Validate(); err != nil {
+			return nil, fmt.Errorf("validate rule evidence: %w", err)
+		}
+		if event.EventID != score.Payload.RuleEvidenceEventIDs[index] {
+			return nil, fmt.Errorf("rule evidence order does not match score references")
+		}
+		value, err := json.Marshal(event)
+		if err != nil {
+			return nil, fmt.Errorf("marshal rule evidence: %w", err)
+		}
+		key := event.Payload.EntityType + ":" + event.Payload.EntityKey
+		outputs = append(outputs, OutputRecord{
+			Topic: processor.config.RuleEvidenceTopic, Key: []byte(key), Value: value,
+		})
+	}
 	scoreValue, err := json.Marshal(score)
 	if err != nil {
 		return nil, fmt.Errorf("marshal risk score: %w", err)
 	}
-	outputs := []OutputRecord{{Topic: processor.config.RiskScoresTopic, Key: []byte(score.Payload.HandID), Value: scoreValue}}
+	outputs = append(outputs, OutputRecord{Topic: processor.config.RiskScoresTopic, Key: []byte(score.Payload.HandID), Value: scoreValue})
 	if alert != nil {
 		alertValue, err := json.Marshal(alert)
 		if err != nil {

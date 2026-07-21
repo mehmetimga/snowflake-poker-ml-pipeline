@@ -1,0 +1,32 @@
+{
+  "dataset_id": "context-full-v2",
+  "dataset_split": "test",
+  "emitted_at": "2026-07-21T10:15:00.250000Z",
+  "event_id": "8bcfb4e4-2113-52c3-85c2-a6ca4cb19823",
+  "event_type": "poker.rule-evidence.recorded",
+  "occurred_at": "2026-07-21T10:15:00Z",
+  "payload": {
+    "effective_at": "2026-07-21T10:15:00Z",
+    "entity_key": "player-a:player-b",
+    "entity_type": "pair",
+    "evidence": {
+      "directional_fold_win_rate": 0.72,
+      "hands_together": 42,
+      "one_folded_other_won": true,
+      "rule_threshold": 0.6
+    },
+    "feature_definition_version": "pair-features-v1",
+    "hand_id": "H-000042",
+    "observation_revision": 1,
+    "raw_score": 72.0,
+    "rule_event_id": "8bcfb4e4-2113-52c3-85c2-a6ca4cb19823",
+    "rule_id": "pair.fold-benefit",
+    "rule_owner": "risk-analytics",
+    "rule_version": 1,
+    "severity": "high"
+  },
+  "product_id": "poker",
+  "schema_version": 1,
+  "tenant_id": "tenant-a",
+  "trace_id": "11111111-1111-5111-8111-111111111111"
+}

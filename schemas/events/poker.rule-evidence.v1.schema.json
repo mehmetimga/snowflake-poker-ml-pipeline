@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poker-ml.example/schemas/events/poker.rule-evidence.v1.schema.json",
+  "title": "Poker Rule Evidence v1",
+  "description": "Inference-safe evidence emitted by one governed rule evaluation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "tenant_id",
+    "product_id",
+    "dataset_id",
+    "dataset_split",
+    "occurred_at",
+    "emitted_at",
+    "trace_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {"$ref": "#/$defs/uuid"},
+    "event_type": {"const": "poker.rule-evidence.recorded"},
+    "schema_version": {"const": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {"type": "string", "minLength": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "trace_id": {"$ref": "#/$defs/uuid"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_event_id",
+        "rule_id",
+        "rule_version",
+        "rule_owner",
+        "entity_type",
+        "entity_key",
+        "hand_id",
+        "observation_revision",
+        "severity",
+        "raw_score",
+        "evidence",
+        "effective_at",
+        "feature_definition_version"
+      ],
+      "properties": {
+        "rule_event_id": {"$ref": "#/$defs/uuid"},
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]+$"
+        },
+        "rule_version": {"type": "integer", "minimum": 1},
+        "rule_owner": {"type": "string", "minLength": 1},
+        "entity_type": {
+          "enum": ["pair", "player", "hand", "session", "account"]
+        },
+        "entity_key": {"type": "string", "minLength": 1},
+        "hand_id": {"type": "string", "minLength": 1},
+        "observation_revision": {"type": "integer", "minimum": 1},
+        "severity": {
+          "enum": ["info", "low", "medium", "high", "critical"]
+        },
+        "raw_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "evidence": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Structured observations; private labels and final model/policy output fields are rejected by runtime validators."
+        },
+        "effective_at": {"type": "string", "format": "date-time"},
+        "feature_definition_version": {"const": "pair-features-v1"}
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

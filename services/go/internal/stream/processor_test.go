@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,8 +13,9 @@ import (
 )
 
 type fakeScorer struct {
-	contract risk.ScoringContract
-	calls    int
+	contract           risk.ScoringContract
+	calls              int
+	ruleEvidenceEvents []risk.RuleEvidenceEvent
 }
 
 func (scorer *fakeScorer) Contract() risk.ScoringContract { return scorer.contract }
@@ -36,6 +38,10 @@ func (scorer *fakeScorer) ScoreHand(_ context.Context, events []risk.PairFeature
 		playerScores = append(playerScores, risk.PlayerScore{PlayerID: playerID, RiskProbability: 0.9, Alert: true})
 	}
 	first := events[0]
+	ruleEvidenceEventIDs := make([]string, 0, len(scorer.ruleEvidenceEvents))
+	for _, event := range scorer.ruleEvidenceEvents {
+		ruleEvidenceEventIDs = append(ruleEvidenceEventIDs, event.EventID)
+	}
 	return &risk.ScoreResult{
 		ScoreID:  "0123456789abcdef0123456789abcdef",
 		TenantID: first.TenantID, ProductID: first.ProductID,
@@ -44,14 +50,17 @@ func (scorer *fakeScorer) ScoreHand(_ context.Context, events []risk.PairFeature
 		ModelName: "pair-catboost-v1", ModelRunID: "pair_test_run",
 		FeatureDefinitionVersion: "pair-features-v1", DecisionPolicyVersion: 1,
 		DecisionThreshold: 0.8, ServiceImplementation: "go-risk-scorer",
-		ServiceBuildVersion: "test-build",
-		ScoredAt:            "2026-07-20T00:01:00Z", PairScores: pairs, PlayerScores: playerScores,
+		ServiceBuildVersion:  "test-build",
+		ScoredAt:             "2026-07-20T00:01:00Z",
+		RuleEvidenceEventIDs: ruleEvidenceEventIDs, RuleEvidenceEvents: scorer.ruleEvidenceEvents,
+		PairScores: pairs, PlayerScores: playerScores,
 		HandRiskProbability: 0.9, Alert: true,
 	}, nil
 }
 
 type fakePublisher struct {
 	records []OutputRecord
+	batches [][]OutputRecord
 	err     error
 }
 
@@ -59,6 +68,7 @@ func (publisher *fakePublisher) Publish(_ context.Context, records []OutputRecor
 	if publisher.err != nil {
 		return publisher.err
 	}
+	publisher.batches = append(publisher.batches, append([]OutputRecord(nil), records...))
 	publisher.records = append(publisher.records, records...)
 	return nil
 }
@@ -113,7 +123,7 @@ func newTestProcessor(t *testing.T, publisher *fakePublisher, committer *fakeCom
 		t.Fatal(err)
 	}
 	processor, err := NewProcessor(Config{
-		InputTopic: "pairs", RiskScoresTopic: "scores", RiskAlertsTopic: "alerts", DeadLetterTopic: "dlq",
+		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules", RiskAlertsTopic: "alerts", DeadLetterTopic: "dlq",
 	}, scorer, assembler, publisher, committer, func() time.Time {
 		return time.Date(2026, 7, 20, 0, 1, 0, 0, time.UTC)
 	})
@@ -151,6 +161,95 @@ func TestProcessorPublishesBeforeCommittingCompleteHand(t *testing.T) {
 	}
 	if len(committer.calls) != 1 || committer.calls[0][0].Offset != 14 {
 		t.Fatalf("expected commit through offset 14, got %+v", committer.calls)
+	}
+}
+
+func TestProcessorPublishesRuleEvidenceScoreAndAlertInOneAcknowledgedBatch(t *testing.T) {
+	publisher, committer := &fakePublisher{}, &fakeCommitter{}
+	processor, scorer := newTestProcessor(t, publisher, committer)
+	evidence, err := risk.BuildRuleEvidenceEvent(risk.RuleEvidenceInput{
+		TenantID: "tenant", ProductID: "poker", DatasetID: "dataset", DatasetSplit: "test",
+		TraceID: "00000000-0000-5000-8000-000000000099",
+		RuleID:  "pair.same-device", RuleVersion: 1, RuleOwner: "trust-platform",
+		EntityType: "pair", EntityKey: "a:b", HandID: "hand-atomic",
+		Severity: "high", RawScore: 100,
+		Evidence: map[string]any{
+			"feature_name": "same_device", "observed_value": 1.0, "snapshot_revision": 1,
+		},
+		EffectiveAt: "2026-07-20T00:00:00Z", EmittedAt: "2026-07-20T00:01:00Z",
+		FeatureDefinitionVersion: "pair-features-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scorer.ruleEvidenceEvents = []risk.RuleEvidenceEvent{evidence}
+
+	var completed ProcessResult
+	for index, event := range pairEvents("hand-atomic") {
+		value, _ := json.Marshal(event)
+		completed, err = processor.Handle(context.Background(), InputRecord{
+			RecordRef: RecordRef{Topic: "pairs", Partition: 0, Offset: int64(index)},
+			Key:       []byte(event.Payload.PairKey), Value: value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if completed.OutputCount != 3 || len(publisher.batches) != 1 || len(publisher.batches[0]) != 3 {
+		t.Fatalf("expected one three-record output batch, got result=%+v batches=%d", completed, len(publisher.batches))
+	}
+	batch := publisher.batches[0]
+	if batch[0].Topic != "rules" || string(batch[0].Key) != "pair:a:b" ||
+		batch[1].Topic != "scores" || batch[2].Topic != "alerts" {
+		t.Fatalf("unexpected atomic output order: %+v", batch)
+	}
+	var score risk.RiskScoreEvent
+	if err := json.Unmarshal(batch[1].Value, &score); err != nil {
+		t.Fatal(err)
+	}
+	if len(score.Payload.RuleEvidenceEventIDs) != 1 || score.Payload.RuleEvidenceEventIDs[0] != evidence.EventID {
+		t.Fatal("published score did not reference its preceding rule evidence")
+	}
+	if len(committer.calls) != 1 {
+		t.Fatal("input offsets must commit only after the complete output batch")
+	}
+}
+
+func TestKafkaReplayReproducesRuleEvidenceIDsAndRevisions(t *testing.T) {
+	evidence, err := risk.BuildRuleEvidenceEvent(risk.RuleEvidenceInput{
+		TenantID: "tenant", ProductID: "poker", DatasetID: "dataset", DatasetSplit: "test",
+		TraceID: "00000000-0000-5000-8000-000000000099",
+		RuleID:  "pair.same-device", RuleVersion: 1, RuleOwner: "trust-platform",
+		EntityType: "pair", EntityKey: "a:b", HandID: "hand-replay",
+		Severity: "high", RawScore: 100,
+		Evidence: map[string]any{
+			"feature_name": "same_device", "observed_value": 1.0, "snapshot_revision": 1,
+		},
+		EffectiveAt: "2026-07-20T00:00:00Z", EmittedAt: "2026-07-20T00:01:00Z",
+		FeatureDefinitionVersion: "pair-features-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runReplay := func() []OutputRecord {
+		publisher, committer := &fakePublisher{}, &fakeCommitter{}
+		processor, scorer := newTestProcessor(t, publisher, committer)
+		scorer.ruleEvidenceEvents = []risk.RuleEvidenceEvent{evidence}
+		for index, event := range pairEvents("hand-replay") {
+			value, _ := json.Marshal(event)
+			if _, err := processor.Handle(context.Background(), InputRecord{
+				RecordRef: RecordRef{Topic: "pairs", Partition: 0, Offset: int64(index)},
+				Key:       []byte(event.Payload.PairKey), Value: value,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return publisher.records
+	}
+
+	first, replay := runReplay(), runReplay()
+	if !reflect.DeepEqual(first, replay) {
+		t.Fatal("replayed Kafka input changed evidence identity, revision, or output")
 	}
 }
 
@@ -219,7 +318,7 @@ func TestProcessorDeadLettersUnauthorizedTenant(t *testing.T) {
 	scorer.contract.FeatureDefinitionVersion = "pair-features-v1"
 	assembler, _ := risk.NewHandAssembler(15, time.Hour)
 	processor, err := NewProcessor(Config{
-		InputTopic: "pairs", RiskScoresTopic: "scores", RiskAlertsTopic: "alerts",
+		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules", RiskAlertsTopic: "alerts",
 		DeadLetterTopic: "dlq", AllowedTenants: []string{"tenant-a"},
 	}, scorer, assembler, publisher, committer, nil)
 	if err != nil {

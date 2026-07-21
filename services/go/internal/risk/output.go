@@ -25,6 +25,7 @@ type RiskScorePayload struct {
 	ServiceImplementation    string        `json:"service_implementation"`
 	ServiceBuildVersion      string        `json:"service_build_version"`
 	ScoredAt                 string        `json:"scored_at"`
+	RuleEvidenceEventIDs     []string      `json:"rule_evidence_event_ids"`
 	PairScores               []PairScore   `json:"pair_scores"`
 	PlayerScores             []PlayerScore `json:"player_scores"`
 	HandRiskProbability      float64       `json:"hand_risk_probability"`
@@ -59,6 +60,7 @@ type RiskAlertPayload struct {
 	DecisionThreshold        float64       `json:"decision_threshold"`
 	ServiceImplementation    string        `json:"service_implementation"`
 	ServiceBuildVersion      string        `json:"service_build_version"`
+	RuleEvidenceEventIDs     []string      `json:"rule_evidence_event_ids"`
 	RiskProbability          float64       `json:"risk_probability"`
 	HighestRiskPair          PairScore     `json:"highest_risk_pair"`
 	HighestRiskPlayers       []PlayerScore `json:"highest_risk_players"`
@@ -86,7 +88,11 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 	if result.DecisionPolicyVersion < 1 || result.ServiceImplementation == "" || result.ServiceBuildVersion == "" {
 		return RiskScoreEvent{}, nil, fmt.Errorf("score audit versions are incomplete")
 	}
+	if err := validateRuleEvidenceReferences(result.RuleEvidenceEventIDs); err != nil {
+		return RiskScoreEvent{}, nil, err
+	}
 	scoreEventID := stableUUID(RiskScoreEventType, result.ScoreID)
+	ruleEvidenceEventIDs := append([]string{}, result.RuleEvidenceEventIDs...)
 	scoreEvent := RiskScoreEvent{
 		EventID: scoreEventID, EventType: RiskScoreEventType, SchemaVersion: 1,
 		TenantID: result.TenantID, ProductID: result.ProductID,
@@ -100,7 +106,8 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 			DecisionThreshold:        result.DecisionThreshold,
 			ServiceImplementation:    result.ServiceImplementation,
 			ServiceBuildVersion:      result.ServiceBuildVersion, ScoredAt: result.ScoredAt,
-			PairScores: result.PairScores, PlayerScores: result.PlayerScores,
+			RuleEvidenceEventIDs: ruleEvidenceEventIDs,
+			PairScores:           result.PairScores, PlayerScores: result.PlayerScores,
 			HandRiskProbability: result.HandRiskProbability, Alert: result.Alert,
 		},
 	}
@@ -138,6 +145,7 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 			DecisionThreshold:        result.DecisionThreshold,
 			ServiceImplementation:    result.ServiceImplementation,
 			ServiceBuildVersion:      result.ServiceBuildVersion,
+			RuleEvidenceEventIDs:     append([]string{}, ruleEvidenceEventIDs...),
 			RiskProbability:          result.HandRiskProbability,
 			HighestRiskPair:          highest, HighestRiskPlayers: players, ScoredAt: result.ScoredAt,
 		},

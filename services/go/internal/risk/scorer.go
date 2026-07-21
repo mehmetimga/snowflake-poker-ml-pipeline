@@ -34,27 +34,29 @@ type PlayerScore struct {
 }
 
 type ScoreResult struct {
-	ScoreID                  string        `json:"score_id"`
-	TenantID                 string        `json:"tenant_id"`
-	ProductID                string        `json:"product_id"`
-	DatasetID                string        `json:"dataset_id"`
-	DatasetSplit             string        `json:"dataset_split"`
-	TraceID                  string        `json:"trace_id"`
-	HandID                   string        `json:"hand_id"`
-	TableID                  string        `json:"table_id"`
-	PlayedAt                 string        `json:"played_at"`
-	ModelName                string        `json:"model_name"`
-	ModelRunID               string        `json:"model_run_id"`
-	FeatureDefinitionVersion string        `json:"feature_definition_version"`
-	DecisionPolicyVersion    int           `json:"decision_policy_version"`
-	DecisionThreshold        float64       `json:"decision_threshold"`
-	ServiceImplementation    string        `json:"service_implementation"`
-	ServiceBuildVersion      string        `json:"service_build_version"`
-	ScoredAt                 string        `json:"scored_at"`
-	PairScores               []PairScore   `json:"pair_scores"`
-	PlayerScores             []PlayerScore `json:"player_scores"`
-	HandRiskProbability      float64       `json:"hand_risk_probability"`
-	Alert                    bool          `json:"alert"`
+	ScoreID                  string              `json:"score_id"`
+	TenantID                 string              `json:"tenant_id"`
+	ProductID                string              `json:"product_id"`
+	DatasetID                string              `json:"dataset_id"`
+	DatasetSplit             string              `json:"dataset_split"`
+	TraceID                  string              `json:"trace_id"`
+	HandID                   string              `json:"hand_id"`
+	TableID                  string              `json:"table_id"`
+	PlayedAt                 string              `json:"played_at"`
+	ModelName                string              `json:"model_name"`
+	ModelRunID               string              `json:"model_run_id"`
+	FeatureDefinitionVersion string              `json:"feature_definition_version"`
+	DecisionPolicyVersion    int                 `json:"decision_policy_version"`
+	DecisionThreshold        float64             `json:"decision_threshold"`
+	ServiceImplementation    string              `json:"service_implementation"`
+	ServiceBuildVersion      string              `json:"service_build_version"`
+	ScoredAt                 string              `json:"scored_at"`
+	RuleEvidenceEventIDs     []string            `json:"rule_evidence_event_ids"`
+	RuleEvidenceEvents       []RuleEvidenceEvent `json:"-"`
+	PairScores               []PairScore         `json:"pair_scores"`
+	PlayerScores             []PlayerScore       `json:"player_scores"`
+	HandRiskProbability      float64             `json:"hand_risk_probability"`
+	Alert                    bool                `json:"alert"`
 }
 
 type Scorer struct {
@@ -62,6 +64,7 @@ type Scorer struct {
 	backend             InferenceBackend
 	clock               func() time.Time
 	serviceBuildVersion string
+	pairRulesEnabled    bool
 }
 
 func NewScorer(bundle *ArtifactBundle, backend InferenceBackend, clock func() time.Time) (*Scorer, error) {
@@ -81,7 +84,10 @@ func NewScorerWithBuildVersion(bundle *ArtifactBundle, backend InferenceBackend,
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Scorer{bundle: bundle, backend: backend, clock: clock, serviceBuildVersion: buildVersion}, nil
+	return &Scorer{
+		bundle: bundle, backend: backend, clock: clock,
+		serviceBuildVersion: buildVersion, pairRulesEnabled: true,
+	}, nil
 }
 
 func (scorer *Scorer) Ready(ctx context.Context) error {
@@ -129,6 +135,18 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 	}
 	if err := validateCompletePairSet(players, pairKeys); err != nil {
 		return nil, err
+	}
+
+	scoredAt := scorer.clock().UTC()
+	ruleEvidenceEvents := make([]RuleEvidenceEvent, 0)
+	if scorer.pairRulesEnabled {
+		for _, event := range events {
+			fired, err := EvaluatePairRules(event, scoredAt)
+			if err != nil {
+				return nil, fmt.Errorf("evaluate pair rules for %s: %w", event.Payload.PairKey, err)
+			}
+			ruleEvidenceEvents = append(ruleEvidenceEvents, fired...)
+		}
 	}
 
 	outputs, err := scorer.backend.Infer(ctx, scorer.bundle.Contract.Input.Name, scorer.bundle.Contract.Output.Name, rows)
@@ -187,6 +205,11 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 		})
 	}
 
+	ruleEvidenceEventIDs := make([]string, 0, len(ruleEvidenceEvents))
+	for _, event := range ruleEvidenceEvents {
+		ruleEvidenceEventIDs = append(ruleEvidenceEventIDs, event.EventID)
+	}
+
 	return &ScoreResult{
 		ScoreID:  scoreIdentity(scorer.bundle.Contract.RunID, events),
 		TenantID: first.TenantID, ProductID: first.ProductID,
@@ -196,9 +219,11 @@ func (scorer *Scorer) ScoreHand(ctx context.Context, events []PairFeatureEvent) 
 		FeatureDefinitionVersion: scorer.bundle.Contract.FeatureDefinitionVersion,
 		DecisionPolicyVersion:    scorer.bundle.Policy.PolicyVersion,
 		DecisionThreshold:        threshold, ServiceImplementation: "go-risk-scorer",
-		ServiceBuildVersion: scorer.serviceBuildVersion,
-		ScoredAt:            scorer.clock().UTC().Format(time.RFC3339Nano),
-		PairScores:          pairScores, PlayerScores: playerScores,
+		ServiceBuildVersion:  scorer.serviceBuildVersion,
+		ScoredAt:             scoredAt.Format(time.RFC3339Nano),
+		RuleEvidenceEventIDs: ruleEvidenceEventIDs,
+		RuleEvidenceEvents:   ruleEvidenceEvents,
+		PairScores:           pairScores, PlayerScores: playerScores,
 		HandRiskProbability: handRisk, Alert: handRisk >= threshold,
 	}, nil
 }

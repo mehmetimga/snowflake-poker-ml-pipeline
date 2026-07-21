@@ -13,6 +13,10 @@ bounded TTL so a higher `snapshot_revision` can re-score a corrected hand.
 Every score and alert carries the decision-policy version, service
 implementation, and immutable build version; set `--build-version` (or
 `RISK_SERVICE_BUILD_VERSION`) to the deployed image/source identifier.
+Both outputs also carry `rule_evidence_event_ids`. Rules v2 evaluates the six
+governed, inference-safe pair signals before Triton inference and emits one
+separate evidence record for each fired rule. Rule evidence is never blended
+into the model probability.
 
 Run from the repository root:
 
@@ -54,12 +58,14 @@ loopback address such as `--pprof-listen 127.0.0.1:6060`. Non-loopback pprof
 listeners are rejected.
 
 The Kafka adapter uses the same `HandAssembler` and `Scorer` interfaces. It
-consumes `poker.pair-features.v1`, publishes a complete audit decision to
-`poker.risk-scores.v1`, and emits threshold-crossing events to
-`poker.risk-alerts.v1`. Input offsets become committable only after synchronous
-output acknowledgement. Invalid input is acknowledged only after a versioned
-dead-letter write. Score and alert IDs are deterministic, so replayed
-at-least-once output can be deduplicated downstream.
+consumes `poker.pair-features.v1`, publishes fired observations to
+`poker.rule-evidence.v1`, a complete audit decision to `poker.risk-scores.v1`,
+and threshold-crossing events to `poker.risk-alerts.v1`. Evidence precedes its
+referencing score and alert in one synchronous publish call. Input offsets
+become committable only after the whole output batch is acknowledged. Invalid
+input is acknowledged only after a versioned dead-letter write. All output IDs
+are deterministic, so replayed at-least-once output can be deduplicated
+downstream.
 
 The current pair-feature topic is keyed by `pair_key`, which can spread one
 hand over multiple partitions. Run exactly one `risk-kafka` consumer replica

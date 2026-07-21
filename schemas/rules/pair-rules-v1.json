@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "feature_definition_version": "pair-features-v1",
+  "rules_only_benchmark": {
+    "formula": "0.20*one_folded_other_won + 0.20*same_device + 0.20*same_network + 0.15*outcome_asymmetry + 0.25*max(a_fold_b_win_rate,b_fold_a_win_rate)",
+    "range": [0.0, 1.0],
+    "probability_blend": false
+  },
+  "rules": [
+    {
+      "rule_id": "pair.one-folded-other-won",
+      "rule_version": 1,
+      "rule_owner": "risk-analytics",
+      "description": "One player folded in the current hand while the other won.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "medium",
+      "feature_group": "current_hand",
+      "feature_name": "one_folded_other_won",
+      "operator": "eq",
+      "threshold": 1.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.2,
+      "benchmark_aggregation": "add"
+    },
+    {
+      "rule_id": "pair.same-device",
+      "rule_version": 1,
+      "rule_owner": "trust-platform",
+      "description": "Both players were linked to the same device in event-time context.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "high",
+      "feature_group": "context",
+      "feature_name": "same_device",
+      "operator": "eq",
+      "threshold": 1.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.2,
+      "benchmark_aggregation": "add"
+    },
+    {
+      "rule_id": "pair.same-network",
+      "rule_version": 1,
+      "rule_owner": "trust-platform",
+      "description": "Both players were linked to the same network cluster in event-time context.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "medium",
+      "feature_group": "context",
+      "feature_name": "same_network",
+      "operator": "eq",
+      "threshold": 1.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.2,
+      "benchmark_aggregation": "add"
+    },
+    {
+      "rule_id": "pair.outcome-asymmetry",
+      "rule_version": 1,
+      "rule_owner": "risk-analytics",
+      "description": "Prior-only pair winnings are asymmetric.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "low",
+      "feature_group": "pair_history",
+      "feature_name": "outcome_asymmetry",
+      "operator": "gt",
+      "threshold": 0.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.15,
+      "benchmark_aggregation": "add"
+    },
+    {
+      "rule_id": "pair.a-fold-b-win-rate",
+      "rule_version": 1,
+      "rule_owner": "risk-analytics",
+      "description": "Prior-only rate at which player A folded and player B won is non-zero.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "medium",
+      "feature_group": "pair_history",
+      "feature_name": "a_fold_b_win_rate",
+      "operator": "gt",
+      "threshold": 0.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.25,
+      "benchmark_aggregation": "max_directional"
+    },
+    {
+      "rule_id": "pair.b-fold-a-win-rate",
+      "rule_version": 1,
+      "rule_owner": "risk-analytics",
+      "description": "Prior-only rate at which player B folded and player A won is non-zero.",
+      "effective_from": "2026-07-21T00:00:00Z",
+      "severity": "medium",
+      "feature_group": "pair_history",
+      "feature_name": "b_fold_a_win_rate",
+      "operator": "gt",
+      "threshold": 0.0,
+      "raw_score_multiplier": 100.0,
+      "benchmark_weight": 0.25,
+      "benchmark_aggregation": "max_directional"
+    }
+  ]
+}

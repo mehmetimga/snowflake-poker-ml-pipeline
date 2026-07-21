@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -118,8 +119,14 @@ func testEvents() []PairFeatureEvent {
 					SourceRevisionA: 1, SourceRevisionB: 1,
 					SnapshotRevision: 1, FeatureDefinitionVersion: "pair-features-v1",
 					ContextStatusA: "matched", ContextStatusB: "matched", ContextVersionA: intPointer(1), ContextVersionB: intPointer(1),
-					CurrentHand: map[string]any{"signal": signal}, Context: map[string]any{},
-					UserHistoryA: map[string]any{}, UserHistoryB: map[string]any{}, PairHistory: map[string]any{},
+					CurrentHand: map[string]any{
+						"signal": signal, "one_folded_other_won": false,
+					},
+					Context:      map[string]any{"same_device": false, "same_network": false},
+					UserHistoryA: map[string]any{}, UserHistoryB: map[string]any{},
+					PairHistory: map[string]any{
+						"outcome_asymmetry": 0.0, "a_fold_b_win_rate": 0.0, "b_fold_a_win_rate": 0.0,
+					},
 				},
 			})
 		}
@@ -224,6 +231,46 @@ func TestScorerCalibratesAndAggregatesCompleteHand(t *testing.T) {
 	}
 }
 
+func TestEnablingPairRulesDoesNotChangeModelProbabilityOrDecision(t *testing.T) {
+	events := testEvents()
+	events[0].Payload.CurrentHand["one_folded_other_won"] = true
+	events[0].Payload.Context["same_device"] = true
+	events[0].Payload.Context["same_network"] = true
+	events[0].Payload.PairHistory["outcome_asymmetry"] = 0.4
+	events[0].Payload.PairHistory["a_fold_b_win_rate"] = 0.25
+	events[0].Payload.PairHistory["b_fold_a_win_rate"] = 0.75
+	clock := func() time.Time { return time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC) }
+
+	enabled, err := NewScorer(testBundle(t), &fakeBackend{}, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := NewScorer(testBundle(t), &fakeBackend{}, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled.pairRulesEnabled = false
+
+	withRules, err := enabled.ScoreHand(context.Background(), events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutRules, err := disabled.ScoreHand(context.Background(), events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(withRules.PairScores, withoutRules.PairScores) ||
+		!reflect.DeepEqual(withRules.PlayerScores, withoutRules.PlayerScores) ||
+		withRules.HandRiskProbability != withoutRules.HandRiskProbability ||
+		withRules.Alert != withoutRules.Alert {
+		t.Fatal("rule evaluation changed model probability or threshold decision")
+	}
+	if len(withRules.RuleEvidenceEvents) != 6 || len(withRules.RuleEvidenceEventIDs) != 6 ||
+		len(withoutRules.RuleEvidenceEvents) != 0 || len(withoutRules.RuleEvidenceEventIDs) != 0 {
+		t.Fatalf("unexpected rule evidence counts enabled=%d disabled=%d", len(withRules.RuleEvidenceEvents), len(withoutRules.RuleEvidenceEvents))
+	}
+}
+
 func TestOutputEventsUseDeterministicIDsAndAlertReference(t *testing.T) {
 	scorer, err := NewScorer(testBundle(t), &fakeBackend{}, func() time.Time {
 		return time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
@@ -235,6 +282,7 @@ func TestOutputEventsUseDeterministicIDsAndAlertReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	result.RuleEvidenceEventIDs = []string{"8bcfb4e4-2113-52c3-85c2-a6ca4cb19823"}
 	firstScore, firstAlert, err := BuildOutputEvents(result)
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +299,26 @@ func TestOutputEventsUseDeterministicIDsAndAlertReference(t *testing.T) {
 	}
 	if firstAlert.Payload.RiskScoreEventID != firstScore.EventID || firstAlert.Payload.HighestRiskPair.PairKey != "a:b" {
 		t.Fatalf("alert does not reference the score/highest pair: %+v", firstAlert.Payload)
+	}
+	if len(firstScore.Payload.RuleEvidenceEventIDs) != 1 ||
+		firstScore.Payload.RuleEvidenceEventIDs[0] != firstAlert.Payload.RuleEvidenceEventIDs[0] {
+		t.Fatal("score and alert must reference the same rule evidence")
+	}
+}
+
+func TestOutputEventsRejectDuplicateRuleEvidenceReferences(t *testing.T) {
+	scorer, err := NewScorer(testBundle(t), &fakeBackend{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scorer.ScoreHand(context.Background(), testEvents())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := "8bcfb4e4-2113-52c3-85c2-a6ca4cb19823"
+	result.RuleEvidenceEventIDs = []string{reference, reference}
+	if _, _, err := BuildOutputEvents(result); err == nil || !strings.Contains(err.Error(), "references must be unique") {
+		t.Fatalf("expected duplicate rule reference rejection, got %v", err)
 	}
 }
 

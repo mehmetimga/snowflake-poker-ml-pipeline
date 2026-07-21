@@ -27,6 +27,7 @@ func main() {
 	groupID := flag.String("group-id", envDefault("KAFKA_RISK_SCORER_GROUP_ID", "poker-go-risk-scorer-v1"), "Kafka consumer group")
 	inputTopic := flag.String("input-topic", envDefault("KAFKA_PAIR_FEATURES_TOPIC", "poker.pair-features.v1"), "pair-feature input topic")
 	scoresTopic := flag.String("scores-topic", envDefault("KAFKA_RISK_SCORES_TOPIC", "poker.risk-scores.v1"), "risk-score output topic")
+	ruleEvidenceTopic := flag.String("rule-evidence-topic", envDefault("KAFKA_RULE_EVIDENCE_TOPIC", "poker.rule-evidence.v1"), "rule-evidence output topic")
 	alertsTopic := flag.String("alerts-topic", envDefault("KAFKA_RISK_ALERTS_TOPIC", "poker.risk-alerts.v1"), "risk-alert output topic")
 	deadLetterTopic := flag.String("dead-letter-topic", envDefault("KAFKA_DEAD_LETTER_TOPIC", "poker.pipeline.dead-letter.v1"), "dead-letter topic")
 	securityProtocol := flag.String("security-protocol", envDefault("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"), "PLAINTEXT, SSL, SASL_PLAINTEXT, or SASL_SSL")
@@ -71,7 +72,8 @@ func main() {
 	defer kafkaClient.Close()
 	processor, err := stream.NewProcessor(stream.Config{
 		InputTopic: *inputTopic, RiskScoresTopic: *scoresTopic,
-		RiskAlertsTopic: *alertsTopic, DeadLetterTopic: *deadLetterTopic,
+		RuleEvidenceTopic: *ruleEvidenceTopic,
+		RiskAlertsTopic:   *alertsTopic, DeadLetterTopic: *deadLetterTopic,
 		AllowedTenants: splitNonEmpty(*allowedTenants),
 	}, scorer, assembler, kafkaClient, kafkaClient, nil)
 	if err != nil {
@@ -94,7 +96,7 @@ func main() {
 		log.Fatalf("Triton readiness failed: %v", err)
 	}
 	cancel()
-	log.Printf("risk-kafka model=%s run=%s input=%s scores=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, *inputTopic, *scoresTopic, *alertsTopic)
+	log.Printf("risk-kafka model=%s run=%s input=%s scores=%s rules=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *alertsTopic)
 	scores, err := kafkaClient.Run(ctx, processor, *maxScores)
 	if err != nil {
 		log.Fatalf("stream stopped: %v", err)

@@ -38,6 +38,7 @@ class EnrichmentTopics:
 @dataclass(frozen=True)
 class ScoringTopics:
     risk_scores: str = "poker.risk-scores.v1"
+    rule_evidence: str = "poker.rule-evidence.v1"
     risk_alerts: str = "poker.risk-alerts.v1"
     dead_letters: str = "poker.pipeline.dead-letter.v1"
 
@@ -46,6 +47,7 @@ class ScoringTopics:
         settings = get_settings()
         return cls(
             risk_scores=settings.kafka_risk_scores_topic,
+            rule_evidence=settings.kafka_rule_evidence_topic,
             risk_alerts=settings.kafka_risk_alerts_topic,
             dead_letters=settings.kafka_dead_letter_topic,
         )
@@ -137,6 +139,12 @@ def scoring_topic_specs(
     return (
         WorldTopicSpec(
             name=names.risk_scores,
+            partitions=partitions,
+            replication_factor=replication_factor,
+            configs={"cleanup.policy": "delete", "retention.ms": thirty_days_ms},
+        ),
+        WorldTopicSpec(
+            name=names.rule_evidence,
             partitions=partitions,
             replication_factor=replication_factor,
             configs={"cleanup.policy": "delete", "retention.ms": thirty_days_ms},

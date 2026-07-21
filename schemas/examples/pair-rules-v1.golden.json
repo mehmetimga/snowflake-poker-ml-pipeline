@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "input": {
+    "event_id": "10000000-0000-5000-8000-000000000001",
+    "tenant_id": "tenant-golden",
+    "product_id": "poker",
+    "dataset_id": "rules-golden-v1",
+    "dataset_split": "validation",
+    "trace_id": "20000000-0000-5000-8000-000000000002",
+    "hand_id": "hand-golden-1",
+    "table_id": "table-golden-1",
+    "pair_key": "player-a:player-b",
+    "player_a": "player-a",
+    "player_b": "player-b",
+    "played_at": "2026-07-21T10:00:00Z",
+    "emitted_at": "2026-07-21T10:00:01Z",
+    "rule_emitted_at": "2026-07-21T10:00:02Z",
+    "snapshot_revision": 3,
+    "current_hand": {
+      "one_folded_other_won": true
+    },
+    "context": {
+      "same_device": true,
+      "same_network": true
+    },
+    "pair_history": {
+      "outcome_asymmetry": 0.4,
+      "a_fold_b_win_rate": 0.25,
+      "b_fold_a_win_rate": 0.75
+    }
+  },
+  "expected": {
+    "rules_only_score": 0.8475,
+    "fired_rules": [
+      {"rule_id": "pair.one-folded-other-won", "raw_score": 100.0, "rule_event_id": "246f6654-3bd7-5529-9aed-eca0a249f5f4"},
+      {"rule_id": "pair.same-device", "raw_score": 100.0, "rule_event_id": "1727d5f7-8bee-5f20-b595-6b38bbdae712"},
+      {"rule_id": "pair.same-network", "raw_score": 100.0, "rule_event_id": "c5c5a09d-70db-583a-821d-85a6737e86ef"},
+      {"rule_id": "pair.outcome-asymmetry", "raw_score": 40.0, "rule_event_id": "5a1f5361-f557-5b1d-92fb-b0c83c16885e"},
+      {"rule_id": "pair.a-fold-b-win-rate", "raw_score": 25.0, "rule_event_id": "e1673d10-4bb0-5fda-9179-b08029fa6b16"},
+      {"rule_id": "pair.b-fold-a-win-rate", "raw_score": 75.0, "rule_event_id": "194088a0-4bab-50b1-8885-e070259243c3"}
+    ]
+  }
+}

@@ -27,6 +27,8 @@ RISK_SCORE_COMPUTED = "poker.risk-score.computed"
 RISK_SCORES_TOPIC = "poker.risk-scores.v1"
 RISK_ALERT_CREATED = "poker.risk-alert.created"
 RISK_ALERTS_TOPIC = "poker.risk-alerts.v1"
+RULE_EVIDENCE_RECORDED = "poker.rule-evidence.recorded"
+RULE_EVIDENCE_TOPIC = "poker.rule-evidence.v1"
 
 TOPIC_BY_EVENT_TYPE: dict[str, str] = {
     HAND_COMPLETED: "poker.hands.raw.v1",
@@ -44,9 +46,51 @@ _FORBIDDEN_INFERENCE_FIELDS = frozenset(
         "is_suspicious",
         "label",
         "label_available_at",
+        "labels",
         "scenario_name",
+        "target",
     }
 )
+
+_FORBIDDEN_RULE_EVIDENCE_FIELDS = _FORBIDDEN_INFERENCE_FIELDS | frozenset(
+    {
+        "alert",
+        "calibrated_probability",
+        "challenge_label",
+        "challenge_labels",
+        "decision",
+        "decision_policy",
+        "decision_policy_version",
+        "decision_threshold",
+        "final_probability",
+        "hand_risk_probability",
+        "model_probability",
+        "policy_action",
+        "private_challenge",
+        "private_challenge_label",
+        "private_challenge_labels",
+        "probability",
+        "raw_probability",
+        "review_required",
+        "risk_probability",
+    }
+)
+
+
+def assert_rule_evidence_safe(value: Any, path: str = "$.evidence") -> None:
+    """Keep private truth and final model/policy outputs out of rule evidence."""
+
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key)
+            if key_text.lower() in _FORBIDDEN_RULE_EVIDENCE_FIELDS:
+                raise ValueError(
+                    f"forbidden rule-evidence field found at {path}.{key_text}"
+                )
+            assert_rule_evidence_safe(child, f"{path}.{key_text}")
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            assert_rule_evidence_safe(child, f"{path}[{index}]")
 
 
 class _ContractModel(BaseModel):
@@ -409,6 +453,204 @@ class PlayerRiskScore(_ContractModel):
     alert: bool
 
 
+def _validate_rule_evidence_references(values: list[uuid.UUID]) -> list[uuid.UUID]:
+    if len(values) != len(set(values)):
+        raise ValueError("rule-evidence event references must be unique")
+    return values
+
+
+def _rule_identity_timestamp(value: datetime) -> str:
+    return _as_utc(value).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def stable_rule_event_id(
+    *,
+    tenant_id: str,
+    product_id: str,
+    dataset_id: str,
+    dataset_split: str,
+    rule_id: str,
+    rule_version: int,
+    entity_type: str,
+    entity_key: str,
+    hand_id: str,
+    observation_revision: int = 1,
+    effective_at: datetime,
+    feature_definition_version: str,
+) -> uuid.UUID:
+    """Return the cross-language replay ID defined by Rules v2."""
+
+    identity = "\x1f".join(
+        (
+            tenant_id,
+            product_id,
+            dataset_id,
+            dataset_split,
+            rule_id,
+            str(rule_version),
+            entity_type,
+            entity_key,
+            hand_id,
+            str(observation_revision),
+            _rule_identity_timestamp(effective_at),
+            feature_definition_version,
+        )
+    )
+    return uuid.uuid5(uuid.NAMESPACE_URL, identity)
+
+
+class RuleEvidencePayload(_ContractModel):
+    """One explainable rule observation, independent of model probability."""
+
+    rule_event_id: uuid.UUID
+    rule_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_.-]+$")
+    rule_version: int = Field(ge=1)
+    rule_owner: str = Field(min_length=1)
+    entity_type: Literal["pair", "player", "hand", "session", "account"]
+    entity_key: str = Field(min_length=1)
+    hand_id: str = Field(min_length=1)
+    observation_revision: int = Field(default=1, ge=1)
+    severity: Literal["info", "low", "medium", "high", "critical"]
+    raw_score: float = Field(ge=0, le=100)
+    evidence: dict[str, Any] = Field(min_length=1)
+    effective_at: datetime
+    feature_definition_version: Literal["pair-features-v1"] = (
+        PAIR_FEATURE_DEFINITION_VERSION
+    )
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: dict[str, Any]) -> dict[str, Any]:
+        assert_rule_evidence_safe(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_entity(self) -> "RuleEvidencePayload":
+        if self.effective_at.tzinfo is None:
+            raise ValueError("rule effective_at must include timezone information")
+        if self.entity_type == "pair":
+            players = self.entity_key.split(":")
+            if len(players) != 2 or not all(players) or players[0] >= players[1]:
+                raise ValueError("pair rule entity_key must use canonical player order")
+        return self
+
+
+class RuleEvidenceEvent(_ContractModel):
+    """Replay-safe envelope published to poker.rule-evidence.v1."""
+
+    event_id: uuid.UUID
+    event_type: Literal["poker.rule-evidence.recorded"] = RULE_EVIDENCE_RECORDED
+    schema_version: Literal[1] = 1
+    tenant_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    dataset_id: str = Field(min_length=1)
+    dataset_split: str = Field(min_length=1)
+    occurred_at: datetime
+    emitted_at: datetime
+    trace_id: uuid.UUID
+    payload: RuleEvidencePayload
+
+    @model_validator(mode="after")
+    def validate_identity_and_time(self) -> "RuleEvidenceEvent":
+        if self.occurred_at.tzinfo is None or self.emitted_at.tzinfo is None:
+            raise ValueError("event timestamps must include timezone information")
+        if self.emitted_at < self.occurred_at:
+            raise ValueError("rule emitted_at cannot precede occurred_at")
+        if self.event_id != self.payload.rule_event_id:
+            raise ValueError("rule event_id must equal payload rule_event_id")
+        if self.occurred_at != self.payload.effective_at:
+            raise ValueError("rule occurred_at must equal evidence effective_at")
+        expected = stable_rule_event_id(
+            tenant_id=self.tenant_id,
+            product_id=self.product_id,
+            dataset_id=self.dataset_id,
+            dataset_split=self.dataset_split,
+            rule_id=self.payload.rule_id,
+            rule_version=self.payload.rule_version,
+            entity_type=self.payload.entity_type,
+            entity_key=self.payload.entity_key,
+            hand_id=self.payload.hand_id,
+            observation_revision=self.payload.observation_revision,
+            effective_at=self.payload.effective_at,
+            feature_definition_version=self.payload.feature_definition_version,
+        )
+        if self.event_id != expected:
+            raise ValueError("rule event_id is not the deterministic replay identity")
+        return self
+
+
+def build_rule_evidence_event(
+    *,
+    tenant_id: str,
+    product_id: str,
+    dataset_id: str,
+    dataset_split: str,
+    trace_id: uuid.UUID,
+    rule_id: str,
+    rule_version: int,
+    rule_owner: str,
+    entity_type: Literal["pair", "player", "hand", "session", "account"],
+    entity_key: str,
+    hand_id: str,
+    observation_revision: int = 1,
+    severity: Literal["info", "low", "medium", "high", "critical"],
+    raw_score: float,
+    evidence: Mapping[str, Any],
+    effective_at: datetime,
+    emitted_at: datetime | None = None,
+    feature_definition_version: str = PAIR_FEATURE_DEFINITION_VERSION,
+) -> RuleEvidenceEvent:
+    """Construct a rule event whose ID is stable across replay and languages."""
+
+    effective_at = _as_utc(effective_at)
+    emitted_at = _as_utc(emitted_at or effective_at)
+    rule_event_id = stable_rule_event_id(
+        tenant_id=tenant_id,
+        product_id=product_id,
+        dataset_id=dataset_id,
+        dataset_split=dataset_split,
+        rule_id=rule_id,
+        rule_version=rule_version,
+        entity_type=entity_type,
+        entity_key=entity_key,
+        hand_id=hand_id,
+        observation_revision=observation_revision,
+        effective_at=effective_at,
+        feature_definition_version=feature_definition_version,
+    )
+    return RuleEvidenceEvent(
+        event_id=rule_event_id,
+        tenant_id=tenant_id,
+        product_id=product_id,
+        dataset_id=dataset_id,
+        dataset_split=dataset_split,
+        occurred_at=effective_at,
+        emitted_at=emitted_at,
+        trace_id=trace_id,
+        payload=RuleEvidencePayload(
+            rule_event_id=rule_event_id,
+            rule_id=rule_id,
+            rule_version=rule_version,
+            rule_owner=rule_owner,
+            entity_type=entity_type,
+            entity_key=entity_key,
+            hand_id=hand_id,
+            observation_revision=observation_revision,
+            severity=severity,
+            raw_score=raw_score,
+            evidence=dict(evidence),
+            effective_at=effective_at,
+            feature_definition_version=feature_definition_version,
+        ),
+    )
+
+
+def rule_evidence_partition_key(event: RuleEvidenceEvent) -> str:
+    """Keep ordered observations for one governed entity in one Kafka partition."""
+
+    return f"{event.payload.entity_type}:{event.payload.entity_key}"
+
+
 class RiskScorePayload(_ContractModel):
     """One complete-hand model decision with pair-level audit details."""
 
@@ -426,10 +668,17 @@ class RiskScorePayload(_ContractModel):
     service_implementation: str = Field(default="go-risk-scorer", min_length=1)
     service_build_version: str = Field(default="dev", min_length=1)
     scored_at: datetime
+    rule_evidence_event_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=256
+    )
     pair_scores: list[PairRiskScore] = Field(min_length=15, max_length=15)
     player_scores: list[PlayerRiskScore] = Field(min_length=6, max_length=6)
     hand_risk_probability: float = Field(ge=0, le=1)
     alert: bool
+
+    _unique_rule_evidence = field_validator("rule_evidence_event_ids")(
+        _validate_rule_evidence_references
+    )
 
     @model_validator(mode="after")
     def validate_complete_hand(self) -> "RiskScorePayload":
@@ -491,18 +740,26 @@ class RiskAlertPayload(_ContractModel):
     decision_threshold: float = Field(ge=0, le=1)
     service_implementation: str = Field(default="go-risk-scorer", min_length=1)
     service_build_version: str = Field(default="dev", min_length=1)
+    rule_evidence_event_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=256
+    )
     risk_probability: float = Field(ge=0, le=1)
     highest_risk_pair: PairRiskScore
     highest_risk_players: list[PlayerRiskScore] = Field(min_length=1, max_length=2)
     scored_at: datetime
 
+    _unique_rule_evidence = field_validator("rule_evidence_event_ids")(
+        _validate_rule_evidence_references
+    )
+
     @model_validator(mode="after")
     def validate_alert(self) -> "RiskAlertPayload":
         if self.risk_probability < self.decision_threshold:
             raise ValueError("risk alert must meet the decision threshold")
-        if abs(
-            self.highest_risk_pair.calibrated_probability - self.risk_probability
-        ) > 1e-9:
+        if (
+            abs(self.highest_risk_pair.calibrated_probability - self.risk_probability)
+            > 1e-9
+        ):
             raise ValueError("alert risk must equal the highest-risk pair score")
         expected_players = {
             self.highest_risk_pair.player_a,
@@ -606,7 +863,11 @@ def _stable_uuid(*parts: object) -> uuid.UUID:
 
 def validate_event(value: Mapping[str, Any] | EventEnvelope) -> EventEnvelope:
     """Validate both the common envelope and its domain-specific payload."""
-    envelope = value if isinstance(value, EventEnvelope) else EventEnvelope.model_validate(value)
+    envelope = (
+        value
+        if isinstance(value, EventEnvelope)
+        else EventEnvelope.model_validate(value)
+    )
     assert_inference_safe(envelope.payload)
     payload_model = _PAYLOAD_MODEL_BY_TYPE[envelope.event_type]
     payload = payload_model.model_validate(envelope.payload).model_dump(mode="json")
@@ -681,6 +942,7 @@ def contract_schema_bundle() -> dict[str, Any]:
             PAIR_FEATURES_COMPUTED: PairFeatureEvent.model_json_schema(),
             RISK_SCORE_COMPUTED: RiskScoreEvent.model_json_schema(),
             RISK_ALERT_CREATED: RiskAlertEvent.model_json_schema(),
+            RULE_EVIDENCE_RECORDED: RuleEvidenceEvent.model_json_schema(),
         },
         "topics": dict(sorted(TOPIC_BY_EVENT_TYPE.items())),
         "derived_topics": {
@@ -688,5 +950,6 @@ def contract_schema_bundle() -> dict[str, Any]:
             PAIR_FEATURES_COMPUTED: PAIR_FEATURES_TOPIC,
             RISK_SCORE_COMPUTED: RISK_SCORES_TOPIC,
             RISK_ALERT_CREATED: RISK_ALERTS_TOPIC,
+            RULE_EVIDENCE_RECORDED: RULE_EVIDENCE_TOPIC,
         },
     }
