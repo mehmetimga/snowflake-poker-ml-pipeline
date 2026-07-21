@@ -1,0 +1,50 @@
+groups:
+  - name: poker-rules-v2-monitoring
+    rules:
+      - alert: PokerRuleMonitoringCritical
+        expr: max by (tenant_id, product_id, rule_id, rule_version, rollout_id, model_run_id, window_id) (poker_rule_monitor_status == 2) > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Rules v2 delayed-label monitoring is critical
+          description: Investigate the linked immutable monitoring report before disabling the rule; no automatic enforcement is authorized.
+      - alert: PokerRuleMonitoringWarning
+        expr: max by (tenant_id, product_id, rule_id, rule_version, rollout_id, model_run_id, window_id) (poker_rule_monitor_status == 1) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Rules v2 delayed-label monitoring exceeded a warning threshold
+      - alert: PokerRuleMonitoringInsufficientData
+        expr: max by (tenant_id, product_id, rule_id, rule_version, rollout_id, model_run_id, window_id) (poker_rule_monitor_status == 3) > 0
+        for: 24h
+        labels:
+          severity: info
+        annotations:
+          summary: A Rules v2 monitoring window remains below its reliability floor
+          description: This is not a passing quality result; wait for independently labeled hands and firings.
+      - alert: PokerRuleMonitoringBadLabels
+        expr: max by (tenant_id, product_id, evaluation_id, rollout_id, model_run_id, window_id) (poker_rule_monitor_bad_label_rows) > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: Circular or unknown labels entered a Rules v2 monitoring window
+          description: Quarantine the labels and rebuild the window before interpreting precision or recall.
+      - alert: PokerRuleRuntimeDisabledUnexpectedly
+        expr: min by (rule_id, rule_version, rule_rollout_id, runtime) (risk_scorer_rule_enabled) == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: A governed Rules v2 rule is disabled
+          description: Confirm that the active rollout file and approved rollback record match this state.
+      - alert: PokerStatefulRuleLateEvents
+        expr: sum(increase({__name__=~".*stateful_rule_late_total"}[10m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The Flink stateful Rules v2 path rejected late observations
+          description: Inspect watermark lag, source delay, correction horizon, and checkpoint health.

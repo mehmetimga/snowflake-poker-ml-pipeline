@@ -43,6 +43,7 @@ func main() {
 	requestTimeout := flag.Duration("request-timeout", 10*time.Second, "Triton and startup request timeout")
 	allowedTenants := flag.String("allowed-tenants", envDefault("RISK_ALLOWED_TENANTS", ""), "comma-separated tenant allowlist; empty allows all for development")
 	buildVersion := flag.String("build-version", envDefault("RISK_SERVICE_BUILD_VERSION", "dev"), "immutable service image or source build version")
+	metricsListen := flag.String("metrics-listen", envDefault("RISK_METRICS_LISTEN", "127.0.0.1:9091"), "Prometheus metrics listen address; empty disables")
 	flag.Parse()
 
 	bundle, err := risk.LoadArtifactBundle(*modelDir)
@@ -91,6 +92,7 @@ func main() {
 		RiskAlertsTopic:      *alertsTopic, DeadLetterTopic: *deadLetterTopic,
 		AllowedTenants: splitNonEmpty(*allowedTenants),
 		ReviewPolicy:   reviewPolicy,
+		RuleRollout:    ruleRollout,
 	}, scorer, assembler, kafkaClient, kafkaClient, nil)
 	if err != nil {
 		log.Fatalf("configure stream processor: %v", err)
@@ -112,8 +114,37 @@ func main() {
 		log.Fatalf("Triton readiness failed: %v", err)
 	}
 	cancel()
+	var metricsServer *http.Server
+	if strings.TrimSpace(*metricsListen) != "" {
+		metricsMux := http.NewServeMux()
+		metricsMux.HandleFunc("GET /metrics", func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("Content-Type", "text/plain; version=0.0.4")
+			_, _ = writer.Write([]byte(processor.PrometheusMetrics()))
+		})
+		metricsMux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"status":"ok"}` + "\n"))
+		})
+		metricsServer = &http.Server{
+			Addr: *metricsListen, Handler: metricsMux,
+			ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second,
+		}
+		go func() {
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("metrics server stopped: %v", err)
+			}
+		}()
+		log.Printf("risk-kafka metrics listen=%s", *metricsListen)
+	}
 	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d rule_rollout=%s input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, ruleRollout.RolloutID, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
 	scores, err := kafkaClient.Run(ctx, processor, *maxScores)
+	if metricsServer != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if shutdownErr := metricsServer.Shutdown(shutdownCtx); shutdownErr != nil {
+			log.Printf("metrics shutdown: %v", shutdownErr)
+		}
+		shutdownCancel()
+	}
 	if err != nil {
 		log.Fatalf("stream stopped: %v", err)
 	}

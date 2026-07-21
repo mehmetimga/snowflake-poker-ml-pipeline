@@ -45,5 +45,6 @@ st.markdown(
 - **4 — Graph explorer**: VGAE anomaly view of the player graph
 - **5 — Retrain**: run the training pipeline from the UI
 - **6 — Similarity search**: find Qdrant nearest-neighbour patterns
+- **7 — Rules v2 monitoring**: delayed-label quality, drift, lineage, and alerts
 """
 )

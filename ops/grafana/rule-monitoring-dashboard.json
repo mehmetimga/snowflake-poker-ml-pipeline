@@ -1,0 +1,140 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Overall rule-monitor status",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "max(poker_rule_monitor_status{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"})",
+          "legendFormat": "0 ok · 1 warning · 2 critical · 3 insufficient · 4 disabled"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Eligible delayed-label windows",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "poker_rule_monitor_eligible{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}",
+          "legendFormat": "{{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Labeled precision",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "poker_rule_monitor_precision{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}",
+          "legendFormat": "{{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Rule firing rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "poker_rule_monitor_firing_rate{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}",
+          "legendFormat": "{{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Evidence per 1,000 hands",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "poker_rule_monitor_evidence_per_1000_hands{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}",
+          "legendFormat": "{{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Active monitoring alerts",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "poker_rule_monitor_alert{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}",
+          "legendFormat": "{{severity}} · {{rule_id}} · {{reason_code}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Acknowledged runtime evidence / second",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tenant_id, rule_id, rule_version, rule_rollout_id, model_run_id) (rate(risk_scorer_rule_evidence_total{tenant_id=~\"$tenant\",rule_id=~\"$rule\",rule_rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}[5m]))",
+          "legendFormat": "{{tenant_id}} · {{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Governed runtime enablement",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "risk_scorer_rule_enabled{rule_id=~\"$rule\",rule_rollout_id=~\"$rollout\"}",
+          "legendFormat": "{{runtime}} · {{rule_id}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Flink stateful rule firings",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate({__name__=~\".*stateful_rule_firings_total\"}[5m]))",
+          "legendFormat": "stateful firings/s"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Delayed-label yield",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "poker_rule_monitor_labeled_hands{tenant_id=~\"$tenant\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}", "legendFormat": "labeled hands"},
+        {"expr": "poker_rule_monitor_positive_labels{tenant_id=~\"$tenant\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}", "legendFormat": "positive labels"},
+        {"expr": "poker_rule_monitor_independent_label_rows{tenant_id=~\"$tenant\",rollout_id=~\"$rollout\",model_run_id=~\"$model_run\"}", "legendFormat": "independent label rows"}
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Flink rule lateness and keyed state",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "sum(rate({__name__=~\".*stateful_rule_late_total\"}[5m]))", "legendFormat": "late events/s"},
+        {"expr": "sum({__name__=~\".*stateful_rule_state_size\"})", "legendFormat": "state entries"},
+        {"expr": "max({__name__=~\".*stateful_rule_event_time_lag_ms\"})", "legendFormat": "event-time lag ms"}
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["poker", "risk", "rules-v2", "phase-b6"],
+  "templating": {
+    "list": [
+      {"name": "tenant", "type": "query", "query": "label_values(poker_rule_monitor_status, tenant_id)", "includeAll": true, "allValue": ".*"},
+      {"name": "rule", "type": "query", "query": "label_values(poker_rule_monitor_status, rule_id)", "includeAll": true, "allValue": ".*"},
+      {"name": "rollout", "type": "query", "query": "label_values(poker_rule_monitor_status, rollout_id)", "includeAll": true, "allValue": ".*"},
+      {"name": "model_run", "type": "query", "query": "label_values(poker_rule_monitor_status, model_run_id)", "includeAll": true, "allValue": ".*"}
+    ]
+  },
+  "time": {"from": "now-30d", "to": "now"},
+  "timezone": "browser",
+  "title": "Poker Rules v2 monitoring",
+  "uid": "poker-rules-v2-monitoring-v1",
+  "version": 1
+}

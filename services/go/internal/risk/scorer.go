@@ -66,6 +66,8 @@ type Scorer struct {
 	serviceBuildVersion string
 	pairRulesEnabled    bool
 	pairRuleEnablement  map[string]bool
+	ruleRolloutID       string
+	ruleRolloutEntries  []RuleRolloutEntry
 }
 
 func NewScorer(bundle *ArtifactBundle, backend InferenceBackend, clock func() time.Time) (*Scorer, error) {
@@ -88,6 +90,7 @@ func NewScorerWithBuildVersion(bundle *ArtifactBundle, backend InferenceBackend,
 	return &Scorer{
 		bundle: bundle, backend: backend, clock: clock,
 		serviceBuildVersion: buildVersion, pairRulesEnabled: true,
+		ruleRolloutID: "unconfigured",
 	}, nil
 }
 
@@ -102,7 +105,13 @@ func (scorer *Scorer) SetRuleRollout(config *RuleRolloutConfig) error {
 		return err
 	}
 	scorer.pairRuleEnablement = enabled
+	scorer.ruleRolloutID = config.RolloutID
+	scorer.ruleRolloutEntries = append([]RuleRolloutEntry(nil), config.Rules...)
 	return nil
+}
+
+func (scorer *Scorer) RuleRolloutSnapshot() (string, []RuleRolloutEntry) {
+	return scorer.ruleRolloutID, append([]RuleRolloutEntry(nil), scorer.ruleRolloutEntries...)
 }
 
 func (scorer *Scorer) Ready(ctx context.Context) error {

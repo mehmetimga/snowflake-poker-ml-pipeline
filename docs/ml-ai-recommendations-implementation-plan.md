@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 10 |
+| Plan version | 11 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase B6 — rule dashboards and alerts |
+| Immediate next phase | Phase C1 — package target Go/Flink SPCS services |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -273,7 +273,7 @@ Production effect: none. CatBoost run `pair_7a1c58c1046b` remains active.
 
 ## 5. Phase B — Versioned Rules v2
 
-Status: `IN PROGRESS`
+Status: `COMPLETE`
 
 Purpose: add explainable, governed evidence without replacing or silently
 changing CatBoost probability.
@@ -400,12 +400,17 @@ Phase B is complete when:
 - [x] no rule reads a database in the hot path;
 - [x] all scores retain model, feature, policy, and rule versions;
 - [x] hard versus soft behavior is explicit;
-- [ ] rule dashboards and alerts exist; and
+- [x] rule dashboards and alerts exist; and
 - [x] CatBoost predictions remain bit-for-bit unchanged.
+
+The runtime metrics, delayed-label window contract, deterministic alerts,
+Prometheus rules, Grafana dashboard, and Streamlit page are documented in
+[`docs/rule-monitoring-and-alerting.md`](rule-monitoring-and-alerting.md).
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
-Status: `BLOCKED` on SPCS packaging and future CDC source integration
+Status: `NEXT` for C1 packaging; C2–C5 remain `BLOCKED` on the future
+poker-server CDC source and independently reviewed real labels
 
 Purpose: measure the current pipeline on real poker-server data without
 automated enforcement.
@@ -811,16 +816,16 @@ Completed slice — Phase B5:
 6. [x] Emit machine-readable monitoring thresholds for firing-rate and rule
    drift dashboards.
 
-Immediate next slice — Phase B6:
+Completed slice — Phase B6:
 
-1. [ ] Export runtime firing, evidence-volume, label-yield, lateness, and state
+1. [x] Export runtime firing, evidence-volume, label-yield, lateness, and state
    metrics to the target monitoring system.
-2. [ ] Build rule and segment dashboards from the B5 baseline contract.
-3. [ ] Alert on eligible-window threshold violations while marking thin
+2. [x] Build rule and segment dashboards from the B5 baseline contract.
+3. [x] Alert on eligible-window threshold violations while marking thin
    windows `insufficient_data`.
-4. [ ] Run alert tests with synthetic drift and verify links to the exact rule,
+4. [x] Run alert tests with synthetic drift and verify links to the exact rule,
    rollout, model, tenant, and evaluation versions.
-5. [ ] Keep all current rules in shadow evidence mode; dashboards do not grant
+5. [x] Keep all current rules in shadow evidence mode; dashboards do not grant
    enforcement authority.
 
 ## 13. Progress log
@@ -841,3 +846,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | B3 | Implemented the first stateful rule, `pair.repeated-fold-to-partner-wins`, as a 24-hour event-time window with scoped keyed state, deterministic corrections, lateness handling, 72-hour TTL, metrics, and Python/Java replay parity. Flink carries complete evidence to Go, which validates and publishes it atomically with the corresponding score/alert batch. | `make phase-b3-check`: 22 Python tests, 7 Java tests, and Go risk/stream suites passed; shared golden evidence IDs matched across Python and Java; checkpoint restore, duplicate, correction, stale, late-event, transport-validation, and probability-invariance paths passed | First B3 vertical slice complete with no deployed-job or probability change. Other stateful candidates are deferred pending shadow evidence; B4 decision-policy separation is next |
 | 2026-07-21 | B4 | Added `poker.review-routing:v1` and an independent `poker.review-decision.recorded` audit contract. All seven current rules are explicitly soft, the hard list is empty, hypothetical hard rules require review with deterministic reasons, and quality failures remain DLQ-only. Go now publishes evidence, score, review decision, and optional policy-linked alert in one acknowledged batch. | `make phase-b4-check`: 32 Python tests, 7 Java tests, and Go risk/stream suites passed; Python/Go golden decision ID `23300633-c2ac-5284-b110-039fe2850d03`; Kafka replay, output order, hard-below-threshold routing, soft-rule non-action, DLQ isolation, rollout metrics, and probability invariance passed | B4 complete in local shadow configuration. No hard rule, automatic enforcement, probability change, or deployment change. B5 governed rule evaluation is next |
 | 2026-07-21 | B5 | Added a hash-bound public-test report for all seven rules, independent-label provenance controls, whole-hand intervals, reliable tenant/context/scenario/history slices, machine-readable monitoring baselines, and executable per-rule rollback in Go and Flink. | 75,000 rows/5,000 hands; 500 hand bootstraps per rule; 7/7 overall reports reliable; 51 reliable and 26 suppressed rule/segment slices; all 75,000 labels independently synthetic; all-rule rollback probability delta `0.0`; `make phase-b5-check` passed with 8 Java tests and all Python/Go suites; `make phase12-check` passed | B5 complete locally. Results confirm rules remain soft shadow evidence; no champion, threshold, hard rule, or deployed service changed. B6 dashboards and alerts are next |
+| 2026-07-21 | B6 | Completed operational Rules v2 monitoring with acknowledged Go runtime counters, existing Flink state/lateness signals, a hash-bound delayed-label window and report, deterministic lineage-rich alerts, Prometheus rules, a Grafana dashboard, and a Streamlit admin page. Thin windows are explicitly `insufficient_data`; circular or unknown labels are quarantined; no alert can disable a rule or enforce an action. | Stable frozen replay: 5,000 hands, 75,000 pair rows, 7/7 rules `ok`, 0 alerts; synthetic thin, drift, bad-label, integrity, and admin-loader tests passed; `make phase-b6-check` passed with 8 Java tests and all focused Python/Go suites; `make phase12-check` passed | Phase B complete locally with all rules still in soft shadow mode and model probability unchanged. Phase C1 SPCS packaging is next; real-data C2–C5 remain blocked on CDC and independently reviewed labels |

@@ -7,6 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/risk"
@@ -47,6 +51,7 @@ type Config struct {
 	DeadLetterTopic      string
 	AllowedTenants       []string
 	ReviewPolicy         risk.ReviewPolicyDefinition
+	RuleRollout          *risk.RuleRolloutConfig
 }
 
 type ProcessResult struct {
@@ -70,6 +75,24 @@ type Processor struct {
 	policyDecisions       int64
 	reviewRecommendations int64
 	mandatoryReviews      int64
+	metricsMu             sync.Mutex
+	scopeHands            map[monitoringScope]int64
+	scopePairs            map[monitoringScope]int64
+	ruleEvidence          map[monitoringRuleKey]int64
+}
+
+type monitoringScope struct {
+	tenantID  string
+	productID string
+	modelName string
+	modelRun  string
+	rolloutID string
+}
+
+type monitoringRuleKey struct {
+	monitoringScope
+	ruleID      string
+	ruleVersion int
 }
 
 func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssembler, publisher Publisher, committer Committer, clock func() time.Time) (*Processor, error) {
@@ -79,6 +102,11 @@ func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssemble
 	}
 	if err := config.ReviewPolicy.Validate(); err != nil {
 		return nil, fmt.Errorf("review policy: %w", err)
+	}
+	if config.RuleRollout != nil {
+		if err := config.RuleRollout.Validate(); err != nil {
+			return nil, fmt.Errorf("rule rollout: %w", err)
+		}
 	}
 	if scorer == nil || assembler == nil || publisher == nil || committer == nil {
 		return nil, fmt.Errorf("scorer, assembler, publisher, and committer are required")
@@ -98,6 +126,9 @@ func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssemble
 		committer: committer, offsets: NewOffsetTracker(),
 		pending: make(map[string]map[RecordRef]struct{}), clock: clock,
 		allowedTenants: allowed, reviewPolicy: config.ReviewPolicy,
+		scopeHands:   make(map[monitoringScope]int64),
+		scopePairs:   make(map[monitoringScope]int64),
+		ruleEvidence: make(map[monitoringRuleKey]int64),
 	}, nil
 }
 
@@ -159,6 +190,7 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	if err := processor.publisher.Publish(ctx, outputs); err != nil {
 		return ProcessResult{}, fmt.Errorf("publish outputs for hand %s: %w", event.Payload.HandID, err)
 	}
+	processor.recordMonitoringMetrics(result)
 	processor.policyDecisions++
 	switch decisionEvent.Payload.Outcome {
 	case "review_recommended":
@@ -174,6 +206,117 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 		Status: string(status), HandID: event.Payload.HandID,
 		OutputCount: len(outputs), Committed: committed,
 	}, err
+}
+
+func (processor *Processor) recordMonitoringMetrics(result *risk.ScoreResult) {
+	rolloutID := "unconfigured"
+	if processor.config.RuleRollout != nil {
+		rolloutID = processor.config.RuleRollout.RolloutID
+	}
+	scope := monitoringScope{
+		tenantID: result.TenantID, productID: result.ProductID,
+		modelName: result.ModelName, modelRun: result.ModelRunID,
+		rolloutID: rolloutID,
+	}
+	processor.metricsMu.Lock()
+	defer processor.metricsMu.Unlock()
+	processor.scopeHands[scope]++
+	processor.scopePairs[scope] += int64(len(result.PairScores))
+	for _, event := range result.RuleEvidenceEvents {
+		key := monitoringRuleKey{
+			monitoringScope: scope,
+			ruleID:          event.Payload.RuleID, ruleVersion: event.Payload.RuleVersion,
+		}
+		processor.ruleEvidence[key]++
+	}
+}
+
+func monitoringLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	return strings.ReplaceAll(value, "\"", "\\\"")
+}
+
+func monitoringScopeLabels(scope monitoringScope) string {
+	return fmt.Sprintf(
+		"tenant_id=\"%s\",product_id=\"%s\",model_name=\"%s\",model_run_id=\"%s\",rule_rollout_id=\"%s\"",
+		monitoringLabelValue(scope.tenantID), monitoringLabelValue(scope.productID),
+		monitoringLabelValue(scope.modelName), monitoringLabelValue(scope.modelRun),
+		monitoringLabelValue(scope.rolloutID),
+	)
+}
+
+// PrometheusMetrics returns acknowledged Kafka output metrics. Counts advance
+// only after evidence, score, decision, and optional alert publishing succeeds.
+func (processor *Processor) PrometheusMetrics() string {
+	processor.metricsMu.Lock()
+	scopeHands := make(map[monitoringScope]int64, len(processor.scopeHands))
+	scopePairs := make(map[monitoringScope]int64, len(processor.scopePairs))
+	ruleEvidence := make(map[monitoringRuleKey]int64, len(processor.ruleEvidence))
+	for key, value := range processor.scopeHands {
+		scopeHands[key] = value
+	}
+	for key, value := range processor.scopePairs {
+		scopePairs[key] = value
+	}
+	for key, value := range processor.ruleEvidence {
+		ruleEvidence[key] = value
+	}
+	processor.metricsMu.Unlock()
+
+	scopes := make([]monitoringScope, 0, len(scopeHands))
+	for scope := range scopeHands {
+		scopes = append(scopes, scope)
+	}
+	sort.Slice(scopes, func(left, right int) bool {
+		return monitoringScopeLabels(scopes[left]) < monitoringScopeLabels(scopes[right])
+	})
+	rules := make([]monitoringRuleKey, 0, len(ruleEvidence))
+	for key := range ruleEvidence {
+		rules = append(rules, key)
+	}
+	sort.Slice(rules, func(left, right int) bool {
+		leftKey := monitoringScopeLabels(rules[left].monitoringScope) + rules[left].ruleID + strconv.Itoa(rules[left].ruleVersion)
+		rightKey := monitoringScopeLabels(rules[right].monitoringScope) + rules[right].ruleID + strconv.Itoa(rules[right].ruleVersion)
+		return leftKey < rightKey
+	})
+
+	var output strings.Builder
+	output.WriteString("# HELP risk_scorer_scope_hands_scored_total Kafka-acknowledged complete hands by governed scope.\n# TYPE risk_scorer_scope_hands_scored_total counter\n")
+	output.WriteString("# HELP risk_scorer_scope_pairs_scored_total Kafka-acknowledged pair rows by governed scope.\n# TYPE risk_scorer_scope_pairs_scored_total counter\n")
+	for _, scope := range scopes {
+		labels := monitoringScopeLabels(scope)
+		fmt.Fprintf(&output, "risk_scorer_scope_hands_scored_total{%s} %d\n", labels, scopeHands[scope])
+		fmt.Fprintf(&output, "risk_scorer_scope_pairs_scored_total{%s} %d\n", labels, scopePairs[scope])
+	}
+	output.WriteString("# HELP risk_scorer_rule_evidence_total Kafka-acknowledged rule evidence by exact governed lineage.\n# TYPE risk_scorer_rule_evidence_total counter\n")
+	for _, key := range rules {
+		fmt.Fprintf(
+			&output,
+			"risk_scorer_rule_evidence_total{%s,rule_id=\"%s\",rule_version=\"%d\"} %d\n",
+			monitoringScopeLabels(key.monitoringScope), monitoringLabelValue(key.ruleID),
+			key.ruleVersion, ruleEvidence[key],
+		)
+	}
+	output.WriteString("# HELP risk_scorer_rule_enabled Governed rule rollout enablement (1 enabled, 0 disabled).\n# TYPE risk_scorer_rule_enabled gauge\n")
+	if processor.config.RuleRollout != nil {
+		entries := append([]risk.RuleRolloutEntry(nil), processor.config.RuleRollout.Rules...)
+		sort.Slice(entries, func(left, right int) bool { return entries[left].RuleID < entries[right].RuleID })
+		for _, entry := range entries {
+			enabled := 0
+			if entry.Enabled {
+				enabled = 1
+			}
+			fmt.Fprintf(
+				&output,
+				"risk_scorer_rule_enabled{rule_rollout_id=\"%s\",rule_id=\"%s\",rule_version=\"%d\",runtime=\"%s\"} %d\n",
+				monitoringLabelValue(processor.config.RuleRollout.RolloutID),
+				monitoringLabelValue(entry.RuleID), entry.RuleVersion,
+				monitoringLabelValue(entry.Runtime), enabled,
+			)
+		}
+	}
+	return output.String()
 }
 
 func (processor *Processor) outputRecords(

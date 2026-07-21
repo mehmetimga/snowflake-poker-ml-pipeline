@@ -86,3 +86,24 @@ def vgae_scores() -> dict[str, float]:
     if not path.exists():
         return {}
     return {k: float(v) for k, v in json.loads(path.read_text()).items()}
+
+
+def rule_monitoring_artifacts(registry_dir: Path | None = None) -> dict[str, Any]:
+    """Load local/generated B5/B6 artifacts without requiring a warehouse."""
+
+    root = registry_dir or (models_dir() / "registry")
+    result: dict[str, Any] = {}
+    for key, name in (
+        ("baseline", "rule_evaluation_report.json"),
+        ("window", "rule_monitoring_window.json"),
+        ("report", "rule_monitoring_report.json"),
+    ):
+        path = root / name
+        if path.is_file():
+            try:
+                value = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(value, dict):
+                result[key] = value
+    return result

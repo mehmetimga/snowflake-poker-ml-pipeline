@@ -67,6 +67,12 @@ tenant.
 Prometheus metrics include request/error/throughput counters, an in-flight
 gauge, readiness failures, and an end-to-end request-duration histogram. The
 dashboard and alert rules live under `ops/grafana` and `ops/prometheus`.
+Rules v2 additionally exports acknowledged evidence counters and enablement
+gauges with tenant, model-run, rollout, rule-ID, and rule-version lineage. The
+Kafka adapter serves these at `RISK_METRICS_LISTEN` (default
+`127.0.0.1:9091`) and increments them only after the complete output batch is
+acknowledged. The scheduled delayed-label job exports `poker_rule_monitor_*`
+gauges from its hash-bound report.
 Optional Go profiling is disabled by default; enable it only with an explicit
 loopback address such as `--pprof-listen 127.0.0.1:6060`. Non-loopback pprof
 listeners are rejected.

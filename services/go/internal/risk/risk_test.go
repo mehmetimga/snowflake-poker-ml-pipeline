@@ -537,9 +537,18 @@ func TestHTTPServiceScoresCompleteHandAndExportsMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rollout, err := LoadRuleRollout("../../../../schemas/rules/rule-rollout-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scorer.SetRuleRollout(rollout); err != nil {
+		t.Fatal(err)
+	}
 	assembler, _ := NewHandAssembler(15, time.Hour)
 	service, _ := NewHTTPService(scorer, assembler, time.Second)
-	payload, _ := json.Marshal(scoreHandRequest{Pairs: testEvents()})
+	events := testEvents()
+	events[0].Payload.CurrentHand["one_folded_other_won"] = true
+	payload, _ := json.Marshal(scoreHandRequest{Pairs: events})
 	request := httptest.NewRequest(http.MethodPost, "/v1/score-hand", bytes.NewReader(payload))
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
@@ -554,6 +563,13 @@ func TestHTTPServiceScoresCompleteHandAndExportsMetrics(t *testing.T) {
 	}
 	if !strings.Contains(metricsResponse.Body.String(), "risk_scorer_request_duration_seconds_count 1") {
 		t.Fatalf("request histogram was not exported: %s", metricsResponse.Body.String())
+	}
+	if !strings.Contains(metricsResponse.Body.String(), "risk_scorer_rule_evidence_total{") ||
+		!strings.Contains(metricsResponse.Body.String(), `rule_id="pair.one-folded-other-won"`) ||
+		!strings.Contains(metricsResponse.Body.String(), `rule_rollout_id="rules-v2-shadow-v1"`) ||
+		!strings.Contains(metricsResponse.Body.String(), "risk_scorer_scope_hands_scored_total{") ||
+		!strings.Contains(metricsResponse.Body.String(), "risk_scorer_rule_enabled{") {
+		t.Fatalf("rule monitoring lineage was not exported: %s", metricsResponse.Body.String())
 	}
 }
 

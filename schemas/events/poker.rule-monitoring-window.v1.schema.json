@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.rule-monitoring-window.v1",
+  "title": "Rules v2 delayed-label monitoring window",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "window_id",
+    "tenant_id",
+    "product_id",
+    "dataset",
+    "model",
+    "rollout",
+    "baseline",
+    "interval",
+    "counts",
+    "label_provenance_counts",
+    "rules",
+    "controls",
+    "source_artifacts",
+    "integrity",
+    "generated_at"
+  ],
+  "properties": {
+    "contract_version": {"const": 1},
+    "window_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "benchmark", "split", "synthetic"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "benchmark": {"type": "string", "minLength": 1},
+        "split": {"enum": ["validation", "test"]},
+        "synthetic": {"type": "boolean"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_name", "run_id"],
+      "properties": {
+        "model_name": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rollout_id", "mode"],
+      "properties": {
+        "rollout_id": {"type": "string", "minLength": 1},
+        "mode": {"const": "shadow"}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluation_id", "payload_sha256"],
+      "properties": {
+        "evaluation_id": {"type": "string", "minLength": 1},
+        "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_start", "event_end", "label_cutoff_at"],
+      "properties": {
+        "event_start": {"type": "string", "format": "date-time"},
+        "event_end": {"type": "string", "format": "date-time"},
+        "label_cutoff_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair_rows",
+        "labeled_hands",
+        "independently_labeled_rows",
+        "positive_labels",
+        "negative_labels",
+        "circular_label_rows",
+        "unknown_label_rows"
+      ],
+      "properties": {
+        "pair_rows": {"type": "integer", "minimum": 1},
+        "labeled_hands": {"type": "integer", "minimum": 1},
+        "independently_labeled_rows": {"type": "integer", "minimum": 0},
+        "positive_labels": {"type": "integer", "minimum": 0},
+        "negative_labels": {"type": "integer", "minimum": 0},
+        "circular_label_rows": {"type": "integer", "minimum": 0},
+        "unknown_label_rows": {"type": "integer", "minimum": 0}
+      }
+    },
+    "label_provenance_counts": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "rule_version",
+          "runtime",
+          "enabled",
+          "firings",
+          "true_positives"
+        ],
+        "properties": {
+          "rule_id": {"type": "string", "minLength": 1},
+          "rule_version": {"type": "integer", "minimum": 1},
+          "runtime": {"enum": ["go-risk-scorer", "java-flink-pair-features"]},
+          "enabled": {"type": "boolean"},
+          "firings": {"type": "integer", "minimum": 0},
+          "true_positives": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "controls": {"type": "object"},
+    "source_artifacts": {"type": "object"},
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "payload_sha256"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "generated_at": {"type": "string", "format": "date-time"}
+  }
+}

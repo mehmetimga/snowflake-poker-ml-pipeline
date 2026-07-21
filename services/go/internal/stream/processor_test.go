@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,10 +123,15 @@ func newTestProcessor(t *testing.T, publisher *fakePublisher, committer *fakeCom
 	if err != nil {
 		t.Fatal(err)
 	}
+	rollout, err := risk.LoadRuleRollout("../../../../schemas/rules/rule-rollout-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	processor, err := NewProcessor(Config{
 		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules",
 		PolicyDecisionsTopic: "decisions", RiskAlertsTopic: "alerts", DeadLetterTopic: "dlq",
 		ReviewPolicy: risk.DefaultReviewPolicy(),
+		RuleRollout:  rollout,
 	}, scorer, assembler, publisher, committer, func() time.Time {
 		return time.Date(2026, 7, 20, 0, 1, 0, 0, time.UTC)
 	})
@@ -229,6 +235,13 @@ func TestProcessorPublishesRuleEvidenceScoreAndAlertInOneAcknowledgedBatch(t *te
 	}
 	if len(committer.calls) != 1 {
 		t.Fatal("input offsets must commit only after the complete output batch")
+	}
+	metrics := processor.PrometheusMetrics()
+	if !strings.Contains(metrics, "risk_scorer_rule_evidence_total{") ||
+		!strings.Contains(metrics, `rule_id="pair.same-device"`) ||
+		!strings.Contains(metrics, `rule_rollout_id="rules-v2-shadow-v1"`) ||
+		!strings.Contains(metrics, "risk_scorer_scope_hands_scored_total{") {
+		t.Fatalf("acknowledged rule monitoring metrics are incomplete: %s", metrics)
 	}
 }
 

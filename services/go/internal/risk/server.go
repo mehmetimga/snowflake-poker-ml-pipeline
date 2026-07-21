@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -24,6 +26,24 @@ type serviceMetrics struct {
 	readyFailures   atomic.Int64
 	requestBuckets  [9]atomic.Int64
 	lastSuccessUnix atomic.Int64
+	dynamicMu       sync.Mutex
+	scopeHands      map[scoringScope]int64
+	scopePairs      map[scoringScope]int64
+	ruleEvidence    map[ruleMetricKey]int64
+}
+
+type scoringScope struct {
+	tenantID  string
+	productID string
+	modelName string
+	modelRun  string
+	rolloutID string
+}
+
+type ruleMetricKey struct {
+	scoringScope
+	ruleID      string
+	ruleVersion int
 }
 
 var requestLatencyUpperMicros = [...]int64{1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000}
@@ -80,7 +100,14 @@ func NewHTTPService(scorer *Scorer, assembler *HandAssembler, readyTimeout time.
 	if scorer == nil || assembler == nil || readyTimeout <= 0 {
 		return nil, fmt.Errorf("scorer, assembler, and positive readiness timeout are required")
 	}
-	return &HTTPService{scorer: scorer, assembler: assembler, readyTimeout: readyTimeout}, nil
+	return &HTTPService{
+		scorer: scorer, assembler: assembler, readyTimeout: readyTimeout,
+		metrics: serviceMetrics{
+			scopeHands:   make(map[scoringScope]int64),
+			scopePairs:   make(map[scoringScope]int64),
+			ruleEvidence: make(map[ruleMetricKey]int64),
+		},
+	}, nil
 }
 
 func (service *HTTPService) Handler() http.Handler {
@@ -143,7 +170,7 @@ func (service *HTTPService) scoreHand(writer http.ResponseWriter, request *http.
 		writeJSON(writer, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
-	service.recordSuccess(len(payload.Pairs))
+	service.recordSuccess(result)
 	writeJSON(writer, http.StatusOK, result)
 }
 
@@ -187,14 +214,47 @@ func (service *HTTPService) addPairFeature(writer http.ResponseWriter, request *
 		writeJSON(writer, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	service.recordSuccess(len(events))
+	service.recordSuccess(result)
 	writeJSON(writer, http.StatusOK, result)
 }
 
-func (service *HTTPService) recordSuccess(pairs int) {
+func (service *HTTPService) recordSuccess(result *ScoreResult) {
+	pairs := len(result.PairScores)
 	service.metrics.handsScored.Add(1)
 	service.metrics.pairsScored.Add(int64(pairs))
 	service.metrics.lastSuccessUnix.Store(time.Now().Unix())
+	rolloutID, _ := service.scorer.RuleRolloutSnapshot()
+	scope := scoringScope{
+		tenantID: result.TenantID, productID: result.ProductID,
+		modelName: result.ModelName, modelRun: result.ModelRunID,
+		rolloutID: rolloutID,
+	}
+	service.metrics.dynamicMu.Lock()
+	defer service.metrics.dynamicMu.Unlock()
+	service.metrics.scopeHands[scope]++
+	service.metrics.scopePairs[scope] += int64(pairs)
+	for _, event := range result.RuleEvidenceEvents {
+		key := ruleMetricKey{
+			scoringScope: scope,
+			ruleID:       event.Payload.RuleID, ruleVersion: event.Payload.RuleVersion,
+		}
+		service.metrics.ruleEvidence[key]++
+	}
+}
+
+func prometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	return strings.ReplaceAll(value, "\"", "\\\"")
+}
+
+func scopeLabels(scope scoringScope) string {
+	return fmt.Sprintf(
+		"tenant_id=\"%s\",product_id=\"%s\",model_name=\"%s\",model_run_id=\"%s\",rule_rollout_id=\"%s\"",
+		prometheusLabelValue(scope.tenantID), prometheusLabelValue(scope.productID),
+		prometheusLabelValue(scope.modelName), prometheusLabelValue(scope.modelRun),
+		prometheusLabelValue(scope.rolloutID),
+	)
 }
 
 func (service *HTTPService) prometheusMetrics(writer http.ResponseWriter, _ *http.Request) {
@@ -225,6 +285,71 @@ func (service *HTTPService) prometheusMetrics(writer http.ResponseWriter, _ *htt
 	fmt.Fprintf(writer, "risk_scorer_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", count)
 	fmt.Fprintf(writer, "risk_scorer_request_duration_seconds_sum %.9f\n", float64(service.metrics.requestMicros.Load())/1e6)
 	fmt.Fprintf(writer, "risk_scorer_request_duration_seconds_count %d\n", count)
+
+	service.metrics.dynamicMu.Lock()
+	scopes := make([]scoringScope, 0, len(service.metrics.scopeHands))
+	for scope := range service.metrics.scopeHands {
+		scopes = append(scopes, scope)
+	}
+	sort.Slice(scopes, func(left, right int) bool {
+		return scopeLabels(scopes[left]) < scopeLabels(scopes[right])
+	})
+	rules := make([]ruleMetricKey, 0, len(service.metrics.ruleEvidence))
+	for key := range service.metrics.ruleEvidence {
+		rules = append(rules, key)
+	}
+	sort.Slice(rules, func(left, right int) bool {
+		leftKey := scopeLabels(rules[left].scoringScope) + rules[left].ruleID + strconv.Itoa(rules[left].ruleVersion)
+		rightKey := scopeLabels(rules[right].scoringScope) + rules[right].ruleID + strconv.Itoa(rules[right].ruleVersion)
+		return leftKey < rightKey
+	})
+	scopeHands := make(map[scoringScope]int64, len(service.metrics.scopeHands))
+	scopePairs := make(map[scoringScope]int64, len(service.metrics.scopePairs))
+	ruleEvidence := make(map[ruleMetricKey]int64, len(service.metrics.ruleEvidence))
+	for key, value := range service.metrics.scopeHands {
+		scopeHands[key] = value
+	}
+	for key, value := range service.metrics.scopePairs {
+		scopePairs[key] = value
+	}
+	for key, value := range service.metrics.ruleEvidence {
+		ruleEvidence[key] = value
+	}
+	service.metrics.dynamicMu.Unlock()
+
+	fmt.Fprint(writer, "# HELP risk_scorer_scope_hands_scored_total Complete hands scored by governed tenant/model/rollout scope.\n# TYPE risk_scorer_scope_hands_scored_total counter\n")
+	fmt.Fprint(writer, "# HELP risk_scorer_scope_pairs_scored_total Pair rows scored by governed tenant/model/rollout scope.\n# TYPE risk_scorer_scope_pairs_scored_total counter\n")
+	for _, scope := range scopes {
+		labels := scopeLabels(scope)
+		fmt.Fprintf(writer, "risk_scorer_scope_hands_scored_total{%s} %d\n", labels, scopeHands[scope])
+		fmt.Fprintf(writer, "risk_scorer_scope_pairs_scored_total{%s} %d\n", labels, scopePairs[scope])
+	}
+	fmt.Fprint(writer, "# HELP risk_scorer_rule_evidence_total Fired rule-evidence events by exact governed lineage.\n# TYPE risk_scorer_rule_evidence_total counter\n")
+	for _, key := range rules {
+		fmt.Fprintf(
+			writer,
+			"risk_scorer_rule_evidence_total{%s,rule_id=\"%s\",rule_version=\"%d\"} %d\n",
+			scopeLabels(key.scoringScope), prometheusLabelValue(key.ruleID),
+			key.ruleVersion, ruleEvidence[key],
+		)
+	}
+	rolloutID, entries := service.scorer.RuleRolloutSnapshot()
+	sort.Slice(entries, func(left, right int) bool { return entries[left].RuleID < entries[right].RuleID })
+	fmt.Fprint(writer, "# HELP risk_scorer_rule_enabled Governed rule rollout enablement (1 enabled, 0 disabled).\n# TYPE risk_scorer_rule_enabled gauge\n")
+	for _, entry := range entries {
+		value := 0
+		if entry.Enabled {
+			value = 1
+		}
+		fmt.Fprintf(
+			writer,
+			"risk_scorer_rule_enabled{model_name=\"%s\",model_run_id=\"%s\",rule_rollout_id=\"%s\",rule_id=\"%s\",rule_version=\"%d\",runtime=\"%s\"} %d\n",
+			prometheusLabelValue(service.scorer.bundle.Contract.ModelName),
+			prometheusLabelValue(service.scorer.bundle.Contract.RunID),
+			prometheusLabelValue(rolloutID), prometheusLabelValue(entry.RuleID),
+			entry.RuleVersion, prometheusLabelValue(entry.Runtime), value,
+		)
+	}
 }
 
 func decodeJSONRequest(writer http.ResponseWriter, request *http.Request, target any) error {
