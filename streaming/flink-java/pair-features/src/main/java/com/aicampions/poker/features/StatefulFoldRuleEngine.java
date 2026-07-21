@@ -3,6 +3,7 @@ package com.aicampions.poker.features;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
@@ -37,7 +38,9 @@ final class StatefulFoldRuleEngine {
             int minimumDirectionalCount,
             double rateThreshold,
             long allowedLatenessMs,
-            long correctionHorizonMs) {
+            long correctionHorizonMs) implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         Config {
             if (windowMs < 1 || minimumHands < 1 || minimumDirectionalCount < 1
                     || rateThreshold < 0 || rateThreshold > 1

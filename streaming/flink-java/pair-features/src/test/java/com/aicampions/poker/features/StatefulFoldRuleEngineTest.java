@@ -4,9 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -16,6 +19,19 @@ class StatefulFoldRuleEngineTest {
     private static final StatefulFoldRuleEngine.Config CONFIG =
             new StatefulFoldRuleEngine.Config(
                     24 * 3_600_000L, 5, 3, 0.6, 120_000L, 48 * 3_600_000L);
+
+    @Test
+    void configuredFlinkOperatorIsSerializable() throws Exception {
+        StatefulPairRuleFunction function =
+                new StatefulPairRuleFunction(72, "poker.pair-features.v1", CONFIG, true);
+
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(function);
+        }
+
+        assertTrue(bytes.size() > 0);
+    }
 
     @Test
     void goldenReplayCorrectionLatenessAndCheckpointRestoreMatchPython() throws Exception {
