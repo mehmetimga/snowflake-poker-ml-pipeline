@@ -1,4 +1,4 @@
-.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-drift model-registry model-registry-check phase12-operational phase12-check phase12 go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
+.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry model-registry-check phase12-operational phase12-check phase12 go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -73,6 +73,14 @@ MODEL_REGISTRY_DIR ?= models/registry
 MODEL_STABILITY_BOOTSTRAP_SAMPLES ?= 1000
 MODEL_STABILITY_SEED ?= 42
 MODEL_STABILITY_FLAGS ?=
+MODEL_SEED_STABILITY_SEEDS ?= 11,23,42,67,101
+MODEL_SEED_STABILITY_FLAGS ?=
+MODEL_SCENARIO_SOURCE ?= data/datasets/context-full-v2
+MODEL_SCENARIO_BOOTSTRAP_SAMPLES ?= 300
+MODEL_SCENARIO_FLAGS ?=
+MODEL_CARD_OWNER ?= poker-ml-platform
+MODEL_CARD_REVIEW_DATE ?= $(shell date -u +%F)
+MODEL_CARD_FLAGS ?=
 GO_RISK_DIR ?= services/go
 GO_RISK_MODEL_DIR ?= $(abspath models/pair-catboost-full-v2)
 GO_RISK_LISTEN ?= :8080
@@ -144,6 +152,12 @@ help:
 	@echo "  model-stability-test Test hand-grouped bootstrap and report validation"
 	@echo "  model-stability Build hand-grouped confidence intervals for the champion"
 	@echo "  model-stability-check Recompute and verify champion stability evidence"
+	@echo "  model-seed-stability Train five validation-only seeds and report robustness"
+	@echo "  model-seed-stability-check Verify seed evidence without opening test/challenge"
+	@echo "  model-scenario-holdout Train leave-one-scenario-family-out benchmarks"
+	@echo "  model-scenario-holdout-check Verify scenario lineage and holdout evidence"
+	@echo "  model-card Build the governed champion model card in JSON and Markdown"
+	@echo "  model-card-check Verify model-card hashes, identities, and rendering"
 	@echo "  model-drift Build validation-window reference and evaluate test drift"
 	@echo "  model-registry Build immutable registry/deployment/audit snapshots"
 	@echo "  phase12-operational Run replay, recovery, load, race, and security checks"
@@ -382,6 +396,71 @@ model-stability-check:
 		--model-dir $(PAIR_CHALLENGER_BASELINE) \
 		--report $(MODEL_REGISTRY_DIR)/stability_report.json
 
+model-seed-stability-test:
+	$(PY) -m pytest -q tests/test_seed_stability.py
+
+model-seed-stability:
+	$(PY) scripts/build_validation_seed_stability.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--output $(MODEL_REGISTRY_DIR)/validation_seed_stability.json \
+		--seeds $(MODEL_SEED_STABILITY_SEEDS) $(MODEL_SEED_STABILITY_FLAGS)
+
+model-seed-stability-check:
+	$(PY) scripts/check_validation_seed_stability.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--report $(MODEL_REGISTRY_DIR)/validation_seed_stability.json
+
+model-scenario-holdout-test:
+	$(PY) -m pytest -q tests/test_scenario_holdout.py
+
+model-scenario-holdout:
+	$(PY) scripts/build_scenario_holdout_report.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--source-world $(MODEL_SCENARIO_SOURCE) \
+		--output $(MODEL_REGISTRY_DIR)/scenario_holdout_report.json \
+		--lineage $(MODEL_REGISTRY_DIR)/generator_scenario_lineage.parquet \
+		--bootstrap-samples $(MODEL_SCENARIO_BOOTSTRAP_SAMPLES) $(MODEL_SCENARIO_FLAGS)
+
+model-scenario-holdout-check:
+	$(PY) scripts/check_scenario_holdout_report.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--source-world $(MODEL_SCENARIO_SOURCE) \
+		--report $(MODEL_REGISTRY_DIR)/scenario_holdout_report.json \
+		--lineage $(MODEL_REGISTRY_DIR)/generator_scenario_lineage.parquet
+
+model-card-test:
+	$(PY) -m pytest -q tests/test_model_card.py
+
+model-card: model-stability-check model-seed-stability-check model-scenario-holdout-check model-drift phase12-operational model-registry model-registry-check
+	$(PY) scripts/build_model_card.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--registry-dir $(MODEL_REGISTRY_DIR) \
+		--stability-report $(MODEL_REGISTRY_DIR)/stability_report.json \
+		--seed-stability-report $(MODEL_REGISTRY_DIR)/validation_seed_stability.json \
+		--scenario-holdout-report $(MODEL_REGISTRY_DIR)/scenario_holdout_report.json \
+		--output $(MODEL_REGISTRY_DIR)/model_card.json \
+		--markdown $(MODEL_REGISTRY_DIR)/model_card.md \
+		--owner $(MODEL_CARD_OWNER) --review-date $(MODEL_CARD_REVIEW_DATE) $(MODEL_CARD_FLAGS)
+
+model-card-check:
+	$(PY) scripts/check_model_card.py \
+		--dataset $(PAIR_CHALLENGER_DATASET) \
+		--model-dir $(PAIR_CHALLENGER_BASELINE) \
+		--registry-dir $(MODEL_REGISTRY_DIR) \
+		--stability-report $(MODEL_REGISTRY_DIR)/stability_report.json \
+		--seed-stability-report $(MODEL_REGISTRY_DIR)/validation_seed_stability.json \
+		--scenario-holdout-report $(MODEL_REGISTRY_DIR)/scenario_holdout_report.json \
+		--card $(MODEL_REGISTRY_DIR)/model_card.json \
+		--markdown $(MODEL_REGISTRY_DIR)/model_card.md
+
+phase12-model-card: model-card
+	$(MAKE) model-card-check
+
 model-drift:
 	$(PY) scripts/check_model_drift.py --dataset $(PAIR_CHALLENGER_DATASET) \
 		--model-dir $(PAIR_CHALLENGER_BASELINE) --output-dir $(MODEL_REGISTRY_DIR)
@@ -399,9 +478,9 @@ model-registry:
 model-registry-check:
 	$(PY) scripts/check_model_registry.py --registry-dir $(MODEL_REGISTRY_DIR)
 
-phase12-check: pair-ensemble-test pair-ensemble-check model-stability-test model-stability-check model-drift phase12-operational model-registry model-registry-check
+phase12-check: pair-ensemble-test pair-ensemble-check model-stability-test model-seed-stability-test model-seed-stability-check model-scenario-holdout-test model-scenario-holdout-check model-card-test phase12-model-card
 
-phase12: pair-ensemble-train model-stability phase12-check
+phase12: pair-ensemble-train model-stability model-seed-stability model-scenario-holdout phase12-check
 
 go-risk-test:
 	cd $(GO_RISK_DIR) && $(GO) test ./...

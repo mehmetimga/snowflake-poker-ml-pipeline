@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,9 +24,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def run_check(check_id: str, command: list[str], cwd: Path) -> dict[str, Any]:
+def run_check(
+    check_id: str,
+    command: list[str],
+    cwd: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     started = time.perf_counter()
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
+    result = subprocess.run(
+        command, cwd=cwd, text=True, capture_output=True, env=env
+    )
     output = (result.stdout + result.stderr).strip()
     return {
         "check_id": check_id,
@@ -44,6 +54,9 @@ def main() -> None:
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     go_root = root / "services" / "go"
+    go_cache = Path(tempfile.gettempdir()) / "snowflake-poker-ml-go-build-cache"
+    go_cache.mkdir(parents=True, exist_ok=True)
+    go_env = {**os.environ, "GOCACHE": str(go_cache)}
     model_dir = args.model_dir.resolve()
     artifact_manifest_path = model_dir / "artifact_manifest.json"
     artifact_manifest = json.loads(artifact_manifest_path.read_text())
@@ -52,13 +65,25 @@ def main() -> None:
             "promoted_artifact_contract",
             ["go", "run", "./cmd/risk-contract-check", "--model-dir", str(model_dir)],
             go_root,
+            env=go_env,
         ),
-        run_check("go_contract_replay_recovery_load_security", ["go", "test", "./..."], go_root),
-        run_check("go_race_detector", ["go", "test", "-race", "./internal/risk", "./internal/stream"], go_root),
+        run_check(
+            "go_contract_replay_recovery_load_security",
+            ["go", "test", "./..."],
+            go_root,
+            env=go_env,
+        ),
+        run_check(
+            "go_race_detector",
+            ["go", "test", "-race", "./internal/risk", "./internal/stream"],
+            go_root,
+            env=go_env,
+        ),
         run_check(
             "go_score_benchmark",
             ["go", "test", "-run", "^$", "-bench", "^BenchmarkScoreHand$", "-benchtime=1s", "./internal/risk"],
             go_root,
+            env=go_env,
         ),
         run_check(
             "python_governance_contracts",

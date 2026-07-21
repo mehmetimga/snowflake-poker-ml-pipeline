@@ -22,9 +22,18 @@ import pandas as pd
 from pipeline.ml.pair_model import binary_classification_report
 
 
-STABILITY_CONTRACT_VERSION = 1
+STABILITY_CONTRACT_VERSION = 2
+SEGMENT_DEFINITION_VERSION = 1
 SUPPORTED_BENCHMARKS = ("cold_start", "temporal", "new_relationship")
 PUBLIC_EVALUATION_SPLITS = ("validation", "test")
+SEGMENT_SOURCE_COLUMNS = (
+    "pair_hands_together",
+    "context_same_network",
+    "context_same_device",
+    "context_same_country",
+    "context_context_missing_a",
+    "context_context_missing_b",
+)
 BOOTSTRAP_METRICS = (
     "pr_auc",
     "roc_auc",
@@ -48,6 +57,9 @@ class StabilityConfig:
     bootstrap_samples: int = 1000
     confidence_level: float = 0.95
     random_seed: int = 42
+    minimum_segment_hands: int = 250
+    minimum_segment_positives: int = 20
+    minimum_segment_negatives: int = 20
 
     def __post_init__(self) -> None:
         if self.benchmark not in SUPPORTED_BENCHMARKS:
@@ -60,6 +72,13 @@ class StabilityConfig:
             raise ValueError("bootstrap_samples must be positive")
         if not 0 < self.confidence_level < 1:
             raise ValueError("confidence_level must be in (0, 1)")
+        for name, value in (
+            ("minimum_segment_hands", self.minimum_segment_hands),
+            ("minimum_segment_positives", self.minimum_segment_positives),
+            ("minimum_segment_negatives", self.minimum_segment_negatives),
+        ):
+            if value < 1:
+                raise ValueError(f"{name} must be positive")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +87,9 @@ class StabilityConfig:
             "bootstrap_samples": self.bootstrap_samples,
             "confidence_level": self.confidence_level,
             "random_seed": self.random_seed,
+            "minimum_segment_hands": self.minimum_segment_hands,
+            "minimum_segment_positives": self.minimum_segment_positives,
+            "minimum_segment_negatives": self.minimum_segment_negatives,
         }
 
     @classmethod
@@ -78,6 +100,13 @@ class StabilityConfig:
             bootstrap_samples=int(raw["bootstrap_samples"]),
             confidence_level=float(raw["confidence_level"]),
             random_seed=int(raw["random_seed"]),
+            minimum_segment_hands=int(raw.get("minimum_segment_hands", 250)),
+            minimum_segment_positives=int(
+                raw.get("minimum_segment_positives", 20)
+            ),
+            minimum_segment_negatives=int(
+                raw.get("minimum_segment_negatives", 20)
+            ),
         )
 
 
@@ -312,6 +341,175 @@ def hand_grouped_bootstrap_intervals(
     }
 
 
+def _evaluation_segment_masks(
+    frame: pd.DataFrame,
+) -> list[tuple[str, str, str, np.ndarray]]:
+    """Return the fixed, versioned public-evaluation segment definitions."""
+
+    missing = sorted(set(SEGMENT_SOURCE_COLUMNS) - set(frame.columns))
+    if missing:
+        raise ValueError(f"public evaluation is missing segment columns: {missing}")
+    history = pd.to_numeric(frame["pair_hands_together"], errors="raise").to_numpy()
+    same_network = frame["context_same_network"].astype(bool).to_numpy()
+    same_device = frame["context_same_device"].astype(bool).to_numpy()
+    same_country = frame["context_same_country"].astype(bool).to_numpy()
+    context_complete = (
+        ~frame["context_context_missing_a"].astype(bool)
+        & ~frame["context_context_missing_b"].astype(bool)
+    ).to_numpy()
+    return [
+        (
+            "pair_history",
+            "no_prior_hands",
+            "pair_hands_together == 0",
+            history == 0,
+        ),
+        (
+            "pair_history",
+            "limited_history_1_4",
+            "1 <= pair_hands_together <= 4",
+            (history >= 1) & (history <= 4),
+        ),
+        (
+            "pair_history",
+            "established_history_5_plus",
+            "pair_hands_together >= 5",
+            history >= 5,
+        ),
+        (
+            "same_network",
+            "false",
+            "context_same_network == false",
+            ~same_network,
+        ),
+        (
+            "same_network",
+            "true",
+            "context_same_network == true",
+            same_network,
+        ),
+        (
+            "same_device",
+            "false",
+            "context_same_device == false",
+            ~same_device,
+        ),
+        (
+            "same_device",
+            "true",
+            "context_same_device == true",
+            same_device,
+        ),
+        (
+            "same_country",
+            "false",
+            "context_same_country == false",
+            ~same_country,
+        ),
+        (
+            "same_country",
+            "true",
+            "context_same_country == true",
+            same_country,
+        ),
+        (
+            "context_availability",
+            "complete",
+            "neither pair member has missing context",
+            context_complete,
+        ),
+        (
+            "context_availability",
+            "missing",
+            "at least one pair member has missing context",
+            ~context_complete,
+        ),
+    ]
+
+
+def segment_stability_report(
+    frame: pd.DataFrame,
+    *,
+    threshold: float,
+    max_alert_rate: float,
+    config: StabilityConfig,
+) -> dict[str, Any]:
+    """Build point estimates and hand-bootstrap intervals for reliable slices.
+
+    Counts are always published. Metrics for a segment below any configured
+    reliability floor are deliberately suppressed, preventing a tiny slice
+    from being interpreted as production-quality evidence.
+    """
+
+    required = {"hand_id", "target", "calibrated_probability"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"segment stability frame is missing columns: {missing}")
+    records: list[dict[str, Any]] = []
+    for family, value, definition, mask in _evaluation_segment_masks(frame):
+        segment = frame.loc[mask].copy()
+        rows = int(len(segment))
+        hands = int(segment["hand_id"].astype(str).nunique()) if rows else 0
+        positives = int(segment["target"].astype(int).sum()) if rows else 0
+        negatives = rows - positives
+        reasons: list[str] = []
+        for name, actual, minimum in (
+            ("hands", hands, config.minimum_segment_hands),
+            ("positives", positives, config.minimum_segment_positives),
+            ("negatives", negatives, config.minimum_segment_negatives),
+        ):
+            if actual < minimum:
+                reasons.append(f"{name}_below_minimum:{actual}<{minimum}")
+        reliable = not reasons
+        point: dict[str, Any] | None = None
+        bootstrap: dict[str, Any] | None = None
+        if reliable:
+            point = binary_classification_report(
+                segment["target"].astype(int).to_numpy(),
+                segment["calibrated_probability"].astype(float).to_numpy(),
+                threshold=threshold,
+                max_alert_rate=max_alert_rate,
+                hand_count=hands,
+            )
+            bootstrap = hand_grouped_bootstrap_intervals(
+                segment[["hand_id", "target", "calibrated_probability"]],
+                threshold=threshold,
+                max_alert_rate=max_alert_rate,
+                config=config,
+            )
+            for metric in BOOTSTRAP_METRICS:
+                bootstrap["metrics"][metric]["point_estimate"] = point[metric]
+        records.append(
+            {
+                "segment_family": family,
+                "segment_value": value,
+                "definition": definition,
+                "counts": {
+                    "rows": rows,
+                    "hands": hands,
+                    "positives": positives,
+                    "negatives": negatives,
+                },
+                "reliability": {
+                    "status": "reliable" if reliable else "suppressed",
+                    "reasons": reasons,
+                },
+                "point_metrics": point,
+                "bootstrap": bootstrap,
+            }
+        )
+    return {
+        "definition_version": SEGMENT_DEFINITION_VERSION,
+        "reliability_floor": {
+            "minimum_hands": config.minimum_segment_hands,
+            "minimum_positives": config.minimum_segment_positives,
+            "minimum_negatives": config.minimum_segment_negatives,
+        },
+        "suppression_policy": "counts_visible_metrics_hidden_below_any_floor",
+        "segments": records,
+    }
+
+
 def _verify_tracked_file(
     root: Path, artifacts: Mapping[str, str], relative: str, *, owner: str
 ) -> tuple[Path, str]:
@@ -373,7 +571,13 @@ def _load_public_evaluation(
         raise ValueError("feature-definition identity does not match")
 
     evaluation = pd.read_parquet(evaluation_path)
-    required_evaluation = {"event_id", "hand_id", "pair_key", "target"}
+    required_evaluation = {
+        "event_id",
+        "hand_id",
+        "pair_key",
+        "target",
+        *SEGMENT_SOURCE_COLUMNS,
+    }
     missing = sorted(required_evaluation - set(evaluation.columns))
     if missing:
         raise ValueError(f"public evaluation is missing columns: {missing}")
@@ -397,7 +601,14 @@ def _load_public_evaluation(
         for column in ("event_id", "hand_id", "pair_key"):
             frame[column] = frame[column].astype(str)
 
-    aligned = evaluation[["event_id", "hand_id", "pair_key", "target"]].merge(
+    evaluation_columns = [
+        "event_id",
+        "hand_id",
+        "pair_key",
+        "target",
+        *SEGMENT_SOURCE_COLUMNS,
+    ]
+    aligned = evaluation[evaluation_columns].merge(
         predictions,
         on="event_id",
         how="left",
@@ -491,6 +702,20 @@ def compute_stability_report(
     )
     for metric in BOOTSTRAP_METRICS:
         bootstrap["metrics"][metric]["point_estimate"] = point[metric]
+    segment_frame = aligned[
+        [
+            "hand_id",
+            "target",
+            "calibrated_probability",
+            *SEGMENT_SOURCE_COLUMNS,
+        ]
+    ].copy()
+    segments = segment_stability_report(
+        segment_frame,
+        threshold=threshold,
+        max_alert_rate=max_alert_rate,
+        config=config,
+    )
 
     return {
         "contract_version": STABILITY_CONTRACT_VERSION,
@@ -516,6 +741,7 @@ def compute_stability_report(
         },
         "point_metrics": point,
         "bootstrap": bootstrap,
+        "segment_analysis": segments,
         "source_artifacts": sources,
         "leakage_controls": {
             "sampling_unit": "hand_id",
@@ -554,6 +780,7 @@ def validate_stability_report(
     actual = {key: value for key, value in report.items() if key != "generated_at"}
     if actual != expected:
         raise ValueError("stability report does not match deterministic recomputation")
+    segment_records = expected["segment_analysis"]["segments"]
     return {
         "model_name": expected["model"]["model_name"],
         "run_id": expected["model"]["run_id"],
@@ -563,4 +790,12 @@ def validate_stability_report(
         "bootstrap_samples": config.bootstrap_samples,
         "pr_auc": expected["point_metrics"]["pr_auc"],
         "pr_auc_interval": expected["bootstrap"]["metrics"]["pr_auc"],
+        "reliable_segments": sum(
+            record["reliability"]["status"] == "reliable"
+            for record in segment_records
+        ),
+        "suppressed_segments": sum(
+            record["reliability"]["status"] == "suppressed"
+            for record in segment_records
+        ),
     }

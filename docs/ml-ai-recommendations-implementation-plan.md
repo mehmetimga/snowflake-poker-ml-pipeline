@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 1 |
+| Plan version | 4 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase A — model card, segment intervals, and validation-seed stability |
+| Immediate next phase | Phase A — generic candidate registry schema |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -119,11 +119,27 @@ Add:
 
 ```text
 pipeline/ml/stability.py
+pipeline/ml/model_card.py
+pipeline/ml/seed_stability.py
+pipeline/ml/scenario_holdout.py
 scripts/build_model_stability_report.py
 scripts/check_model_stability.py
+scripts/build_model_card.py
+scripts/check_model_card.py
+scripts/build_validation_seed_stability.py
+scripts/check_validation_seed_stability.py
+scripts/build_scenario_holdout_report.py
+scripts/check_scenario_holdout_report.py
 tests/test_model_stability.py
+tests/test_model_card.py
+tests/test_seed_stability.py
+tests/test_scenario_holdout.py
 models/registry/stability_report.json
 models/registry/model_card.json
+models/registry/model_card.md
+models/registry/validation_seed_stability.json
+models/registry/scenario_holdout_report.json
+models/registry/generator_scenario_lineage.parquet
 ```
 
 Implementation status:
@@ -133,18 +149,50 @@ Implementation status:
 - [x] `scripts/check_model_stability.py`
 - [x] `tests/test_model_stability.py`
 - [x] Local generated `models/registry/stability_report.json`
-- [ ] `models/registry/model_card.json`
+- [x] `pipeline/ml/model_card.py`
+- [x] `scripts/build_model_card.py`
+- [x] `scripts/check_model_card.py`
+- [x] `tests/test_model_card.py`
+- [x] Local generated `models/registry/model_card.json`
+- [x] Local generated `models/registry/model_card.md`
+- [x] `pipeline/ml/seed_stability.py`
+- [x] `scripts/build_validation_seed_stability.py`
+- [x] `scripts/check_validation_seed_stability.py`
+- [x] `tests/test_seed_stability.py`
+- [x] Local generated `models/registry/validation_seed_stability.json`
+- [x] `pipeline/ml/scenario_holdout.py`
+- [x] `scripts/build_scenario_holdout_report.py`
+- [x] `scripts/check_scenario_holdout_report.py`
+- [x] `tests/test_scenario_holdout.py`
+- [x] Local generated `models/registry/scenario_holdout_report.json`
+- [x] Local generated private evaluation-only
+  `models/registry/generator_scenario_lineage.parquet`
 
 Add Make targets:
 
 ```text
 model-stability
 model-stability-check
+model-card
+model-card-check
+model-seed-stability
+model-seed-stability-check
+model-scenario-holdout
+model-scenario-holdout-check
 ```
 
 - [x] Added `model-stability-test`.
 - [x] Added `model-stability`.
 - [x] Added `model-stability-check`.
+- [x] Added `model-card-test`.
+- [x] Added `model-card`.
+- [x] Added `model-card-check`.
+- [x] Added `model-seed-stability-test`.
+- [x] Added `model-seed-stability`.
+- [x] Added `model-seed-stability-check`.
+- [x] Added `model-scenario-holdout-test`.
+- [x] Added `model-scenario-holdout`.
+- [x] Added `model-scenario-holdout-check`.
 - [x] Extended `phase12-check` with stability tests and deterministic report
   verification.
 
@@ -157,28 +205,28 @@ Extend `phase12-check` to run the stability checker.
   false positives per 1,000 hands.
 - [x] Bootstrap by `hand_id`; never sample pair rows independently.
 - [x] Report recall and precision at the fixed analyst alert budget.
-- [ ] Report validation robustness across at least five training seeds.
-- [ ] Keep seed robustness on train/validation; do not select a seed using test.
-- [ ] Add generator-seed and scenario-family holdout summaries.
-- [ ] Add segment metrics with counts and confidence intervals.
-- [ ] Suppress or mark segments below a configured reliability floor.
+- [x] Report validation robustness across at least five training seeds.
+- [x] Keep seed robustness on train/validation; do not select a seed using test.
+- [x] Add generator-seed and scenario-family holdout summaries.
+- [x] Add segment metrics with counts and confidence intervals.
+- [x] Suppress or mark segments below a configured reliability floor.
 - [x] Record every stability configuration and random seed.
 
 ### A3. Model card
 
 The machine-readable and Markdown-renderable model card must include:
 
-- [ ] prediction unit and intended use;
-- [ ] prohibited uses;
-- [ ] dataset IDs, hashes, splits, and label policy;
-- [ ] feature, preprocessing, model, calibration, and policy versions;
-- [ ] overall and segment metrics with counts;
-- [ ] synthetic-data limitation;
-- [ ] known failure modes;
-- [ ] drift reference and current drift status;
-- [ ] inference contract and latency evidence;
-- [ ] promotion and rollback identities; and
-- [ ] owner and review date.
+- [x] prediction unit and intended use;
+- [x] prohibited uses;
+- [x] dataset IDs, hashes, splits, and label policy;
+- [x] feature, preprocessing, model, calibration, and policy versions;
+- [x] overall and segment metrics with counts;
+- [x] synthetic-data limitation;
+- [x] known failure modes;
+- [x] drift reference and current drift status;
+- [x] inference contract and latency evidence;
+- [x] promotion and rollback identities; and
+- [x] owner and review date.
 
 ### A4. Registry generalization
 
@@ -199,7 +247,17 @@ Phase A is complete when:
 - [x] existing CatBoost metrics reproduce from frozen predictions;
 - [x] bootstrap output is deterministic for a fixed bootstrap seed;
 - [x] private challenge datasets and labels are not opened;
-- [ ] model-card facts match the artifact and registry;
+- [x] model-card facts match the artifact and registry;
+- [x] validation seed evidence opens only train/validation and does not select a
+  best-looking seed;
+- [x] material validation seed sensitivity is surfaced as a warning in the
+  model card;
+- [x] scenario lineage is private evaluation evidence and is never included in
+  a model feature matrix;
+- [x] every leave-one-family-out model removes the held-out family from both
+  training and validation calibration; and
+- [x] generator/scenario evidence is hash-bound, deterministically reproducible,
+  challenge-free, and visible in the model card;
 - [x] mutation of any tracked source or report evidence fails validation;
 - [x] all new tests pass; and
 - [x] `make phase12-check` includes and passes the new controls.
@@ -579,6 +637,66 @@ First pull-request-sized slice:
 Do not change the Go scorer, decision threshold, registry champion, or private
 challenge during this slice.
 
+Second pull-request-sized slice:
+
+1. [x] Add versioned production-style segment definitions.
+2. [x] Compute point metrics and hand-grouped intervals for reliable segments.
+3. [x] Publish counts but suppress metrics below configured hand/class floors.
+4. [x] Generate a machine-readable model card from governed evidence.
+5. [x] Render Markdown from the same JSON card and validate exact parity.
+6. [x] Bind model-card facts to dataset, model, registry, deployment, drift,
+   operational, and stability artifacts.
+7. [x] Add model-card tests and include the build/check sequence in
+   `phase12-check`.
+
+Do not interpret suppressed segment metrics as zero performance. The next data
+generation work should increase independent positive coverage for those
+segments before they are used for promotion decisions.
+
+Third pull-request-sized slice:
+
+1. [x] Add a separate allowlisted CatBoost trainer that opens only frozen train
+   and validation parquet files.
+2. [x] Refit the exact champion hyperparameters for five fixed unique seeds.
+3. [x] Refit calibration and the alert-budget threshold independently on
+   validation for each seed.
+4. [x] Record per-seed prediction digests, metrics, best iteration, calibration,
+   threshold, and aggregate statistics.
+5. [x] Prohibit test/challenge reads and seed selection in the evidence contract.
+6. [x] Add integrity, source-hash, deterministic recomputation, and mutation
+   checks.
+7. [x] Bind seed stability into the JSON/Markdown model card and Phase 12 gate.
+8. [x] Scope Go's operational-test build cache to a writable temporary path so
+   managed-workspace cache trimming cannot create false failures.
+
+The result is a `warning`, not a passing stability claim: validation PR-AUC
+varies from `0.145587` to `0.225296`, a `0.416905` relative spread versus the
+configured `0.25` limit. Do not choose the best seed or replace the champion
+from this result. Treat it as evidence that the rare-positive synthetic
+validation window is sensitive to stochastic training.
+
+Fourth pull-request-sized slice:
+
+1. [x] Bind the pair dataset to its exact source-world manifest and generator
+   seeds.
+2. [x] Derive a private scenario-lineage sidecar from the generator's fixed
+   round-robin pair-pattern assignment; do not add it to model features.
+3. [x] Report champion metrics and hand-grouped intervals on independent
+   validation seed `10042` and public-test seed `20042`.
+4. [x] Train four leave-one-scenario-family-out CatBoost models with the
+   champion hyperparameters and seed.
+5. [x] Remove every held-out-family hand from both training and calibration,
+   then evaluate only on normal plus held-out-family public-test hands.
+6. [x] Compare unseen-family models with champion references and write
+   hand-grouped confidence intervals.
+7. [x] Add semantic/file hashes, mutation checks, deterministic retraining,
+   model-card binding, tests, and Phase 12 integration.
+
+Unseen-family PR-AUC ranges from `0.078057` for `soft_play` to `0.429689`
+for `fold_benefit`. The four family test slices contain only 15–23 positives,
+so their intervals remain wide. Treat these as scenario-generalization
+evidence, not as independently promotable models.
+
 ## 13. Progress log
 
 Add dated entries here as phases move:
@@ -588,3 +706,6 @@ Add dated entries here as phases move:
 | 2026-07-20 | Planning | Created implementation follow-up plan | This document | Phase A is next |
 | 2026-07-20 | A | Completed the first stability slice: exact hand-grouped bootstrap, hash-bound report, deterministic checker, tests, and Make integration | `make model-stability`; `make model-stability-check`; `make phase12-check`; PR-AUC `0.362918`, 95% CI `[0.255751, 0.494629]` from 1,000 hand draws | Phase A remains in progress; model card, segment intervals, and validation multi-seed evidence are next |
 | 2026-07-20 | A validation | Targeted stability tests and the complete Phase 12 gate pass. The repository-wide `python -m pytest -q` currently stops during collection because the active base interpreter does not have the pinned `pokerkit==0.7.4` dependency installed. | `make model-stability-test`: 4 passed; `make phase12-check`: passed; `requirements.txt`: `pokerkit==0.7.4` | Dependency environment follow-up; this does not block the Phase A stability slice |
+| 2026-07-20 | A | Added versioned segment definitions, configured reliability floors, whole-hand confidence intervals, and suppression for statistically thin slices. Added a hash-bound JSON model card and generated Markdown view tied to dataset, model, stability, registry, deployment, drift, and operational evidence. | `make phase12-check`: passed; 6/11 segments reliable, 5/11 suppressed; model-card hashes, identities, and Markdown parity passed; stability tests: 5 passed; model-card tests: 1 passed | Phase A remains in progress; validation multi-seed evidence, generator/scenario holdouts, and generic registry schema are next |
+| 2026-07-21 | A | Added validation-only five-seed CatBoost robustness evidence and bound its warning into the governed model card. The loader allowlists only train/validation; deterministic recomputation passed without test, challenge, or stored prediction reads. Also moved the Go operational build cache to a writable temporary directory for managed-workspace execution. | Seeds `11,23,42,67,101`; validation PR-AUC `[0.145587, 0.225296]`; relative spread `0.416905`; status `warning`; seed tests: 2 passed; `--recompute`: passed; `make phase12-check`: passed | Do not select the best seed or change production. Phase A remains in progress; generator/scenario holdouts and generic registry schema are next |
+| 2026-07-21 | A | Added independent generator-seed summaries and four true leave-one-scenario-family-out CatBoost evaluations. Scenario lineage is stored only in a private evaluation sidecar; held-out hands are absent from training/calibration and challenge is never loaded. Bound results into the governed model card. | Generator seeds: train `42`, validation `10042`, test `20042`; unseen-family PR-AUC: `soft_play=0.078057`, `chip_dump=0.318533`, `squeeze_collude=0.230247`, `fold_benefit=0.429689`; 300 hand bootstraps; scenario tests: 2 passed; deterministic `--recompute`: passed; `make phase12-check`: passed | No scenario model selected and no production change. Phase A remains in progress; generic candidate registry schema is next |

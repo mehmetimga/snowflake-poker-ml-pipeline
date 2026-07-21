@@ -29,7 +29,9 @@ def main() -> None:
         f"split={result['split']} hands={result['hands']} rows={result['rows']} "
         f"pr_auc={result['pr_auc']:.6f} "
         f"ci=[{interval['lower']:.6f},{interval['upper']:.6f}] "
-        f"bootstrap={result['bootstrap_samples']} hashes=passed "
+        f"bootstrap={result['bootstrap_samples']} "
+        f"segments={result['reliable_segments']}_reliable/"
+        f"{result['suppressed_segments']}_suppressed hashes=passed "
         "recompute=passed challenge_read=false"
     )
 

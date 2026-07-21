@@ -32,6 +32,9 @@ def main() -> None:
     parser.add_argument("--bootstrap-samples", type=int, default=1000)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--random-seed", type=int, default=42)
+    parser.add_argument("--minimum-segment-hands", type=int, default=250)
+    parser.add_argument("--minimum-segment-positives", type=int, default=20)
+    parser.add_argument("--minimum-segment-negatives", type=int, default=20)
     args = parser.parse_args()
     report = build_stability_report(
         args.dataset,
@@ -43,9 +46,16 @@ def main() -> None:
             bootstrap_samples=args.bootstrap_samples,
             confidence_level=args.confidence_level,
             random_seed=args.random_seed,
+            minimum_segment_hands=args.minimum_segment_hands,
+            minimum_segment_positives=args.minimum_segment_positives,
+            minimum_segment_negatives=args.minimum_segment_negatives,
         ),
     )
     interval = report["bootstrap"]["metrics"]["pr_auc"]
+    segments = report["segment_analysis"]["segments"]
+    reliable_segments = sum(
+        segment["reliability"]["status"] == "reliable" for segment in segments
+    )
     print(
         f"[model-stability] model={report['model']['model_name']} "
         f"run={report['model']['run_id']} split={args.split} "
@@ -53,6 +63,7 @@ def main() -> None:
         f"pr_auc={report['point_metrics']['pr_auc']:.6f} "
         f"ci=[{interval['lower']:.6f},{interval['upper']:.6f}] "
         f"bootstrap={args.bootstrap_samples} sampling_unit=hand_id "
+        f"segments={reliable_segments}/{len(segments)}_reliable "
         f"output={args.output}"
     )
 

@@ -16,6 +16,7 @@ from pipeline.ml.stability import (
     build_stability_report,
     hand_group_bootstrap_weights,
     hand_grouped_bootstrap_intervals,
+    segment_stability_report,
     validate_stability_report,
 )
 
@@ -74,6 +75,45 @@ def test_weighted_ranking_metrics_match_sklearn_with_score_ties() -> None:
     )
 
 
+def test_segment_metrics_are_suppressed_below_reliability_floor() -> None:
+    frame = pd.DataFrame(
+        {
+            "hand_id": np.repeat([f"hand-{index}" for index in range(20)], 3),
+            "target": np.tile([1, 0, 0], 20),
+            "calibrated_probability": np.tile([0.9, 0.4, 0.1], 20),
+            "pair_hands_together": np.tile([0, 2, 8], 20),
+            "context_same_network": np.tile([True, False, False], 20),
+            "context_same_device": np.tile([False, False, False], 20),
+            "context_same_country": np.tile([True, False, False], 20),
+            "context_context_missing_a": False,
+            "context_context_missing_b": False,
+        }
+    )
+    result = segment_stability_report(
+        frame,
+        threshold=0.8,
+        max_alert_rate=0.2,
+        config=StabilityConfig(
+            bootstrap_samples=10,
+            random_seed=3,
+            minimum_segment_hands=5,
+            minimum_segment_positives=3,
+            minimum_segment_negatives=3,
+        ),
+    )
+    by_name = {
+        (item["segment_family"], item["segment_value"]): item
+        for item in result["segments"]
+    }
+    reliable = by_name[("same_device", "false")]
+    assert reliable["reliability"]["status"] == "reliable"
+    assert reliable["bootstrap"]["sampling_unit"] == "hand_id"
+    suppressed = by_name[("context_availability", "missing")]
+    assert suppressed["reliability"]["status"] == "suppressed"
+    assert suppressed["point_metrics"] is None
+    assert suppressed["bootstrap"] is None
+
+
 def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
     dataset = root / "dataset"
     model = root / "model"
@@ -94,6 +134,12 @@ def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
             "hand_id": hands,
             "pair_key": pairs,
             "target": labels,
+            "pair_hands_together": np.tile([0, 2, 8], 12),
+            "context_same_network": np.tile([True, False, False], 12),
+            "context_same_device": False,
+            "context_same_country": np.tile([True, False, False], 12),
+            "context_context_missing_a": False,
+            "context_context_missing_b": False,
         }
     )
     evaluation.to_parquet(evaluation_path, index=False)
