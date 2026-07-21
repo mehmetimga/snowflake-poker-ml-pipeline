@@ -938,6 +938,8 @@ C1_MODEL_BUNDLE ?= build/c1/risk-runtime
 C1_MODEL_RUN_ID ?= pair_7a1c58c1046b
 C1_ALLOWED_TENANTS ?= demo
 C1_RISK_SCORER_GROUP_ID ?= poker-go-risk-scorer-v1
+C1_FLINK_CONTEXT_SAVEPOINT_PATH ?=
+C1_FLINK_PAIR_SAVEPOINT_PATH ?=
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -978,7 +980,12 @@ snow-status:
 	$(PY) infra/snowflake/deploy.py status
 
 c1-package-test:
-	$(PY) -m pytest -q tests/test_snowflake_deploy.py tests/test_c1_packaging.py
+	$(PY) -m pytest -q tests/test_snowflake_deploy.py tests/test_c1_packaging.py \
+		tests/test_spcs_flink_savepoints.py
+
+c1-take-flink-savepoints:
+	$(PY) scripts/spcs_flink_savepoints.py \
+		--image-path /POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:$(C1_FLINK_IMAGE_TAG)
 
 c1-risk-bundle:
 	$(PY) scripts/build_risk_runtime_bundle.py \
@@ -993,6 +1000,8 @@ c1-render:
 	SPCS_FLINK_BUILD_VERSION=$(C1_FLINK_IMAGE_TAG) \
 	SPCS_MODEL_RUN_ID=$(C1_MODEL_RUN_ID) \
 	SPCS_RISK_SCORER_GROUP_ID=$(C1_RISK_SCORER_GROUP_ID) \
+	SPCS_FLINK_CONTEXT_SAVEPOINT_PATH=$(C1_FLINK_CONTEXT_SAVEPOINT_PATH) \
+	SPCS_FLINK_PAIR_SAVEPOINT_PATH=$(C1_FLINK_PAIR_SAVEPOINT_PATH) \
 	RISK_ALLOWED_TENANTS=$(C1_ALLOWED_TENANTS) \
 		$(PY) infra/snowflake/deploy.py render
 

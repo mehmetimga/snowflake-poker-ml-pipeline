@@ -37,6 +37,8 @@ def test_render_specs_substitutes_image_and_kafka(monkeypatch, tmp_path: Path):
         "group: __RISK_SCORER_GROUP_ID__\n"
         "risk_build: __RISK_BUILD_VERSION__\n"
         "flink_build: __FLINK_BUILD_VERSION__\n"
+        "context_savepoint: __FLINK_CONTEXT_SAVEPOINT_PATH__\n"
+        "pair_savepoint: __FLINK_PAIR_SAVEPOINT_PATH__\n"
     )
     monkeypatch.setattr(deploy, "SPECS_DIR", templates)
     monkeypatch.setattr(deploy, "RENDERED_DIR", rendered)
@@ -52,6 +54,8 @@ def test_render_specs_substitutes_image_and_kafka(monkeypatch, tmp_path: Path):
         "group: poker-go-risk-scorer-v1\n"
         "risk_build: dev\n"
         "flink_build: dev\n"
+        "context_savepoint: \n"
+        "pair_savepoint: \n"
     )
 
 
@@ -92,4 +96,53 @@ def test_render_specs_rejects_unsafe_release_identity(tmp_path: Path, monkeypatc
             deploy.DEFAULT_IMAGE_PATH,
             "broker.example.com:9092",
             risk_scorer_group_id="group;DROP SERVICE",
+        )
+
+
+def test_render_specs_accepts_validated_flink_savepoints(monkeypatch, tmp_path: Path):
+    templates = tmp_path / "templates"
+    rendered = tmp_path / "rendered"
+    templates.mkdir()
+    (templates / "flink.yaml.template").write_text(
+        "context: '__FLINK_CONTEXT_SAVEPOINT_PATH__'\n"
+        "pair: '__FLINK_PAIR_SAVEPOINT_PATH__'\n"
+    )
+    monkeypatch.setattr(deploy, "SPECS_DIR", templates)
+    monkeypatch.setattr(deploy, "RENDERED_DIR", rendered)
+
+    deploy.render_specs(
+        deploy.DEFAULT_IMAGE_PATH,
+        "broker.example.com:9092",
+        flink_context_savepoint_path=(
+            "file:///opt/flink/state/savepoints/savepoint-context123"
+        ),
+        flink_pair_savepoint_path="file:/opt/flink/state/savepoints/savepoint-pair456",
+    )
+
+    assert (rendered / "flink.yaml").read_text() == (
+        "context: 'file:///opt/flink/state/savepoints/savepoint-context123'\n"
+        "pair: 'file:/opt/flink/state/savepoints/savepoint-pair456'\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://example.com/savepoint-1",
+        "file:///tmp/savepoint-1",
+        "file:///opt/flink/state/savepoints/../escape",
+        "file:///opt/flink/state/savepoints/savepoint-x\"\nenv: injected",
+    ],
+)
+def test_render_specs_rejects_unsafe_flink_savepoint_uri(
+    value: str, monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(deploy, "SPECS_DIR", tmp_path)
+    monkeypatch.setattr(deploy, "RENDERED_DIR", tmp_path / "rendered")
+
+    with pytest.raises(SystemExit, match="context savepoint URI"):
+        deploy.render_specs(
+            deploy.DEFAULT_IMAGE_PATH,
+            "broker.example.com:9092",
+            flink_context_savepoint_path=value,
         )

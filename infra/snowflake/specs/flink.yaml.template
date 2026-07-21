@@ -80,8 +80,8 @@ spec:
       FLINK_CONTEXT_GROUP_ID: flink-context-enrichment-v1
       FLINK_PAIR_FEATURES_GROUP_ID: flink-pair-features-v1
       FLINK_STATEFUL_RULE_ENABLED: "true"
-      FLINK_CONTEXT_SAVEPOINT_PATH: ""
-      FLINK_PAIR_SAVEPOINT_PATH: ""
+      FLINK_CONTEXT_SAVEPOINT_PATH: "__FLINK_CONTEXT_SAVEPOINT_PATH__"
+      FLINK_PAIR_SAVEPOINT_PATH: "__FLINK_PAIR_SAVEPOINT_PATH__"
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: 127.0.0.1
         rest.address: 127.0.0.1

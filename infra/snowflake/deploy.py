@@ -36,6 +36,9 @@ _IMAGE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$"
 )
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SAVEPOINT_URI = re.compile(
+    r"^file:/+opt/flink/state/savepoints/savepoint-[A-Za-z0-9_-]+$"
+)
 
 
 def _warehouse():
@@ -173,6 +176,8 @@ def render_specs(
     model_run_id: str = DEFAULT_MODEL_RUN_ID,
     allowed_tenants: str = "demo",
     risk_scorer_group_id: str = DEFAULT_RISK_SCORER_GROUP_ID,
+    flink_context_savepoint_path: str = "",
+    flink_pair_savepoint_path: str = "",
 ) -> None:
     image_paths = {
         "application": image_path,
@@ -200,6 +205,15 @@ def render_specs(
     tenants = [value.strip() for value in allowed_tenants.split(",") if value.strip()]
     if not tenants or any(not _SAFE_ID.fullmatch(value) for value in tenants):
         raise SystemExit("RISK_ALLOWED_TENANTS must be a comma-separated ID allowlist")
+    for label, candidate in {
+        "context savepoint URI": flink_context_savepoint_path,
+        "pair savepoint URI": flink_pair_savepoint_path,
+    }.items():
+        if candidate and not _SAVEPOINT_URI.fullmatch(candidate):
+            raise SystemExit(
+                f"Invalid {label}: expected a savepoint below "
+                "file:///opt/flink/state/savepoints"
+            )
 
     replacements = {
         "__IMAGE_PATH__": image_path,
@@ -211,6 +225,8 @@ def render_specs(
         "__MODEL_RUN_ID__": model_run_id,
         "__RISK_ALLOWED_TENANTS__": ",".join(tenants),
         "__RISK_SCORER_GROUP_ID__": risk_scorer_group_id,
+        "__FLINK_CONTEXT_SAVEPOINT_PATH__": flink_context_savepoint_path,
+        "__FLINK_PAIR_SAVEPOINT_PATH__": flink_pair_savepoint_path,
     }
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     for template_path in sorted(SPECS_DIR.glob("*.yaml.template")):
@@ -406,6 +422,14 @@ def main() -> None:
             "SPCS_RISK_SCORER_GROUP_ID", DEFAULT_RISK_SCORER_GROUP_ID
         ),
     )
+    render.add_argument(
+        "--flink-context-savepoint-path",
+        default=os.environ.get("SPCS_FLINK_CONTEXT_SAVEPOINT_PATH", ""),
+    )
+    render.add_argument(
+        "--flink-pair-savepoint-path",
+        default=os.environ.get("SPCS_FLINK_PAIR_SAVEPOINT_PATH", ""),
+    )
 
     sub.add_parser("deploy-admin")
     sub.add_parser("suspend-admin")
@@ -444,6 +468,8 @@ def main() -> None:
             model_run_id=args.model_run_id,
             allowed_tenants=args.allowed_tenants,
             risk_scorer_group_id=args.risk_scorer_group_id,
+            flink_context_savepoint_path=args.flink_context_savepoint_path,
+            flink_pair_savepoint_path=args.flink_pair_savepoint_path,
         )
     elif args.command == "deploy-admin":
         deploy_service("POKER_ADMIN", "admin.yaml")
