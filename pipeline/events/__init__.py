@@ -55,6 +55,7 @@ from .contracts import (
     stable_review_decision_id,
     validate_event,
 )
+from .invariants import remember_deterministic_event
 
 __all__ = [
     "ACCOUNT_LINK_UPDATED",
@@ -107,6 +108,7 @@ __all__ = [
     "contract_schema_bundle",
     "event_partition_key",
     "rule_evidence_partition_key",
+    "remember_deterministic_event",
     "stable_rule_event_id",
     "stable_review_decision_id",
     "validate_event",

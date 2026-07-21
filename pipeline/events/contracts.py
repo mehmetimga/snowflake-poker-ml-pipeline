@@ -430,6 +430,8 @@ class PairFeatureEvent(_ContractModel):
             raise ValueError("event timestamps must include timezone information")
         if self.occurred_at != self.payload.played_at:
             raise ValueError("derived occurred_at must equal hand played_at")
+        if self.emitted_at < self.occurred_at:
+            raise ValueError("pair-feature emitted_at cannot precede occurred_at")
         seen: set[uuid.UUID] = set()
         for raw in self.upstream_rule_evidence:
             evidence = RuleEvidenceEvent.model_validate(raw)

@@ -89,8 +89,12 @@ func (event PairFeatureEvent) Validate(expectedFeatureVersion string) error {
 	if err != nil || !occurredAt.Equal(playedAt) {
 		return fmt.Errorf("occurred_at must be a valid timestamp equal to played_at")
 	}
-	if _, err := time.Parse(time.RFC3339Nano, event.EmittedAt); err != nil {
+	emittedAt, err := time.Parse(time.RFC3339Nano, event.EmittedAt)
+	if err != nil {
 		return fmt.Errorf("invalid emitted_at: %w", err)
+	}
+	if emittedAt.Before(occurredAt) {
+		return fmt.Errorf("pair-feature emitted_at cannot precede occurred_at")
 	}
 	if payload.PlayerA >= payload.PlayerB || payload.PairKey != payload.PlayerA+":"+payload.PlayerB {
 		return fmt.Errorf("pair endpoints are not in canonical order")

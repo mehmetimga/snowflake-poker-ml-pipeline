@@ -38,6 +38,7 @@ data/raw/*
 data/parquet/*
 data/seeds/*
 data/datasets/*
+data/generated/*
 data/runs/*
 !data/raw/.gitkeep
 !data/parquet/.gitkeep

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from pipeline.context import enrich_player_hand
 from pipeline.events import (
     HAND_COMPLETED,
@@ -9,6 +11,7 @@ from pipeline.events import (
     PAIR_FEATURES_TOPIC,
     USER_CONTEXT_UPDATED,
     HandCompletedPayload,
+    PairFeatureEvent,
     UserContextPayload,
     build_event,
     contract_schema_bundle,
@@ -166,3 +169,15 @@ def test_pair_feature_contract_is_exported_for_non_python_consumers():
 
     assert PAIR_FEATURES_COMPUTED in bundle["derived_events"]
     assert bundle["derived_topics"][PAIR_FEATURES_COMPUTED] == PAIR_FEATURES_TOPIC
+
+
+def test_pair_feature_contract_rejects_emission_before_hand_time():
+    row = PairFeatureCore().process_many(_enriched_hand(_hand_events(1)[0]))[0]
+    raw = row.model_dump(mode="json")
+    raw["emitted_at"] = row.occurred_at - timedelta(microseconds=1)
+
+    with pytest.raises(
+        ValueError,
+        match="pair-feature emitted_at cannot precede occurred_at",
+    ):
+        PairFeatureEvent.model_validate(raw)

@@ -387,6 +387,31 @@ func TestProcessorDeadLettersPoisonRecordBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestProcessorDeadLettersCausallyInvalidPairBeforeAssembly(t *testing.T) {
+	publisher, committer := &fakePublisher{}, &fakeCommitter{}
+	processor, scorer := newTestProcessor(t, publisher, committer)
+	event := pairEvents("hand-future")[0]
+	event.EmittedAt = "2026-07-19T23:59:59Z"
+	value, _ := json.Marshal(event)
+
+	result, err := processor.Handle(context.Background(), InputRecord{
+		RecordRef: RecordRef{Topic: "pairs", Partition: 1, Offset: 8},
+		Key:       []byte(event.Payload.PairKey), Value: value,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "dead_lettered" || scorer.calls != 0 || processor.PendingHands() != 0 {
+		t.Fatalf("causally invalid pair was not isolated: result=%+v", result)
+	}
+	if len(publisher.records) != 1 || publisher.records[0].Topic != "dlq" {
+		t.Fatalf("invalid pair did not produce one dead letter: %+v", publisher.records)
+	}
+	if len(committer.calls) != 1 || committer.calls[0][0].Offset != 8 {
+		t.Fatalf("dead letter must precede committing the invalid pair: %+v", committer.calls)
+	}
+}
+
 func TestPolicyPromotionGateRequiresSampleAndBothRateLimits(t *testing.T) {
 	processor, _ := newTestProcessor(t, &fakePublisher{}, &fakeCommitter{})
 	processor.policyDecisions = 1000

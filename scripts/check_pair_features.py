@@ -9,7 +9,11 @@ from collections import Counter
 from math import comb
 
 from pipeline.config import get_settings
-from pipeline.events import PairFeatureEvent, PlayerHandContextEvent
+from pipeline.events import (
+    PairFeatureEvent,
+    PlayerHandContextEvent,
+    remember_deterministic_event,
+)
 from pipeline.features import PairFeatureCore
 from pipeline.kafka.config import kafka_client_kwargs
 
@@ -113,10 +117,12 @@ def main() -> None:
         event = PairFeatureEvent.model_validate(raw)
         if key != event.payload.pair_key.encode("utf-8"):
             raise ValueError(f"incorrect pair key for event {event.event_id}")
-        previous = output.get(str(event.event_id))
-        if previous is not None and previous != event:
-            raise ValueError(f"event_id collision in Kafka: {event.event_id}")
-        output[str(event.event_id)] = event
+        remember_deterministic_event(
+            output,
+            event.event_id,
+            event,
+            source=topic,
+        )
     if len(output) < args.minimum_records:
         raise RuntimeError(
             f"found {len(output)} records; expected at least {args.minimum_records} on {topic}"
@@ -152,7 +158,12 @@ def main() -> None:
             event = PlayerHandContextEvent.model_validate(raw)
             if key != event.payload.player.player_id.encode("utf-8"):
                 raise ValueError(f"incorrect player key for source event {event.event_id}")
-            enriched[str(event.event_id)] = event
+            remember_deterministic_event(
+                enriched,
+                event.event_id,
+                event,
+                source=args.input_topic,
+            )
         ordered = sorted(
             enriched.values(),
             key=lambda event: (

@@ -8,7 +8,7 @@ import time
 from collections import Counter
 
 from pipeline.config import get_settings
-from pipeline.events import PlayerHandContextEvent
+from pipeline.events import PlayerHandContextEvent, remember_deterministic_event
 from pipeline.kafka.config import kafka_client_kwargs
 
 
@@ -20,6 +20,11 @@ def main() -> None:
     parser.add_argument("--minimum-records", type=int, default=1)
     parser.add_argument("--settle-ms", type=int, default=1_000)
     parser.add_argument("--dataset-id", default=None)
+    parser.add_argument(
+        "--fail-on-duplicates",
+        action="store_true",
+        help="Fail on exact at-least-once retries as well as payload collisions.",
+    )
     args = parser.parse_args()
     if args.timeout_ms <= 0 or args.minimum_records <= 0 or args.settle_ms <= 0:
         parser.error("timeout-ms, minimum-records, and settle-ms must be positive")
@@ -46,6 +51,7 @@ def main() -> None:
 
     records: dict[str, PlayerHandContextEvent] = {}
     statuses: Counter[str] = Counter()
+    raw_records = 0
     deadline = time.monotonic() + args.timeout_ms / 1_000
     last_received_at: float | None = None
     try:
@@ -57,6 +63,7 @@ def main() -> None:
                     event = PlayerHandContextEvent.model_validate(message.value)
                     if args.dataset_id and event.dataset_id != args.dataset_id:
                         continue
+                    raw_records += 1
                     expected_key = event.payload.player.player_id.encode("utf-8")
                     if message.key != expected_key:
                         raise ValueError(f"incorrect player key for event {event.event_id}")
@@ -65,9 +72,12 @@ def main() -> None:
                         and event.payload.context_effective_at > event.payload.played_at
                     ):
                         raise ValueError(f"future context leaked into event {event.event_id}")
-                    event_id = str(event.event_id)
-                    if event_id not in records:
-                        records[event_id] = event
+                    if remember_deterministic_event(
+                        records,
+                        event.event_id,
+                        event,
+                        source=topic,
+                    ):
                         statuses[event.payload.context_status] += 1
                         received = True
             if received:
@@ -86,12 +96,19 @@ def main() -> None:
             f"timed out with {len(records)} records; expected at least "
             f"{args.minimum_records} on {topic}"
         )
+    exact_duplicates = raw_records - len(records)
+    if args.fail_on_duplicates and exact_duplicates:
+        raise ValueError(
+            f"found {exact_duplicates} exact duplicate records for dataset "
+            f"{args.dataset_id!r} on {topic}"
+        )
     identities = {
         (event.payload.hand_id, event.payload.player.player_id)
         for event in records.values()
     }
     print(
         f"[context-enrichment-check] valid_records={len(records)} "
+        f"raw_records={raw_records} exact_duplicates={exact_duplicates} "
         f"player_hands={len(identities)} statuses={dict(sorted(statuses.items()))}"
     )
 
