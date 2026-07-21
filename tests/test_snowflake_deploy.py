@@ -47,3 +47,14 @@ def test_render_specs_substitutes_image_and_kafka(monkeypatch, tmp_path: Path):
         "image: /POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev\n"
         "brokers: broker.example.com:9092\n"
     )
+
+
+def test_render_specs_rejects_unsafe_release_identity(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(deploy, "SPECS_DIR", tmp_path)
+    monkeypatch.setattr(deploy, "RENDERED_DIR", tmp_path / "rendered")
+    with pytest.raises(SystemExit, match="build version"):
+        deploy.render_specs(
+            deploy.DEFAULT_IMAGE_PATH,
+            "broker.example.com:9092",
+            build_version="sha;DROP SERVICE",
+        )

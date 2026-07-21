@@ -7,6 +7,8 @@ handled by the Snowflake CLI and Docker.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -19,6 +21,10 @@ SPECS_DIR = Path(__file__).resolve().parent / "specs"
 RENDERED_DIR = Path(__file__).resolve().parent / "rendered"
 
 DEFAULT_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev"
+DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
+DEFAULT_FLINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:dev"
+DEFAULT_TRITON_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3"
+DEFAULT_MODEL_RUN_ID = "pair_7a1c58c1046b"
 POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
@@ -28,6 +34,7 @@ _IMAGE = re.compile(
     r"^/[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z_][A-Za-z0-9_$]*/"
     r"[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$"
 )
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _warehouse():
@@ -152,14 +159,53 @@ def configure_kafka() -> None:
         wh.close()
 
 
-def render_specs(image_path: str, kafka_bootstrap_servers: str | None) -> None:
-    if not _IMAGE.fullmatch(image_path):
-        raise SystemExit(
-            "Image path must look like /DATABASE/SCHEMA/REPOSITORY/image:tag"
-        )
+def render_specs(
+    image_path: str,
+    kafka_bootstrap_servers: str | None,
+    *,
+    risk_image_path: str = DEFAULT_RISK_IMAGE_PATH,
+    flink_image_path: str = DEFAULT_FLINK_IMAGE_PATH,
+    triton_image_path: str = DEFAULT_TRITON_IMAGE_PATH,
+    build_version: str = "dev",
+    model_run_id: str = DEFAULT_MODEL_RUN_ID,
+    allowed_tenants: str = "demo",
+) -> None:
+    image_paths = {
+        "application": image_path,
+        "risk": risk_image_path,
+        "flink": flink_image_path,
+        "triton": triton_image_path,
+    }
+    for label, candidate in image_paths.items():
+        if not _IMAGE.fullmatch(candidate):
+            raise SystemExit(
+                f"{label} image path must look like "
+                "/DATABASE/SCHEMA/REPOSITORY/image:tag"
+            )
+    for label, candidate in {
+        "build version": build_version,
+        "model run ID": model_run_id,
+    }.items():
+        if not _SAFE_ID.fullmatch(candidate):
+            raise SystemExit(f"Invalid {label}: {candidate!r}")
+    tenants = [value.strip() for value in allowed_tenants.split(",") if value.strip()]
+    if not tenants or any(not _SAFE_ID.fullmatch(value) for value in tenants):
+        raise SystemExit("RISK_ALLOWED_TENANTS must be a comma-separated ID allowlist")
+
+    replacements = {
+        "__IMAGE_PATH__": image_path,
+        "__RISK_IMAGE_PATH__": risk_image_path,
+        "__FLINK_IMAGE_PATH__": flink_image_path,
+        "__TRITON_IMAGE_PATH__": triton_image_path,
+        "__BUILD_VERSION__": build_version,
+        "__MODEL_RUN_ID__": model_run_id,
+        "__RISK_ALLOWED_TENANTS__": ",".join(tenants),
+    }
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     for template_path in sorted(SPECS_DIR.glob("*.yaml.template")):
-        text = template_path.read_text().replace("__IMAGE_PATH__", image_path)
+        text = template_path.read_text()
+        for placeholder, replacement in replacements.items():
+            text = text.replace(placeholder, replacement)
         if "__KAFKA_BOOTSTRAP_SERVERS__" in text:
             if not kafka_bootstrap_servers:
                 print(f"[render] skipped {template_path.name}: Kafka brokers not set")
@@ -170,6 +216,52 @@ def render_specs(image_path: str, kafka_bootstrap_servers: str | None) -> None:
         output.write_text(text)
         display_path = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
         print(f"[render] {display_path}")
+
+
+def upload_risk_bundle(bundle_dir: Path) -> None:
+    bundle_dir = bundle_dir.resolve()
+    manifest_path = bundle_dir / "artifact_manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit(
+            f"Missing {manifest_path}. Run scripts/build_risk_runtime_bundle.py first."
+        )
+    manifest = json.loads(manifest_path.read_text())
+    run_id = str(manifest.get("run_id", ""))
+    if not _SAFE_ID.fullmatch(run_id):
+        raise SystemExit(f"Invalid runtime bundle run ID: {run_id!r}")
+    relative_files = [Path("artifact_manifest.json")]
+    relative_files.extend(Path(value) for value in manifest.get("artifacts", {}))
+    for relative in relative_files:
+        path = (bundle_dir / relative).resolve()
+        if bundle_dir not in path.parents or not path.is_file():
+            raise SystemExit(f"Unsafe or missing runtime bundle file: {relative}")
+        if relative.as_posix() != "artifact_manifest.json":
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            expected = manifest["artifacts"][relative.as_posix()]
+            if actual != expected:
+                raise SystemExit(f"Runtime bundle hash mismatch: {relative}")
+
+    wh = _warehouse()
+    try:
+        wh.execute("USE ROLE SYSADMIN")
+        wh.execute(f"USE DATABASE {DATABASE}")
+        wh.execute(f"USE SCHEMA {SCHEMA}")
+        for relative in relative_files:
+            path = (bundle_dir / relative).resolve()
+            parent = relative.parent.as_posix()
+            destination = f"@MODEL_ARTIFACTS/risk/{run_id}"
+            if parent != ".":
+                destination += f"/{parent}"
+            wh.execute(
+                f"PUT {_sql_string(path.as_uri())} {destination} "
+                "AUTO_COMPRESS = FALSE OVERWRITE = TRUE"
+            )
+        print(
+            f"[snowflake] uploaded risk bundle run={run_id} "
+            f"files={len(relative_files)} stage=@MODEL_ARTIFACTS/risk/{run_id}"
+        )
+    finally:
+        wh.close()
 
 
 def _read_rendered(name: str) -> str:
@@ -269,11 +361,39 @@ def main() -> None:
         "--kafka-bootstrap-servers",
         default=os.environ.get("KAFKA_BOOTSTRAP_SERVERS"),
     )
+    render.add_argument(
+        "--risk-image-path",
+        default=os.environ.get("SPCS_RISK_IMAGE_PATH", DEFAULT_RISK_IMAGE_PATH),
+    )
+    render.add_argument(
+        "--flink-image-path",
+        default=os.environ.get("SPCS_FLINK_IMAGE_PATH", DEFAULT_FLINK_IMAGE_PATH),
+    )
+    render.add_argument(
+        "--triton-image-path",
+        default=os.environ.get("SPCS_TRITON_IMAGE_PATH", DEFAULT_TRITON_IMAGE_PATH),
+    )
+    render.add_argument(
+        "--build-version", default=os.environ.get("SPCS_BUILD_VERSION", "dev")
+    )
+    render.add_argument(
+        "--model-run-id",
+        default=os.environ.get("SPCS_MODEL_RUN_ID", DEFAULT_MODEL_RUN_ID),
+    )
+    render.add_argument(
+        "--allowed-tenants", default=os.environ.get("RISK_ALLOWED_TENANTS", "demo")
+    )
 
     sub.add_parser("deploy-admin")
     sub.add_parser("suspend-admin")
     sub.add_parser("resume-admin")
     sub.add_parser("deploy-realtime")
+    sub.add_parser("deploy-risk")
+    sub.add_parser("deploy-flink")
+    upload = sub.add_parser("upload-risk-bundle")
+    upload.add_argument(
+        "--bundle-dir", type=Path, default=ROOT / "build/c1/risk-runtime"
+    )
     train = sub.add_parser("run-training-job")
     train.add_argument("--sync", action="store_true")
     sub.add_parser("status")
@@ -289,7 +409,16 @@ def main() -> None:
             configured_brokers, username, password = _configured_kafka()
             if username and password:
                 kafka_bootstrap_servers = configured_brokers
-        render_specs(args.image_path, kafka_bootstrap_servers)
+        render_specs(
+            args.image_path,
+            kafka_bootstrap_servers,
+            risk_image_path=args.risk_image_path,
+            flink_image_path=args.flink_image_path,
+            triton_image_path=args.triton_image_path,
+            build_version=args.build_version,
+            model_run_id=args.model_run_id,
+            allowed_tenants=args.allowed_tenants,
+        )
     elif args.command == "deploy-admin":
         deploy_service("POKER_ADMIN", "admin.yaml")
     elif args.command == "suspend-admin":
@@ -298,6 +427,12 @@ def main() -> None:
         set_admin_state("RESUME")
     elif args.command == "deploy-realtime":
         deploy_service("POKER_REALTIME", "realtime.yaml", kafka_eai=True)
+    elif args.command == "deploy-risk":
+        deploy_service("POKER_RISK", "risk.yaml", kafka_eai=True)
+    elif args.command == "deploy-flink":
+        deploy_service("POKER_FLINK", "flink.yaml", kafka_eai=True)
+    elif args.command == "upload-risk-bundle":
+        upload_risk_bundle(args.bundle_dir)
     elif args.command == "run-training-job":
         run_training_job(async_=not args.sync)
     elif args.command == "status":

@@ -1,5 +1,6 @@
 .PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 .PHONY: rule-monitoring-test rule-monitor-window rule-monitoring rule-monitoring-check phase-b6-check
+.PHONY: c1-package-test c1-risk-bundle c1-render c1-build-risk c1-build-flink c1-build c1-image-smoke c1-release-check c1-push c1-mirror-triton c1-upload-model c1-deploy-risk c1-deploy-flink c1-deploy phase-c1-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -175,6 +176,11 @@ help:
 	@echo "  rule-monitoring Build delayed-label status, alert, and Prometheus artifacts"
 	@echo "  rule-monitoring-check Recompute the B6 monitoring window and outputs"
 	@echo "  phase-b6-check Verify dashboards, alert lineage, runtime metrics, and B1-B5"
+	@echo "  phase-c1-check Verify C1 runtime bundles, SPCS specs, Go, and Flink packages"
+	@echo "  c1-build     Build versioned linux/amd64 poker-risk and poker-flink images"
+	@echo "  c1-image-smoke Smoke-test the two locally built C1 images"
+	@echo "  c1-push      Push the two versioned C1 images to Snowflake registry"
+	@echo "  c1-deploy    Deploy separate POKER_FLINK and POKER_RISK SPCS services"
 	@echo "  go-risk-test Test the Go complete-hand scorer and Triton client"
 	@echo "  go-risk-check Verify Go can load the promoted artifact contract"
 	@echo "  go-risk-run Run the Go HTTP scorer against a Triton V2 endpoint"
@@ -918,6 +924,17 @@ clean:
 SNOW_IMAGE ?= poker-pipeline:dev
 SNOW_REPO_URL ?= clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo
 SNOW_REMOTE_IMAGE ?= $(SNOW_REPO_URL)/poker-pipeline:dev
+C1_IMAGE_TAG ?= $(shell $(PY) scripts/c1_image_tag.py 2>/dev/null || echo dev-unknown)
+C1_RISK_IMAGE ?= poker-risk:$(C1_IMAGE_TAG)
+C1_FLINK_IMAGE ?= poker-flink:$(C1_IMAGE_TAG)
+C1_REMOTE_RISK_IMAGE ?= $(SNOW_REPO_URL)/poker-risk:$(C1_IMAGE_TAG)
+C1_REMOTE_FLINK_IMAGE ?= $(SNOW_REPO_URL)/poker-flink:$(C1_IMAGE_TAG)
+C1_TRITON_SOURCE_IMAGE ?= nvcr.io/nvidia/tritonserver:25.12-py3
+C1_REMOTE_TRITON_IMAGE ?= $(SNOW_REPO_URL)/tritonserver:25.12-py3
+C1_MODEL_SOURCE ?= models/pair-catboost-full-v2
+C1_MODEL_BUNDLE ?= build/c1/risk-runtime
+C1_MODEL_RUN_ID ?= pair_7a1c58c1046b
+C1_ALLOWED_TENANTS ?= demo
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -956,6 +973,76 @@ snow-train:
 
 snow-status:
 	$(PY) infra/snowflake/deploy.py status
+
+c1-package-test:
+	$(PY) -m pytest -q tests/test_snowflake_deploy.py tests/test_c1_packaging.py
+
+c1-risk-bundle:
+	$(PY) scripts/build_risk_runtime_bundle.py \
+		--source $(C1_MODEL_SOURCE) --output $(C1_MODEL_BUNDLE)
+
+c1-render:
+	SPCS_RISK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:$(C1_IMAGE_TAG) \
+	SPCS_FLINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:$(C1_IMAGE_TAG) \
+	SPCS_TRITON_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3 \
+	SPCS_BUILD_VERSION=$(C1_IMAGE_TAG) SPCS_MODEL_RUN_ID=$(C1_MODEL_RUN_ID) \
+	RISK_ALLOWED_TENANTS=$(C1_ALLOWED_TENANTS) \
+		$(PY) infra/snowflake/deploy.py render
+
+c1-build-risk:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(C1_IMAGE_TAG) \
+		-f Dockerfile.risk -t $(C1_RISK_IMAGE) .
+
+c1-build-flink:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(C1_IMAGE_TAG) \
+		-f Dockerfile.flink -t $(C1_FLINK_IMAGE) .
+
+c1-build: c1-build-risk c1-build-flink
+
+c1-image-smoke: c1-risk-bundle
+	docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/risk-kafka \
+		$(C1_RISK_IMAGE) --help
+	docker run --rm --platform linux/amd64 \
+		-v $(abspath $(C1_MODEL_BUNDLE)):/opt/models:ro \
+		--entrypoint /usr/local/bin/risk-contract-check $(C1_RISK_IMAGE) \
+		--model-dir /opt/models
+	docker run --rm --platform linux/amd64 --entrypoint /opt/flink/bin/check-poker-image \
+		$(C1_FLINK_IMAGE)
+
+c1-release-check:
+	$(PY) scripts/check_c1_release.py --tag $(C1_IMAGE_TAG)
+
+c1-push: c1-release-check
+	docker tag $(C1_RISK_IMAGE) $(C1_REMOTE_RISK_IMAGE)
+	docker push $(C1_REMOTE_RISK_IMAGE)
+	docker tag $(C1_FLINK_IMAGE) $(C1_REMOTE_FLINK_IMAGE)
+	docker push $(C1_REMOTE_FLINK_IMAGE)
+
+c1-mirror-triton:
+	docker pull --platform linux/amd64 $(C1_TRITON_SOURCE_IMAGE)
+	docker tag $(C1_TRITON_SOURCE_IMAGE) $(C1_REMOTE_TRITON_IMAGE)
+	docker push $(C1_REMOTE_TRITON_IMAGE)
+
+c1-upload-model: c1-risk-bundle
+	$(PY) infra/snowflake/deploy.py upload-risk-bundle \
+		--bundle-dir $(C1_MODEL_BUNDLE)
+
+c1-deploy-risk: c1-release-check
+	$(PY) infra/snowflake/deploy.py deploy-risk
+
+c1-deploy-flink: c1-release-check
+	$(PY) infra/snowflake/deploy.py deploy-flink
+
+c1-deploy: c1-deploy-flink c1-deploy-risk
+
+phase-c1-check: c1-package-test c1-risk-bundle
+	KAFKA_BOOTSTRAP_SERVERS=broker.c1.invalid:9092 $(MAKE) c1-render
+	bash -n streaming/flink-java/docker/submit-jobs.sh
+	cd services/go && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache go test ./...
+	cd $(FLINK_CONTEXT_DIR) && $(MAVEN) -Dmaven.repo.local=$(MAVEN_REPO) test package
+	cd $(FLINK_PAIR_FEATURES_DIR) && $(MAVEN) -Dmaven.repo.local=$(MAVEN_REPO) test package
 
 # ---- AWS / Terraform ----
 # Force AWS_PROFILE=default for these targets. The shell may export

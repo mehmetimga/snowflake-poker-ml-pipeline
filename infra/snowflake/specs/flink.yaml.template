@@ -1,0 +1,135 @@
+spec:
+  containers:
+  - name: jobmanager
+    image: __FLINK_IMAGE_PATH__
+    command:
+    - /docker-entrypoint.sh
+    args:
+    - jobmanager
+    env:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: 127.0.0.1
+        jobmanager.bind-host: 0.0.0.0
+        rest.address: 127.0.0.1
+        rest.bind-address: 0.0.0.0
+        parallelism.default: 1
+        state.backend.type: rocksdb
+        state.checkpoints.dir: file:///opt/flink/state/checkpoints
+        state.savepoints.dir: file:///opt/flink/state/savepoints
+        execution.checkpointing.interval: 30000
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+    volumeMounts:
+    - name: flink-state
+      mountPath: /opt/flink/state
+    readinessProbe:
+      port: 8081
+      path: /overview
+    resources:
+      requests:
+        cpu: 0.5
+        memory: 1Gi
+      limits:
+        cpu: 1
+        memory: 2Gi
+  - name: taskmanager
+    image: __FLINK_IMAGE_PATH__
+    command:
+    - /docker-entrypoint.sh
+    args:
+    - taskmanager
+    env:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: 127.0.0.1
+        taskmanager.bind-host: 0.0.0.0
+        taskmanager.host: 127.0.0.1
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+        state.backend.type: rocksdb
+        state.checkpoints.dir: file:///opt/flink/state/checkpoints
+        state.savepoints.dir: file:///opt/flink/state/savepoints
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+    volumeMounts:
+    - name: flink-state
+      mountPath: /opt/flink/state
+    resources:
+      requests:
+        cpu: 2
+        memory: 5Gi
+      limits:
+        cpu: 3
+        memory: 7Gi
+  - name: submitter
+    image: __FLINK_IMAGE_PATH__
+    command:
+    - /opt/flink/bin/submit-poker-jobs
+    env:
+      POKER_FLINK_BUILD_VERSION: __BUILD_VERSION__
+      FLINK_REST_URL: http://127.0.0.1:8081
+      FLINK_STARTUP_TIMEOUT_SECONDS: "180"
+      KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_WORLD_HANDS_TOPIC: poker.hands.raw.v1
+      KAFKA_USER_CONTEXT_TOPIC: poker.user-context.v1
+      KAFKA_PLAYER_CONTEXT_TOPIC: poker.hand-player-context.v1
+      KAFKA_PAIR_FEATURES_TOPIC: poker.pair-features.v1
+      KAFKA_DEAD_LETTER_TOPIC: poker.pipeline.dead-letter.v1
+      FLINK_CONTEXT_GROUP_ID: flink-context-enrichment-v1
+      FLINK_PAIR_FEATURES_GROUP_ID: flink-pair-features-v1
+      FLINK_STATEFUL_RULE_ENABLED: "true"
+      FLINK_CONTEXT_SAVEPOINT_PATH: ""
+      FLINK_PAIR_SAVEPOINT_PATH: ""
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: 127.0.0.1
+        rest.address: 127.0.0.1
+    secrets:
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+      secretKeyRef: username
+      envVarName: KAFKA_SASL_USERNAME
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+      secretKeyRef: password
+      envVarName: KAFKA_SASL_PASSWORD
+    volumeMounts:
+    - name: flink-state
+      mountPath: /opt/flink/state
+    resources:
+      requests:
+        cpu: 0.25
+        memory: 0.5Gi
+      limits:
+        cpu: 0.5
+        memory: 1Gi
+  endpoints:
+  - name: flink-rest
+    port: 8081
+    protocol: HTTP
+    public: false
+  - name: flink-jobmanager-metrics
+    port: 9249
+    protocol: HTTP
+    public: false
+  - name: flink-taskmanager-metrics
+    port: 9250
+    protocol: HTTP
+    public: false
+  volumes:
+  - name: flink-state
+    source: block
+    size: 20Gi
+    blockConfig:
+      encryption: SNOWFLAKE_SSE
+      snapshotOnDelete: true
+      snapshotDeleteAfter: 30d
+  logExporters:
+    eventTableConfig:
+      logLevel: INFO
+  platformMonitor:
+    metricConfig:
+      groups:
+      - system
+      - network
+      - storage
+      - status

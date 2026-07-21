@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GO_VERSION=1.23.8
+FROM golang:${GO_VERSION}-bookworm@sha256:0b4f8c5d414756a53ba0e4d235151f9b246552e512c3feaad5f9a3251376b279 AS build
+
+ARG BUILD_VERSION=dev
+WORKDIR /src
+
+COPY services/go/go.mod services/go/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY services/go/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" -o /out/risk-kafka ./cmd/risk-kafka \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" -o /out/risk-contract-check ./cmd/risk-contract-check
+
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-risk" \
+      org.opencontainers.image.description="Acknowledged Kafka-to-Triton poker risk scorer" \
+      org.opencontainers.image.revision="${BUILD_VERSION}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 poker \
+    && useradd --system --uid 65532 --gid 65532 --no-create-home poker
+
+COPY --from=build --chown=65532:65532 /out/risk-kafka /usr/local/bin/risk-kafka
+COPY --from=build --chown=65532:65532 /out/risk-contract-check /usr/local/bin/risk-contract-check
+COPY --chown=65532:65532 schemas/policies/review-policy-v1.json /opt/poker/contracts/review-policy-v1.json
+COPY --chown=65532:65532 schemas/rules/rule-rollout-v1.json /opt/poker/contracts/rule-rollout-v1.json
+
+USER 65532:65532
+WORKDIR /opt/poker
+
+ENV RISK_SERVICE_BUILD_VERSION=${BUILD_VERSION} \
+    RISK_REVIEW_POLICY_PATH=/opt/poker/contracts/review-policy-v1.json \
+    RISK_RULE_ROLLOUT_PATH=/opt/poker/contracts/rule-rollout-v1.json \
+    RISK_METRICS_LISTEN=0.0.0.0:9091 \
+    TRITON_HTTP_URL=http://127.0.0.1:8000
+
+EXPOSE 9091
+ENTRYPOINT ["/usr/local/bin/risk-kafka"]

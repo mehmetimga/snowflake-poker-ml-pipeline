@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 11 |
+| Plan version | 12 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase C1 — package target Go/Flink SPCS services |
+| Immediate next phase | Phase C1 — release and deploy validated Go/Flink SPCS images |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -409,8 +409,10 @@ Prometheus rules, Grafana dashboard, and Streamlit page are documented in
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
-Status: `NEXT` for C1 packaging; C2–C5 remain `BLOCKED` on the future
-poker-server CDC source and independently reviewed real labels
+Status: `IN PROGRESS` for C1. Local packaging and container smoke tests are
+complete; registry release, live SPCS deployment, and a savepoint recovery
+drill require a clean reviewed commit. C2–C5 remain `BLOCKED` on the future
+poker-server CDC source and independently reviewed real labels.
 
 Purpose: measure the current pipeline on real poker-server data without
 automated enforcement.
@@ -420,14 +422,21 @@ Label collection will take longer than implementation.
 
 ### C1. Target deployment
 
-- [ ] Package Java 17/Flink as `poker-flink:<git-sha>`.
-- [ ] Package Go scoring as `poker-risk:<git-sha>`.
+- [x] Package Java 17/Flink as `poker-flink:<git-sha>`.
+- [x] Package Go scoring as `poker-risk:<git-sha>`.
 - [ ] Deploy separate long-running `POKER_FLINK` and `POKER_RISK` SPCS services.
 - [ ] Configure durable checkpoint storage and savepoint recovery.
 - [ ] Store artifacts in a controlled Snowflake stage/registry URI, not a local
   absolute path.
-- [ ] Add service readiness, lag, watermark, checkpoint, state, and latency
+- [x] Add service readiness, lag, watermark, checkpoint, state, and latency
   monitoring.
+
+The image contents, minimal runtime model bundle, SPCS service specs, block
+storage boundary, clean-commit release guard, deployment sequence, and local
+evidence are documented in
+[`docs/spcs-c1-deployment.md`](spcs-c1-deployment.md). The unchecked items
+require live Snowflake mutation and recovery evidence; a rendered specification
+alone does not close them.
 
 ### C2. Future CDC boundary
 
@@ -847,3 +856,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | B4 | Added `poker.review-routing:v1` and an independent `poker.review-decision.recorded` audit contract. All seven current rules are explicitly soft, the hard list is empty, hypothetical hard rules require review with deterministic reasons, and quality failures remain DLQ-only. Go now publishes evidence, score, review decision, and optional policy-linked alert in one acknowledged batch. | `make phase-b4-check`: 32 Python tests, 7 Java tests, and Go risk/stream suites passed; Python/Go golden decision ID `23300633-c2ac-5284-b110-039fe2850d03`; Kafka replay, output order, hard-below-threshold routing, soft-rule non-action, DLQ isolation, rollout metrics, and probability invariance passed | B4 complete in local shadow configuration. No hard rule, automatic enforcement, probability change, or deployment change. B5 governed rule evaluation is next |
 | 2026-07-21 | B5 | Added a hash-bound public-test report for all seven rules, independent-label provenance controls, whole-hand intervals, reliable tenant/context/scenario/history slices, machine-readable monitoring baselines, and executable per-rule rollback in Go and Flink. | 75,000 rows/5,000 hands; 500 hand bootstraps per rule; 7/7 overall reports reliable; 51 reliable and 26 suppressed rule/segment slices; all 75,000 labels independently synthetic; all-rule rollback probability delta `0.0`; `make phase-b5-check` passed with 8 Java tests and all Python/Go suites; `make phase12-check` passed | B5 complete locally. Results confirm rules remain soft shadow evidence; no champion, threshold, hard rule, or deployed service changed. B6 dashboards and alerts are next |
 | 2026-07-21 | B6 | Completed operational Rules v2 monitoring with acknowledged Go runtime counters, existing Flink state/lateness signals, a hash-bound delayed-label window and report, deterministic lineage-rich alerts, Prometheus rules, a Grafana dashboard, and a Streamlit admin page. Thin windows are explicitly `insufficient_data`; circular or unknown labels are quarantined; no alert can disable a rule or enforce an action. | Stable frozen replay: 5,000 hands, 75,000 pair rows, 7/7 rules `ok`, 0 alerts; synthetic thin, drift, bad-label, integrity, and admin-loader tests passed; `make phase-b6-check` passed with 8 Java tests and all focused Python/Go suites; `make phase12-check` passed | Phase B complete locally with all rules still in soft shadow mode and model probability unchanged. Phase C1 SPCS packaging is next; real-data C2–C5 remain blocked on CDC and independently reviewed labels |
+| 2026-07-21 | C1 packaging | Added separate multi-stage amd64 `poker-risk` and `poker-flink` images, a hash-verified seven-file serving bundle, pinned localhost Triton sidecar contract, private readiness/metrics endpoints, three-container Flink session service, 20 GiB checkpoint/savepoint block volume, retained deletion snapshots, governed Kafka secrets, stage mounts, and a clean-commit release guard. | `make phase-c1-check`: 15 deployment tests, all Go packages, 6 context-enrichment Java tests, 8 pair-feature Java tests, and both shaded packages passed; `make c1-build` produced amd64 images; `make c1-image-smoke` loaded the 58-feature model bundle and both Flink jobs with Prometheus/RocksDB modules; `make snow-status` confirmed only legacy `poker-pipeline:dev`, `POKER_ADMIN`, and `POKER_REALTIME` are remote | C1 packaging complete locally. No C1 image was pushed, model uploaded, `POKER_FLINK`/`POKER_RISK` service deployed, or production behavior changed. The existing pool was already active because legacy services are running. Clean commit, registry release, live deployment, and savepoint/replay drill remain |

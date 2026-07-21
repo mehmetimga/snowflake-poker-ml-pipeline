@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS context-build
+WORKDIR /build/context-enrichment
+COPY streaming/flink-java/context-enrichment/pom.xml ./
+RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests dependency:go-offline
+COPY streaming/flink-java/context-enrichment/src ./src
+RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests package
+
+FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS pair-build
+WORKDIR /build/pair-features
+COPY streaming/flink-java/pair-features/pom.xml ./
+RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests dependency:go-offline
+COPY streaming/flink-java/pair-features/src ./src
+RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests package
+
+FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS runtime-libs
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.7.1:copy \
+      -Dartifact=org.apache.flink:flink-metrics-prometheus:1.19.1 \
+      -DoutputDirectory=/runtime-libs \
+    && mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.7.1:copy \
+      -Dartifact=org.apache.flink:flink-statebackend-rocksdb:1.19.1 \
+      -DoutputDirectory=/runtime-libs
+
+FROM apache/flink:1.19.1-scala_2.12-java17@sha256:09cdcacefd0606c98e73bd9f7d308e3c7f2f949b287b81b3dc210cd7e55ba528
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-flink" \
+      org.opencontainers.image.description="Java 17 Flink context and pair-feature streaming jobs" \
+      org.opencontainers.image.revision="${BUILD_VERSION}"
+
+USER root
+RUN mkdir -p /opt/flink/usrlib /opt/flink/state/checkpoints /opt/flink/state/savepoints
+
+COPY --from=runtime-libs /runtime-libs/*.jar /opt/flink/lib/
+COPY --from=context-build \
+    /build/context-enrichment/target/context-enrichment-0.1.0.jar \
+    /opt/flink/usrlib/context-enrichment.jar
+COPY --from=pair-build \
+    /build/pair-features/target/pair-features-0.1.0.jar \
+    /opt/flink/usrlib/pair-features.jar
+COPY streaming/flink-java/docker/submit-jobs.sh /opt/flink/bin/submit-poker-jobs
+COPY streaming/flink-java/docker/check-image.sh /opt/flink/bin/check-poker-image
+
+RUN chmod 0755 /opt/flink/bin/submit-poker-jobs /opt/flink/bin/check-poker-image \
+    && chown -R flink:flink /opt/flink/usrlib
+
+ENV POKER_FLINK_BUILD_VERSION=${BUILD_VERSION}
+
+EXPOSE 8081 9249 9250

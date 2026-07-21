@@ -532,6 +532,10 @@ See [infra/snowflake/README.md](infra/snowflake/README.md) for provisioning,
 registry push, Kafka secret/egress setup, deployment, status, and cost-control
 commands.
 
+The separate production-shaped Go and Java/Flink services, runtime model
+bundle, durable state, release guard, and validation sequence are documented in
+[Phase C1: Go and Flink deployment on SPCS](docs/spcs-c1-deployment.md).
+
 ## AWS / SageMaker architecture
 
 Terraform under `infra/terraform` provisions the cloud demo stack:

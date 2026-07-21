@@ -13,10 +13,12 @@ Snowflake CPU training job -> model stage ----+
 
 ## Current implementation versus target deployment
 
-The files in this directory currently deploy a single Python application image
-for the realtime scorer, training job, and admin service. The validated Go
-scorer runs locally today, Java/Flink is not yet packaged for SPCS, and Triton
-runs on DGX Spark for development testing.
+The legacy demo commands still deploy one Python application image for the
+training job, admin service, and `POKER_REALTIME`. Phase C1 now also packages
+the production-shaped Go scorer and Java/Flink jobs as separate
+`POKER_RISK` and `POKER_FLINK` services. Their images and specs are locally
+validated; registry push and live service deployment remain explicit release
+operations.
 
 That is the current test topology, not the final production boundary. The
 target is:
@@ -147,7 +149,6 @@ make evaluate-challenge
 ## Phase two
 
 - Deploy Qdrant with an SPCS block volume and private HTTP endpoint.
-- Package the PyFlink jobs with Java and the Kafka connector JAR.
 - Register trained models in Snowflake Model Registry and move orchestration
   from the generic SPCS training job to Snowflake ML Jobs/Tasks.
 - Move training to a GPU-capable Snowflake region, build a CUDA runtime image,
