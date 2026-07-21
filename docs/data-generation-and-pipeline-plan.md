@@ -350,8 +350,10 @@ Kafka is the live interface between producers and all downstream consumers.
 | `poker.session-context.v1` | `session_id` | Delete | Direct publisher or CDC adapter |
 | `poker.account-links.v1` | `user_id` | Compact/delete | Direct publisher or CDC adapter |
 | `poker.pair-features.v1` | `pair_key` | Delete | Flink |
+| `poker.rule-evidence.v1` | `entity_type:entity_key` | Delete | Flink/Go rule engines through Go publisher |
 | `poker.risk-scores.v1` | `hand_id` | Delete | Go risk scorer |
-| `poker.risk-alerts.v1` | `hand_id` | Delete | Go risk scorer/policy service |
+| `poker.review-decisions.v1` | `hand_id` | Delete | Go review policy |
+| `poker.risk-alerts.v1` | `hand_id` | Delete | Go review policy |
 | `poker.labels.v1` | `example_id` | Restricted/delete | Delayed label loader only |
 | `poker.pipeline.dead-letter.v1` | `event_id` | Delete | Contract validators and consumers |
 

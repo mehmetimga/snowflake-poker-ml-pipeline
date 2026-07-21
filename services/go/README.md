@@ -25,6 +25,13 @@ event identity before combining those events with its local stateless evidence.
 The metadata is excluded from preprocessing, so the `[15, 58]` model tensor is
 unchanged.
 
+Phase B4 evaluates the separate governed
+[`review-policy-v1.json`](../../schemas/policies/review-policy-v1.json) after
+the score exists. Every score gets a deterministic event on
+`poker.review-decisions.v1`. All current rules are soft evidence and cannot
+change review routing. The current hard-rule list is empty; a future approved
+hard rule can mandate analyst review without changing model probability.
+
 Run from the repository root:
 
 ```bash
@@ -67,8 +74,9 @@ listeners are rejected.
 The Kafka adapter uses the same `HandAssembler` and `Scorer` interfaces. It
 consumes `poker.pair-features.v1`, publishes fired observations to
 `poker.rule-evidence.v1`, a complete audit decision to `poker.risk-scores.v1`,
-and threshold-crossing events to `poker.risk-alerts.v1`. Evidence precedes its
-referencing score and alert in one synchronous publish call. Input offsets
+one review-routing audit record to `poker.review-decisions.v1`, and policy
+alerts to `poker.risk-alerts.v1`. Evidence precedes its referencing score,
+review decision, and alert in one synchronous publish call. Input offsets
 become committable only after the whole output batch is acknowledged. Invalid
 input is acknowledged only after a versioned dead-letter write. All output IDs
 are deterministic, so replayed at-least-once output can be deduplicated

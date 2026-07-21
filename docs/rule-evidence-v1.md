@@ -124,7 +124,9 @@ observations, for example `rule_threshold` and `directional_fold_win_rate`.
 ## Kafka and warehouse
 
 `make scoring-topics` now manages `poker.rule-evidence.v1` with 30-day
-retention alongside scores and alerts.
+retention alongside scores, review decisions, and alerts. The B4 review policy
+classifies every current rule reference as soft; see
+[`decision-policy-v1.md`](decision-policy-v1.md).
 
 Migration `011_rule_evidence.sql` creates:
 

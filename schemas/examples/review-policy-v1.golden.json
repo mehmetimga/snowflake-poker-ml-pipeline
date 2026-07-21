@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "tenant_id": "tenant-golden",
+  "product_id": "poker",
+  "dataset_id": "review-policy-golden-v1",
+  "dataset_split": "validation",
+  "trace_id": "30000000-0000-5000-8000-000000000001",
+  "risk_score_event_id": "30000000-0000-5000-8000-000000000002",
+  "score_id": "0123456789abcdef0123456789abcdef",
+  "hand_id": "hand-policy-1",
+  "table_id": "table-policy-1",
+  "played_at": "2026-07-21T08:00:00Z",
+  "decided_at": "2026-07-21T08:00:01Z",
+  "model_threshold_exceeded": true,
+  "rule_evidence": [
+    {
+      "rule_event_id": "a8a1afca-17ce-5773-ab20-57f0da19aa9a",
+      "rule_id": "pair.repeated-fold-to-partner-wins",
+      "rule_version": 1
+    }
+  ],
+  "expected": {
+    "decision_id": "23300633-c2ac-5284-b110-039fe2850d03",
+    "outcome": "review_recommended",
+    "action": "analyst_review",
+    "reason_codes": ["model.threshold-exceeded"],
+    "rule_category": "soft"
+  }
+}

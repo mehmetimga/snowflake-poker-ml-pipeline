@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 8 |
+| Plan version | 9 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Phase B4 — decision-policy separation |
+| Immediate next phase | Phase B5 — rule governance and evaluation |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -363,9 +363,9 @@ and alert in the existing acknowledged output batch. It does not alter the
 
 ### B4. Decision-policy separation
 
-- [ ] Hard policy rules create mandatory review with explicit reasons.
-- [ ] Soft behavioral rules attach evidence and analyst filters.
-- [ ] Data-quality violations remain DLQ events, not fraud evidence.
+- [x] Hard policy rules create mandatory review with explicit reasons.
+- [x] Soft behavioral rules attach evidence and analyst filters.
+- [x] Data-quality violations remain DLQ events, not fraud evidence.
 - [x] CatBoost calibrated probability stays unchanged in Rules v2.
 - [x] No manually weighted probability blend is introduced.
 
@@ -395,7 +395,7 @@ Phase B is complete when:
 - [x] Kafka replay produces the same evidence IDs and revisions;
 - [x] no rule reads a database in the hot path;
 - [x] all scores retain model, feature, policy, and rule versions;
-- [ ] hard versus soft behavior is explicit;
+- [x] hard versus soft behavior is explicit;
 - [ ] rule dashboards and alerts exist; and
 - [x] CatBoost predictions remain bit-for-bit unchanged.
 
@@ -778,20 +778,34 @@ Completed slice — Phase B3:
 6. [x] Add evaluation/firing counters, event-time lag, keyed state size, and
    checkpointed state coverage.
 
-Immediate next slice — Phase B4:
+Completed slice — Phase B4:
 
-1. [ ] Define a versioned decision-policy contract separate from model scores
+1. [x] Define a versioned decision-policy contract separate from model scores
    and rule evidence.
-2. [ ] Classify every current B2/B3 rule as soft evidence; configure no hard
+2. [x] Classify every current B2/B3 rule as soft evidence; configure no hard
    enforcement rule until risk owners approve one.
-3. [ ] Define mandatory-review semantics for any future hard policy rule,
+3. [x] Define mandatory-review semantics for any future hard policy rule,
    including explicit reason codes and independent audit records.
-4. [ ] Keep malformed/late data on quality and DLQ paths rather than turning
+4. [x] Keep malformed/late data on quality and DLQ paths rather than turning
    it into fraud evidence.
-5. [ ] Add Go policy evaluation, deterministic decision IDs, replay tests,
+5. [x] Add Go policy evaluation, deterministic decision IDs, replay tests,
    rule-version lineage, and probability-invariance tests.
-6. [ ] Add policy firing-rate and review-volume gates before any shadow
+6. [x] Add policy firing-rate and review-volume gates before any shadow
    deployment.
+
+Immediate next slice — Phase B5:
+
+1. [ ] Build a deterministic rule-evaluation dataset from frozen public-test
+   features and independently available labels.
+2. [ ] Report per-rule support, firing rate, precision, recall, and alert
+   volume with whole-hand confidence intervals.
+3. [ ] Mark label provenance and exclude labels caused solely by the evaluated
+   rule from its own quality report.
+4. [ ] Add tenant/context/scenario segment summaries and reliability floors.
+5. [ ] Define rule disable/rollback configuration and prove replay after a
+   rollback does not change stored model probability.
+6. [ ] Emit machine-readable monitoring thresholds for firing-rate and rule
+   drift dashboards.
 
 ## 13. Progress log
 
@@ -809,3 +823,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | B1 | Added `poker.rule-evidence.v1` in Python and Go, a shared cross-language UUIDv5 fixture, recursive label/model/policy leakage rejection, score/alert evidence references, managed Kafka topic configuration, and idempotent warehouse event plus score/model-run lineage persistence. | `make phase-b1-check`: 14 Python tests and Go risk/stream suites passed; `go test ./...`: passed; `make phase12-check`: passed; shared revision-aware ID `8bcfb4e4-2113-52c3-85c2-a6ca4cb19823`; migration `011_rule_evidence.sql` exercised through DuckDB | B1 complete. No rules are evaluated and CatBoost probability is unchanged; B2 Go pair-rule parity is next |
 | 2026-07-21 | B2 | Froze six pair-rule definitions, added a pure Python reference and matching pre-inference Go evaluator, retained the exact rules-only formula, emitted deterministic evidence with score/alert references, and published evidence before its score and alert in one acknowledged batch. | `make phase-b2-check`: 18 Python tests plus Go risk/stream suites passed; cross-language golden score `0.8475`; replay IDs matched and higher snapshot revisions produced distinct IDs; enabled/disabled Go scorer probabilities and decisions matched; `go test ./...`: passed; `make phase12-check`: passed | B2 complete with no probability blend and no production deployment change. Phase B remains in progress; the first stateful Java/Flink rule is next |
 | 2026-07-21 | B3 | Implemented the first stateful rule, `pair.repeated-fold-to-partner-wins`, as a 24-hour event-time window with scoped keyed state, deterministic corrections, lateness handling, 72-hour TTL, metrics, and Python/Java replay parity. Flink carries complete evidence to Go, which validates and publishes it atomically with the corresponding score/alert batch. | `make phase-b3-check`: 22 Python tests, 7 Java tests, and Go risk/stream suites passed; shared golden evidence IDs matched across Python and Java; checkpoint restore, duplicate, correction, stale, late-event, transport-validation, and probability-invariance paths passed | First B3 vertical slice complete with no deployed-job or probability change. Other stateful candidates are deferred pending shadow evidence; B4 decision-policy separation is next |
+| 2026-07-21 | B4 | Added `poker.review-routing:v1` and an independent `poker.review-decision.recorded` audit contract. All seven current rules are explicitly soft, the hard list is empty, hypothetical hard rules require review with deterministic reasons, and quality failures remain DLQ-only. Go now publishes evidence, score, review decision, and optional policy-linked alert in one acknowledged batch. | `make phase-b4-check`: 32 Python tests, 7 Java tests, and Go risk/stream suites passed; Python/Go golden decision ID `23300633-c2ac-5284-b110-039fe2850d03`; Kafka replay, output order, hard-below-threshold routing, soft-rule non-action, DLQ isolation, rollout metrics, and probability invariance passed | B4 complete in local shadow configuration. No hard rule, automatic enforcement, probability change, or deployment change. B5 governed rule evaluation is next |

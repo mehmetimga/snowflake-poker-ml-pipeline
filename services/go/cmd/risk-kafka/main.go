@@ -22,12 +22,14 @@ import (
 func main() {
 	loadDotEnv("../../.env")
 	modelDir := flag.String("model-dir", "../../models/pair-catboost-full-v2", "model artifact directory")
+	reviewPolicyPath := flag.String("review-policy", envDefault("RISK_REVIEW_POLICY_PATH", "../../schemas/policies/review-policy-v1.json"), "governed review-routing policy JSON")
 	tritonURL := flag.String("triton-url", envDefault("TRITON_HTTP_URL", "http://127.0.0.1:8000"), "Triton V2 HTTP base URL")
 	brokers := flag.String("bootstrap-servers", envDefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"), "comma-separated Kafka brokers")
 	groupID := flag.String("group-id", envDefault("KAFKA_RISK_SCORER_GROUP_ID", "poker-go-risk-scorer-v1"), "Kafka consumer group")
 	inputTopic := flag.String("input-topic", envDefault("KAFKA_PAIR_FEATURES_TOPIC", "poker.pair-features.v1"), "pair-feature input topic")
 	scoresTopic := flag.String("scores-topic", envDefault("KAFKA_RISK_SCORES_TOPIC", "poker.risk-scores.v1"), "risk-score output topic")
 	ruleEvidenceTopic := flag.String("rule-evidence-topic", envDefault("KAFKA_RULE_EVIDENCE_TOPIC", "poker.rule-evidence.v1"), "rule-evidence output topic")
+	policyDecisionsTopic := flag.String("policy-decisions-topic", envDefault("KAFKA_REVIEW_DECISIONS_TOPIC", "poker.review-decisions.v1"), "review-decision output topic")
 	alertsTopic := flag.String("alerts-topic", envDefault("KAFKA_RISK_ALERTS_TOPIC", "poker.risk-alerts.v1"), "risk-alert output topic")
 	deadLetterTopic := flag.String("dead-letter-topic", envDefault("KAFKA_DEAD_LETTER_TOPIC", "poker.pipeline.dead-letter.v1"), "dead-letter topic")
 	securityProtocol := flag.String("security-protocol", envDefault("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"), "PLAINTEXT, SSL, SASL_PLAINTEXT, or SASL_SSL")
@@ -45,6 +47,10 @@ func main() {
 	bundle, err := risk.LoadArtifactBundle(*modelDir)
 	if err != nil {
 		log.Fatalf("load model artifacts: %v", err)
+	}
+	reviewPolicy, err := risk.LoadReviewPolicy(*reviewPolicyPath)
+	if err != nil {
+		log.Fatalf("load review policy: %v", err)
 	}
 	httpClient := &http.Client{Timeout: *requestTimeout}
 	backend, err := risk.NewTritonBackend(*tritonURL, bundle.Contract.Batching.TritonModel, httpClient)
@@ -72,9 +78,11 @@ func main() {
 	defer kafkaClient.Close()
 	processor, err := stream.NewProcessor(stream.Config{
 		InputTopic: *inputTopic, RiskScoresTopic: *scoresTopic,
-		RuleEvidenceTopic: *ruleEvidenceTopic,
-		RiskAlertsTopic:   *alertsTopic, DeadLetterTopic: *deadLetterTopic,
+		RuleEvidenceTopic:    *ruleEvidenceTopic,
+		PolicyDecisionsTopic: *policyDecisionsTopic,
+		RiskAlertsTopic:      *alertsTopic, DeadLetterTopic: *deadLetterTopic,
 		AllowedTenants: splitNonEmpty(*allowedTenants),
+		ReviewPolicy:   reviewPolicy,
 	}, scorer, assembler, kafkaClient, kafkaClient, nil)
 	if err != nil {
 		log.Fatalf("configure stream processor: %v", err)
@@ -96,12 +104,17 @@ func main() {
 		log.Fatalf("Triton readiness failed: %v", err)
 	}
 	cancel()
-	log.Printf("risk-kafka model=%s run=%s input=%s scores=%s rules=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *alertsTopic)
+	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
 	scores, err := kafkaClient.Run(ctx, processor, *maxScores)
 	if err != nil {
 		log.Fatalf("stream stopped: %v", err)
 	}
-	log.Printf("risk-kafka stopped cleanly scores=%d", scores)
+	policyMetrics := processor.PolicyMetrics()
+	log.Printf(
+		"risk-kafka stopped cleanly scores=%d policy_decisions=%d review_rate=%.6f mandatory_review_rate=%.6f minimum_sample_reached=%t within_rate_limits=%t promotion_gate_passed=%t",
+		scores, policyMetrics.Decisions, policyMetrics.ReviewRate,
+		policyMetrics.MandatoryReviewRate, policyMetrics.MinimumSampleReached,
+		policyMetrics.WithinConfiguredRateLimits, policyMetrics.PromotionGatePassed)
 }
 
 func splitNonEmpty(value string) []string {

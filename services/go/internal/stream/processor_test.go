@@ -123,7 +123,9 @@ func newTestProcessor(t *testing.T, publisher *fakePublisher, committer *fakeCom
 		t.Fatal(err)
 	}
 	processor, err := NewProcessor(Config{
-		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules", RiskAlertsTopic: "alerts", DeadLetterTopic: "dlq",
+		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules",
+		PolicyDecisionsTopic: "decisions", RiskAlertsTopic: "alerts", DeadLetterTopic: "dlq",
+		ReviewPolicy: risk.DefaultReviewPolicy(),
 	}, scorer, assembler, publisher, committer, func() time.Time {
 		return time.Date(2026, 7, 20, 0, 1, 0, 0, time.UTC)
 	})
@@ -149,18 +151,25 @@ func TestProcessorPublishesBeforeCommittingCompleteHand(t *testing.T) {
 		if index < 14 && (len(publisher.records) != 0 || len(committer.calls) != 0) {
 			t.Fatalf("published or committed incomplete hand at record %d", index)
 		}
-		if index == 14 && (result.OutputCount != 2 || result.Status != "complete") {
+		if index == 14 && (result.OutputCount != 3 || result.Status != "complete") {
 			t.Fatalf("unexpected completion result: %+v", result)
 		}
 	}
-	if scorer.calls != 1 || len(publisher.records) != 2 {
-		t.Fatalf("expected one score call and score+alert outputs")
+	if scorer.calls != 1 || len(publisher.records) != 3 {
+		t.Fatalf("expected one score call and score+decision+alert outputs")
 	}
-	if publisher.records[0].Topic != "scores" || publisher.records[1].Topic != "alerts" {
+	if publisher.records[0].Topic != "scores" || publisher.records[1].Topic != "decisions" ||
+		publisher.records[2].Topic != "alerts" {
 		t.Fatalf("unexpected outputs: %+v", publisher.records)
 	}
 	if len(committer.calls) != 1 || committer.calls[0][0].Offset != 14 {
 		t.Fatalf("expected commit through offset 14, got %+v", committer.calls)
+	}
+	metrics := processor.PolicyMetrics()
+	if metrics.Decisions != 1 || metrics.ReviewRecommendations != 1 ||
+		metrics.MandatoryReviews != 0 || metrics.MinimumSampleReached ||
+		metrics.WithinConfiguredRateLimits || metrics.PromotionGatePassed {
+		t.Fatalf("unexpected shadow policy metrics/gate state: %+v", metrics)
 	}
 }
 
@@ -195,12 +204,12 @@ func TestProcessorPublishesRuleEvidenceScoreAndAlertInOneAcknowledgedBatch(t *te
 			t.Fatal(err)
 		}
 	}
-	if completed.OutputCount != 3 || len(publisher.batches) != 1 || len(publisher.batches[0]) != 3 {
-		t.Fatalf("expected one three-record output batch, got result=%+v batches=%d", completed, len(publisher.batches))
+	if completed.OutputCount != 4 || len(publisher.batches) != 1 || len(publisher.batches[0]) != 4 {
+		t.Fatalf("expected one four-record output batch, got result=%+v batches=%d", completed, len(publisher.batches))
 	}
 	batch := publisher.batches[0]
 	if batch[0].Topic != "rules" || string(batch[0].Key) != "pair:a:b" ||
-		batch[1].Topic != "scores" || batch[2].Topic != "alerts" {
+		batch[1].Topic != "scores" || batch[2].Topic != "decisions" || batch[3].Topic != "alerts" {
 		t.Fatalf("unexpected atomic output order: %+v", batch)
 	}
 	var score risk.RiskScoreEvent
@@ -209,6 +218,14 @@ func TestProcessorPublishesRuleEvidenceScoreAndAlertInOneAcknowledgedBatch(t *te
 	}
 	if len(score.Payload.RuleEvidenceEventIDs) != 1 || score.Payload.RuleEvidenceEventIDs[0] != evidence.EventID {
 		t.Fatal("published score did not reference its preceding rule evidence")
+	}
+	var decision risk.ReviewDecisionEvent
+	if err := json.Unmarshal(batch[2].Value, &decision); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Payload.RiskScoreEventID != score.EventID ||
+		decision.Payload.RuleEvidence[0].Category != "soft" {
+		t.Fatal("published review decision does not reference its score and soft evidence")
 	}
 	if len(committer.calls) != 1 {
 		t.Fatal("input offsets must commit only after the complete output batch")
@@ -304,7 +321,7 @@ func TestProcessorRecoversPartialHandAfterRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if secondScorer.calls != 1 || len(secondPublisher.records) != 2 {
+	if secondScorer.calls != 1 || len(secondPublisher.records) != 3 {
 		t.Fatalf("replayed hand was not scored exactly once")
 	}
 	if len(secondCommitter.calls) != 1 || secondCommitter.calls[0][0].Offset != 14 {
@@ -318,8 +335,10 @@ func TestProcessorDeadLettersUnauthorizedTenant(t *testing.T) {
 	scorer.contract.FeatureDefinitionVersion = "pair-features-v1"
 	assembler, _ := risk.NewHandAssembler(15, time.Hour)
 	processor, err := NewProcessor(Config{
-		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules", RiskAlertsTopic: "alerts",
+		InputTopic: "pairs", RiskScoresTopic: "scores", RuleEvidenceTopic: "rules",
+		PolicyDecisionsTopic: "decisions", RiskAlertsTopic: "alerts",
 		DeadLetterTopic: "dlq", AllowedTenants: []string{"tenant-a"},
+		ReviewPolicy: risk.DefaultReviewPolicy(),
 	}, scorer, assembler, publisher, committer, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -349,6 +368,25 @@ func TestProcessorDeadLettersPoisonRecordBeforeCommit(t *testing.T) {
 	}
 	if len(committer.calls) != 1 || committer.calls[0][0].Offset != 7 {
 		t.Fatalf("dead letter must precede committing poison record: %+v", committer.calls)
+	}
+	if metrics := processor.PolicyMetrics(); metrics.Decisions != 0 {
+		t.Fatalf("data-quality failure must not become a policy decision: %+v", metrics)
+	}
+}
+
+func TestPolicyPromotionGateRequiresSampleAndBothRateLimits(t *testing.T) {
+	processor, _ := newTestProcessor(t, &fakePublisher{}, &fakeCommitter{})
+	processor.policyDecisions = 1000
+	processor.reviewRecommendations = 20
+	metrics := processor.PolicyMetrics()
+	if !metrics.MinimumSampleReached || !metrics.WithinConfiguredRateLimits ||
+		!metrics.PromotionGatePassed {
+		t.Fatalf("boundary rates should pass after the minimum sample: %+v", metrics)
+	}
+	processor.mandatoryReviews = 1
+	metrics = processor.PolicyMetrics()
+	if metrics.WithinConfiguredRateLimits || metrics.PromotionGatePassed {
+		t.Fatalf("mandatory-review rate above zero must block promotion: %+v", metrics)
 	}
 }
 

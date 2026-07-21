@@ -39,12 +39,14 @@ type HandScorer interface {
 }
 
 type Config struct {
-	InputTopic        string
-	RiskScoresTopic   string
-	RuleEvidenceTopic string
-	RiskAlertsTopic   string
-	DeadLetterTopic   string
-	AllowedTenants    []string
+	InputTopic           string
+	RiskScoresTopic      string
+	RuleEvidenceTopic    string
+	PolicyDecisionsTopic string
+	RiskAlertsTopic      string
+	DeadLetterTopic      string
+	AllowedTenants       []string
+	ReviewPolicy         risk.ReviewPolicyDefinition
 }
 
 type ProcessResult struct {
@@ -55,20 +57,28 @@ type ProcessResult struct {
 }
 
 type Processor struct {
-	config         Config
-	scorer         HandScorer
-	assembler      *risk.HandAssembler
-	publisher      Publisher
-	committer      Committer
-	offsets        *OffsetTracker
-	pending        map[string]map[RecordRef]struct{}
-	clock          func() time.Time
-	allowedTenants map[string]struct{}
+	config                Config
+	scorer                HandScorer
+	assembler             *risk.HandAssembler
+	publisher             Publisher
+	committer             Committer
+	offsets               *OffsetTracker
+	pending               map[string]map[RecordRef]struct{}
+	clock                 func() time.Time
+	allowedTenants        map[string]struct{}
+	reviewPolicy          risk.ReviewPolicyDefinition
+	policyDecisions       int64
+	reviewRecommendations int64
+	mandatoryReviews      int64
 }
 
 func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssembler, publisher Publisher, committer Committer, clock func() time.Time) (*Processor, error) {
-	if config.InputTopic == "" || config.RiskScoresTopic == "" || config.RuleEvidenceTopic == "" || config.RiskAlertsTopic == "" || config.DeadLetterTopic == "" {
+	if config.InputTopic == "" || config.RiskScoresTopic == "" || config.RuleEvidenceTopic == "" ||
+		config.PolicyDecisionsTopic == "" || config.RiskAlertsTopic == "" || config.DeadLetterTopic == "" {
 		return nil, fmt.Errorf("all stream topics are required")
+	}
+	if err := config.ReviewPolicy.Validate(); err != nil {
+		return nil, fmt.Errorf("review policy: %w", err)
 	}
 	if scorer == nil || assembler == nil || publisher == nil || committer == nil {
 		return nil, fmt.Errorf("scorer, assembler, publisher, and committer are required")
@@ -87,7 +97,7 @@ func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssemble
 		config: config, scorer: scorer, assembler: assembler, publisher: publisher,
 		committer: committer, offsets: NewOffsetTracker(),
 		pending: make(map[string]map[RecordRef]struct{}), clock: clock,
-		allowedTenants: allowed,
+		allowedTenants: allowed, reviewPolicy: config.ReviewPolicy,
 	}, nil
 }
 
@@ -136,16 +146,25 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	if err != nil {
 		return ProcessResult{}, fmt.Errorf("score hand %s: %w", event.Payload.HandID, err)
 	}
-	scoreEvent, alertEvent, err := risk.BuildOutputEvents(result)
+	scoreEvent, decisionEvent, alertEvent, err := risk.BuildSeparatedOutputEvents(
+		result, processor.reviewPolicy)
 	if err != nil {
 		return ProcessResult{}, fmt.Errorf("build outputs for hand %s: %w", event.Payload.HandID, err)
 	}
-	outputs, err := processor.outputRecords(result.RuleEvidenceEvents, scoreEvent, alertEvent)
+	outputs, err := processor.outputRecords(
+		result.RuleEvidenceEvents, scoreEvent, decisionEvent, alertEvent)
 	if err != nil {
 		return ProcessResult{}, err
 	}
 	if err := processor.publisher.Publish(ctx, outputs); err != nil {
 		return ProcessResult{}, fmt.Errorf("publish outputs for hand %s: %w", event.Payload.HandID, err)
+	}
+	processor.policyDecisions++
+	switch decisionEvent.Payload.Outcome {
+	case "review_recommended":
+		processor.reviewRecommendations++
+	case "mandatory_review":
+		processor.mandatoryReviews++
 	}
 	refs := processor.pendingRefs(handKey)
 	processor.offsets.MarkProcessed(refs...)
@@ -157,11 +176,16 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	}, err
 }
 
-func (processor *Processor) outputRecords(ruleEvidence []risk.RuleEvidenceEvent, score risk.RiskScoreEvent, alert *risk.RiskAlertEvent) ([]OutputRecord, error) {
+func (processor *Processor) outputRecords(
+	ruleEvidence []risk.RuleEvidenceEvent,
+	score risk.RiskScoreEvent,
+	decision risk.ReviewDecisionEvent,
+	alert *risk.RiskAlertEvent,
+) ([]OutputRecord, error) {
 	if len(ruleEvidence) != len(score.Payload.RuleEvidenceEventIDs) {
 		return nil, fmt.Errorf("rule evidence batch does not match score references")
 	}
-	outputs := make([]OutputRecord, 0, len(ruleEvidence)+2)
+	outputs := make([]OutputRecord, 0, len(ruleEvidence)+3)
 	for index, event := range ruleEvidence {
 		if err := event.Validate(); err != nil {
 			return nil, fmt.Errorf("validate rule evidence: %w", err)
@@ -183,7 +207,25 @@ func (processor *Processor) outputRecords(ruleEvidence []risk.RuleEvidenceEvent,
 		return nil, fmt.Errorf("marshal risk score: %w", err)
 	}
 	outputs = append(outputs, OutputRecord{Topic: processor.config.RiskScoresTopic, Key: []byte(score.Payload.HandID), Value: scoreValue})
+	if err := decision.Validate(); err != nil {
+		return nil, fmt.Errorf("validate review decision: %w", err)
+	}
+	if decision.Payload.RiskScoreEventID != score.EventID || decision.Payload.ScoreID != score.Payload.ScoreID ||
+		decision.Payload.HandID != score.Payload.HandID {
+		return nil, fmt.Errorf("review decision does not reference its risk score")
+	}
+	decisionValue, err := json.Marshal(decision)
+	if err != nil {
+		return nil, fmt.Errorf("marshal review decision: %w", err)
+	}
+	outputs = append(outputs, OutputRecord{
+		Topic: processor.config.PolicyDecisionsTopic,
+		Key:   []byte(decision.Payload.HandID), Value: decisionValue,
+	})
 	if alert != nil {
+		if alert.Payload.ReviewDecisionEventID != decision.EventID {
+			return nil, fmt.Errorf("risk alert does not reference its review decision")
+		}
 		alertValue, err := json.Marshal(alert)
 		if err != nil {
 			return nil, fmt.Errorf("marshal risk alert: %w", err)
@@ -250,4 +292,37 @@ func (processor *Processor) commitReady(ctx context.Context) ([]RecordRef, error
 
 func (processor *Processor) PendingHands() int {
 	return len(processor.pending)
+}
+
+type PolicyMetricsSnapshot struct {
+	Decisions                  int64
+	ReviewRecommendations      int64
+	MandatoryReviews           int64
+	ReviewRate                 float64
+	MandatoryReviewRate        float64
+	MinimumSampleReached       bool
+	WithinConfiguredRateLimits bool
+	PromotionGatePassed        bool
+}
+
+func (processor *Processor) PolicyMetrics() PolicyMetricsSnapshot {
+	value := PolicyMetricsSnapshot{
+		Decisions:             processor.policyDecisions,
+		ReviewRecommendations: processor.reviewRecommendations,
+		MandatoryReviews:      processor.mandatoryReviews,
+	}
+	if value.Decisions > 0 {
+		value.ReviewRate = float64(value.ReviewRecommendations+value.MandatoryReviews) /
+			float64(value.Decisions)
+		value.MandatoryReviewRate = float64(value.MandatoryReviews) / float64(value.Decisions)
+	}
+	value.MinimumSampleReached = value.Decisions >= int64(
+		processor.reviewPolicy.RolloutGates.MinimumDecisions)
+	value.WithinConfiguredRateLimits = value.ReviewRate <=
+		processor.reviewPolicy.RolloutGates.MaximumReviewRate &&
+		value.MandatoryReviewRate <=
+			processor.reviewPolicy.RolloutGates.MaximumMandatoryReviewRate
+	value.PromotionGatePassed = value.MinimumSampleReached &&
+		value.WithinConfiguredRateLimits
+	return value
 }

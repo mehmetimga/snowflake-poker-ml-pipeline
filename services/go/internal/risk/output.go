@@ -60,6 +60,12 @@ type RiskAlertPayload struct {
 	DecisionThreshold        float64       `json:"decision_threshold"`
 	ServiceImplementation    string        `json:"service_implementation"`
 	ServiceBuildVersion      string        `json:"service_build_version"`
+	ReviewDecisionEventID    string        `json:"review_decision_event_id"`
+	ReviewPolicyID           string        `json:"review_policy_id"`
+	ReviewPolicyVersion      int           `json:"review_policy_version"`
+	ReviewPolicyMode         string        `json:"review_policy_mode"`
+	PolicyOutcome            string        `json:"policy_outcome"`
+	PolicyReasonCodes        []string      `json:"policy_reason_codes"`
 	RuleEvidenceEventIDs     []string      `json:"rule_evidence_event_ids"`
 	RiskProbability          float64       `json:"risk_probability"`
 	HighestRiskPair          PairScore     `json:"highest_risk_pair"`
@@ -82,14 +88,22 @@ type RiskAlertEvent struct {
 }
 
 func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, error) {
+	score, _, alert, err := BuildSeparatedOutputEvents(result, DefaultReviewPolicy())
+	return score, alert, err
+}
+
+func BuildSeparatedOutputEvents(
+	result *ScoreResult,
+	policy ReviewPolicyDefinition,
+) (RiskScoreEvent, ReviewDecisionEvent, *RiskAlertEvent, error) {
 	if result == nil || result.ScoreID == "" || len(result.PairScores) != 15 || len(result.PlayerScores) != 6 {
-		return RiskScoreEvent{}, nil, fmt.Errorf("complete score result is required")
+		return RiskScoreEvent{}, ReviewDecisionEvent{}, nil, fmt.Errorf("complete score result is required")
 	}
 	if result.DecisionPolicyVersion < 1 || result.ServiceImplementation == "" || result.ServiceBuildVersion == "" {
-		return RiskScoreEvent{}, nil, fmt.Errorf("score audit versions are incomplete")
+		return RiskScoreEvent{}, ReviewDecisionEvent{}, nil, fmt.Errorf("score audit versions are incomplete")
 	}
 	if err := validateRuleEvidenceReferences(result.RuleEvidenceEventIDs); err != nil {
-		return RiskScoreEvent{}, nil, err
+		return RiskScoreEvent{}, ReviewDecisionEvent{}, nil, err
 	}
 	scoreEventID := stableUUID(RiskScoreEventType, result.ScoreID)
 	ruleEvidenceEventIDs := append([]string{}, result.RuleEvidenceEventIDs...)
@@ -111,8 +125,12 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 			HandRiskProbability: result.HandRiskProbability, Alert: result.Alert,
 		},
 	}
-	if !result.Alert {
-		return scoreEvent, nil, nil
+	decisionEvent, err := EvaluateReviewPolicy(result, scoreEventID, policy)
+	if err != nil {
+		return RiskScoreEvent{}, ReviewDecisionEvent{}, nil, err
+	}
+	if decisionEvent.Payload.Outcome == "no_review" {
+		return scoreEvent, decisionEvent, nil, nil
 	}
 	highest := result.PairScores[0]
 	for _, pair := range result.PairScores[1:] {
@@ -128,9 +146,9 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 	}
 	sort.Slice(players, func(left, right int) bool { return players[left].PlayerID < players[right].PlayerID })
 	if len(players) != 2 {
-		return RiskScoreEvent{}, nil, fmt.Errorf("highest-risk pair players are missing")
+		return RiskScoreEvent{}, ReviewDecisionEvent{}, nil, fmt.Errorf("highest-risk pair players are missing")
 	}
-	alertID := stableUUID(RiskAlertEventType, result.ScoreID)
+	alertID := stableUUID(RiskAlertEventType, result.ScoreID, decisionEvent.EventID)
 	alertEvent := &RiskAlertEvent{
 		EventID: alertID, EventType: RiskAlertEventType, SchemaVersion: 1,
 		TenantID: result.TenantID, ProductID: result.ProductID,
@@ -145,12 +163,18 @@ func BuildOutputEvents(result *ScoreResult) (RiskScoreEvent, *RiskAlertEvent, er
 			DecisionThreshold:        result.DecisionThreshold,
 			ServiceImplementation:    result.ServiceImplementation,
 			ServiceBuildVersion:      result.ServiceBuildVersion,
+			ReviewDecisionEventID:    decisionEvent.EventID,
+			ReviewPolicyID:           decisionEvent.Payload.PolicyID,
+			ReviewPolicyVersion:      decisionEvent.Payload.PolicyVersion,
+			ReviewPolicyMode:         decisionEvent.Payload.PolicyMode,
+			PolicyOutcome:            decisionEvent.Payload.Outcome,
+			PolicyReasonCodes:        append([]string{}, decisionEvent.Payload.ReasonCodes...),
 			RuleEvidenceEventIDs:     append([]string{}, ruleEvidenceEventIDs...),
 			RiskProbability:          result.HandRiskProbability,
 			HighestRiskPair:          highest, HighestRiskPlayers: players, ScoredAt: result.ScoredAt,
 		},
 	}
-	return scoreEvent, alertEvent, nil
+	return scoreEvent, decisionEvent, alertEvent, nil
 }
 
 func stableUUID(parts ...string) string {

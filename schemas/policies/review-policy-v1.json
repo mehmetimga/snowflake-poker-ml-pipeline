@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "policy_id": "poker.review-routing",
+  "policy_version": 1,
+  "policy_owner": "risk-operations",
+  "effective_from": "2026-07-21T00:00:00Z",
+  "mode": "shadow",
+  "model_threshold": {
+    "enabled": true,
+    "reason_code": "model.threshold-exceeded",
+    "outcome": "review_recommended"
+  },
+  "soft_rules": [
+    {"rule_id": "pair.one-folded-other-won", "rule_version": 1},
+    {"rule_id": "pair.same-device", "rule_version": 1},
+    {"rule_id": "pair.same-network", "rule_version": 1},
+    {"rule_id": "pair.outcome-asymmetry", "rule_version": 1},
+    {"rule_id": "pair.a-fold-b-win-rate", "rule_version": 1},
+    {"rule_id": "pair.b-fold-a-win-rate", "rule_version": 1},
+    {"rule_id": "pair.repeated-fold-to-partner-wins", "rule_version": 1}
+  ],
+  "hard_rules": [],
+  "unknown_rule_behavior": "reject",
+  "data_quality_behavior": "dead_letter",
+  "actions": {
+    "no_review": "none",
+    "review_recommended": "analyst_review",
+    "mandatory_review": "analyst_review"
+  },
+  "rollout_gates": {
+    "maximum_review_rate": 0.02,
+    "maximum_mandatory_review_rate": 0.0,
+    "minimum_decisions": 1000
+  }
+}

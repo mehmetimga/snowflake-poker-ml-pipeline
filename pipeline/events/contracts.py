@@ -29,6 +29,8 @@ RISK_ALERT_CREATED = "poker.risk-alert.created"
 RISK_ALERTS_TOPIC = "poker.risk-alerts.v1"
 RULE_EVIDENCE_RECORDED = "poker.rule-evidence.recorded"
 RULE_EVIDENCE_TOPIC = "poker.rule-evidence.v1"
+REVIEW_DECISION_RECORDED = "poker.review-decision.recorded"
+REVIEW_DECISIONS_TOPIC = "poker.review-decisions.v1"
 
 TOPIC_BY_EVENT_TYPE: dict[str, str] = {
     HAND_COMPLETED: "poker.hands.raw.v1",
@@ -747,6 +749,134 @@ class RiskScoreEvent(_ContractModel):
         return self
 
 
+def stable_review_decision_id(
+    *,
+    tenant_id: str,
+    product_id: str,
+    dataset_id: str,
+    dataset_split: str,
+    policy_id: str,
+    policy_version: int,
+    risk_score_event_id: uuid.UUID,
+) -> uuid.UUID:
+    """Return the replay identity for one policy evaluation of one score."""
+
+    identity = "\x1f".join(
+        (
+            tenant_id,
+            product_id,
+            dataset_id,
+            dataset_split,
+            policy_id,
+            str(policy_version),
+            str(risk_score_event_id),
+        )
+    )
+    return uuid.uuid5(uuid.NAMESPACE_URL, identity)
+
+
+class PolicyRuleReference(_ContractModel):
+    rule_event_id: uuid.UUID
+    rule_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_.-]+$")
+    rule_version: int = Field(ge=1)
+    category: Literal["soft", "hard"]
+
+
+class ReviewDecisionPayload(_ContractModel):
+    decision_id: uuid.UUID
+    risk_score_event_id: uuid.UUID
+    score_id: str = Field(min_length=32, max_length=64)
+    hand_id: str = Field(min_length=1)
+    table_id: str = Field(min_length=1)
+    played_at: datetime
+    policy_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_.-]+$")
+    policy_version: int = Field(ge=1)
+    policy_owner: str = Field(min_length=1)
+    policy_mode: Literal["shadow", "enforced"]
+    outcome: Literal["no_review", "review_recommended", "mandatory_review"]
+    action: Literal["none", "analyst_review"]
+    reason_codes: list[str] = Field(default_factory=list, max_length=32)
+    model_threshold_exceeded: bool
+    rule_evidence: list[PolicyRuleReference] = Field(
+        default_factory=list, max_length=256
+    )
+    decided_at: datetime
+
+    @model_validator(mode="after")
+    def validate_policy_semantics(self) -> "ReviewDecisionPayload":
+        if self.played_at.tzinfo is None or self.decided_at.tzinfo is None:
+            raise ValueError("review decision timestamps must include timezone information")
+        if self.decided_at < self.played_at:
+            raise ValueError("review decision cannot precede hand time")
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("review decision reason codes must be unique")
+        references = [value.rule_event_id for value in self.rule_evidence]
+        if len(references) != len(set(references)):
+            raise ValueError("review decision rule references must be unique")
+        hard = [value for value in self.rule_evidence if value.category == "hard"]
+        if hard:
+            expected_outcome = "mandatory_review"
+        elif self.model_threshold_exceeded:
+            expected_outcome = "review_recommended"
+        else:
+            expected_outcome = "no_review"
+        if self.outcome != expected_outcome:
+            raise ValueError("review decision outcome does not match policy inputs")
+        expected_action = "none" if self.outcome == "no_review" else "analyst_review"
+        if self.action != expected_action:
+            raise ValueError("review decision action does not match its outcome")
+        if self.model_threshold_exceeded != (
+            "model.threshold-exceeded" in self.reason_codes
+        ):
+            raise ValueError("model threshold reason code is inconsistent")
+        expected_hard_reasons = {
+            f"hard-rule.{value.rule_id}.v{value.rule_version}" for value in hard
+        }
+        actual_hard_reasons = {
+            value for value in self.reason_codes if value.startswith("hard-rule.")
+        }
+        if actual_hard_reasons != expected_hard_reasons:
+            raise ValueError("hard-rule reason codes are inconsistent")
+        return self
+
+
+class ReviewDecisionEvent(_ContractModel):
+    """Independent audit event for review routing after model scoring."""
+
+    event_id: uuid.UUID
+    event_type: Literal["poker.review-decision.recorded"] = REVIEW_DECISION_RECORDED
+    schema_version: Literal[1] = 1
+    tenant_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    dataset_id: str = Field(min_length=1)
+    dataset_split: str = Field(min_length=1)
+    occurred_at: datetime
+    emitted_at: datetime
+    trace_id: uuid.UUID
+    payload: ReviewDecisionPayload
+
+    @model_validator(mode="after")
+    def validate_identity_and_time(self) -> "ReviewDecisionEvent":
+        if self.occurred_at != self.payload.played_at:
+            raise ValueError("review-decision occurred_at must equal hand played_at")
+        if self.emitted_at != self.payload.decided_at:
+            raise ValueError("review-decision emitted_at must equal decided_at")
+        if self.event_id != self.payload.decision_id:
+            raise ValueError("review decision event_id must equal decision_id")
+        expected = stable_review_decision_id(
+            tenant_id=self.tenant_id,
+            product_id=self.product_id,
+            dataset_id=self.dataset_id,
+            dataset_split=self.dataset_split,
+            policy_id=self.payload.policy_id,
+            policy_version=self.payload.policy_version,
+            risk_score_event_id=self.payload.risk_score_event_id,
+        )
+        if self.event_id != expected:
+            raise ValueError("review decision ID is not the deterministic replay identity")
+        return self
+
+
 class RiskAlertPayload(_ContractModel):
     """Compact alert that references the complete risk-score audit event."""
 
@@ -765,6 +895,14 @@ class RiskAlertPayload(_ContractModel):
     decision_threshold: float = Field(ge=0, le=1)
     service_implementation: str = Field(default="go-risk-scorer", min_length=1)
     service_build_version: str = Field(default="dev", min_length=1)
+    review_decision_event_id: uuid.UUID
+    review_policy_id: str = Field(
+        min_length=1, pattern=r"^[a-z0-9][a-z0-9_.-]+$"
+    )
+    review_policy_version: int = Field(ge=1)
+    review_policy_mode: Literal["shadow", "enforced"]
+    policy_outcome: Literal["review_recommended", "mandatory_review"]
+    policy_reason_codes: list[str] = Field(min_length=1, max_length=32)
     rule_evidence_event_ids: list[uuid.UUID] = Field(
         default_factory=list, max_length=256
     )
@@ -779,8 +917,21 @@ class RiskAlertPayload(_ContractModel):
 
     @model_validator(mode="after")
     def validate_alert(self) -> "RiskAlertPayload":
-        if self.risk_probability < self.decision_threshold:
+        if (
+            self.policy_outcome == "review_recommended"
+            and self.risk_probability < self.decision_threshold
+        ):
             raise ValueError("risk alert must meet the decision threshold")
+        if len(self.policy_reason_codes) != len(set(self.policy_reason_codes)):
+            raise ValueError("risk alert policy reasons must be unique")
+        if self.policy_outcome == "review_recommended" and (
+            "model.threshold-exceeded" not in self.policy_reason_codes
+        ):
+            raise ValueError("recommended review must retain its model reason")
+        if self.policy_outcome == "mandatory_review" and not any(
+            value.startswith("hard-rule.") for value in self.policy_reason_codes
+        ):
+            raise ValueError("mandatory review requires a hard-rule reason")
         if (
             abs(self.highest_risk_pair.calibrated_probability - self.risk_probability)
             > 1e-9
@@ -968,6 +1119,7 @@ def contract_schema_bundle() -> dict[str, Any]:
             RISK_SCORE_COMPUTED: RiskScoreEvent.model_json_schema(),
             RISK_ALERT_CREATED: RiskAlertEvent.model_json_schema(),
             RULE_EVIDENCE_RECORDED: RuleEvidenceEvent.model_json_schema(),
+            REVIEW_DECISION_RECORDED: ReviewDecisionEvent.model_json_schema(),
         },
         "topics": dict(sorted(TOPIC_BY_EVENT_TYPE.items())),
         "derived_topics": {
@@ -976,5 +1128,6 @@ def contract_schema_bundle() -> dict[str, Any]:
             RISK_SCORE_COMPUTED: RISK_SCORES_TOPIC,
             RISK_ALERT_CREATED: RISK_ALERTS_TOPIC,
             RULE_EVIDENCE_RECORDED: RULE_EVIDENCE_TOPIC,
+            REVIEW_DECISION_RECORDED: REVIEW_DECISIONS_TOPIC,
         },
     }

@@ -12,6 +12,8 @@ from pipeline.events import (
     RISK_ALERTS_TOPIC,
     RISK_SCORE_COMPUTED,
     RISK_SCORES_TOPIC,
+    REVIEW_DECISION_RECORDED,
+    REVIEW_DECISIONS_TOPIC,
     RULE_EVIDENCE_RECORDED,
     RULE_EVIDENCE_TOPIC,
     PairRiskScore,
@@ -22,6 +24,7 @@ from pipeline.events import (
     RiskScorePayload,
     assert_inference_safe,
     contract_schema_bundle,
+    stable_review_decision_id,
 )
 from pipeline.kafka.topics import ScoringTopics, scoring_topic_specs
 
@@ -99,6 +102,15 @@ def test_risk_score_and_alert_contracts_are_inference_safe():
     )
     highest = score.payload.pair_scores[0]
     alert_id = uuid.uuid5(uuid.NAMESPACE_URL, "alert-event")
+    decision_id = stable_review_decision_id(
+        tenant_id=score.tenant_id,
+        product_id=score.product_id,
+        dataset_id=score.dataset_id,
+        dataset_split=score.dataset_split,
+        policy_id="poker.review-routing",
+        policy_version=1,
+        risk_score_event_id=score.event_id,
+    )
     alert = RiskAlertEvent(
         event_id=alert_id,
         tenant_id=score.tenant_id,
@@ -121,6 +133,12 @@ def test_risk_score_and_alert_contracts_are_inference_safe():
             decision_threshold=0.8,
             service_implementation=score.payload.service_implementation,
             service_build_version=score.payload.service_build_version,
+            review_decision_event_id=decision_id,
+            review_policy_id="poker.review-routing",
+            review_policy_version=1,
+            review_policy_mode="shadow",
+            policy_outcome="review_recommended",
+            policy_reason_codes=["model.threshold-exceeded"],
             rule_evidence_event_ids=score.payload.rule_evidence_event_ids,
             risk_probability=0.9,
             highest_risk_pair=highest,
@@ -155,16 +173,19 @@ def test_schema_bundle_and_scoring_topics_are_versioned():
     bundle = contract_schema_bundle()
     assert RISK_SCORE_COMPUTED in bundle["derived_events"]
     assert RISK_ALERT_CREATED in bundle["derived_events"]
+    assert REVIEW_DECISION_RECORDED in bundle["derived_events"]
     assert bundle["derived_topics"][RISK_SCORE_COMPUTED] == RISK_SCORES_TOPIC
     assert bundle["derived_topics"][RISK_ALERT_CREATED] == RISK_ALERTS_TOPIC
     assert bundle["derived_topics"][RULE_EVIDENCE_RECORDED] == RULE_EVIDENCE_TOPIC
+    assert bundle["derived_topics"][REVIEW_DECISION_RECORDED] == REVIEW_DECISIONS_TOPIC
 
     topics = ScoringTopics(
         risk_scores="scores-v1", rule_evidence="rules-v1",
+        review_decisions="decisions-v1",
         risk_alerts="alerts-v1", dead_letters="dlq-v1"
     )
     specs = scoring_topic_specs(topics, partitions=2, replication_factor=1)
     assert [spec.name for spec in specs] == [
-        "scores-v1", "rules-v1", "alerts-v1", "dlq-v1"
+        "scores-v1", "rules-v1", "decisions-v1", "alerts-v1", "dlq-v1"
     ]
     assert all(spec.configs["retention.ms"] == "2592000000" for spec in specs)

@@ -457,7 +457,14 @@ fraud evidence.
 | Long retrospective investigation | Snowflake task/query | Complex historical analysis outside the hot path |
 | Hard security/account policy | Dedicated policy service or Go policy layer | Clear ownership, audit, and controlled overrides |
 
-### 9.4 Rule output contract — next
+### 9.4 Rule and review-policy output contracts
+
+Rules now publish `poker.rule-evidence.v1`; review routing publishes the
+separate `poker.review-decisions.v1` contract. All implemented behavioral rules
+are soft. The current policy has no hard rule, so rules alone cannot create a
+mandatory review. See
+[`decision-policy-v1.md`](decision-policy-v1.md) for the exact policy inputs,
+reason codes, deterministic replay identity, and rollout gates.
 
 Publish structured evidence rather than one unexplained sum:
 

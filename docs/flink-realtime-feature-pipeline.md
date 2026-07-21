@@ -60,9 +60,12 @@ Future: poker server -> PostgreSQL hand history -> Debezium CDC
                               |
                  +------------+-------------+
                  v                          v
-       poker.risk-scores.v1       poker.risk-alerts.v1
+       poker.risk-scores.v1    poker.review-decisions.v1
                  |                          |
                  +------------+-------------+
+                              |
+                              v
+                    poker.risk-alerts.v1
                               |
                               v
                      Snowflake tables
@@ -401,7 +404,8 @@ The complete rule contract is embedded in the pair event's optional
 `upstream_rule_evidence` array. This array is transport metadata, not part of
 the 58-value model tensor. Go validates its scope, hand, revision, feature
 version, and deterministic ID, then publishes it in the same acknowledged
-batch as the referencing score and optional alert.
+batch as the referencing score, independent review decision, and optional
+alert.
 
 ### 5.5 Streaming algorithms used in Flink
 
@@ -503,7 +507,9 @@ The model returns 15 raw pair probabilities. Go then:
 1. applies Platt calibration;
 2. applies the frozen decision threshold;
 3. aggregates pair probabilities into player and hand risk; and
-4. publishes score and alert events with model, feature, and policy versions.
+4. evaluates the separately versioned review-routing policy; and
+5. publishes score, review-decision, and optional alert events with complete
+   model, feature, rule, and policy lineage.
 
 Read [the exact model input contract](realtime-model-input-contract.md) for all
 58 ordered columns, data types, missing-value rules, tensor names, and model

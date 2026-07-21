@@ -1,4 +1,4 @@
-"""Create versioned risk-score, rule-evidence, alert, and dead-letter topics."""
+"""Create score, evidence, review-decision, alert, and dead-letter topics."""
 
 from __future__ import annotations
 

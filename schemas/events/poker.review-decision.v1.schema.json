@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poker-ml.example/schemas/events/poker.review-decision.v1.schema.json",
+  "title": "Poker Review Decision v1",
+  "description": "Independent review-routing audit decision for one complete-hand risk score.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "tenant_id",
+    "product_id",
+    "dataset_id",
+    "dataset_split",
+    "occurred_at",
+    "emitted_at",
+    "trace_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {"$ref": "#/$defs/uuid"},
+    "event_type": {"const": "poker.review-decision.recorded"},
+    "schema_version": {"const": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {"type": "string", "minLength": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "trace_id": {"$ref": "#/$defs/uuid"},
+    "payload": {"$ref": "#/$defs/reviewDecisionPayload"}
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "ruleReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_event_id", "rule_id", "rule_version", "category"],
+      "properties": {
+        "rule_event_id": {"$ref": "#/$defs/uuid"},
+        "rule_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_.-]+$"
+        },
+        "rule_version": {"type": "integer", "minimum": 1},
+        "category": {"enum": ["soft", "hard"]}
+      }
+    },
+    "reviewDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_id",
+        "risk_score_event_id",
+        "score_id",
+        "hand_id",
+        "table_id",
+        "played_at",
+        "policy_id",
+        "policy_version",
+        "policy_owner",
+        "policy_mode",
+        "outcome",
+        "action",
+        "reason_codes",
+        "model_threshold_exceeded",
+        "rule_evidence",
+        "decided_at"
+      ],
+      "properties": {
+        "decision_id": {"$ref": "#/$defs/uuid"},
+        "risk_score_event_id": {"$ref": "#/$defs/uuid"},
+        "score_id": {"type": "string", "minLength": 32, "maxLength": 64},
+        "hand_id": {"type": "string", "minLength": 1},
+        "table_id": {"type": "string", "minLength": 1},
+        "played_at": {"type": "string", "format": "date-time"},
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_.-]+$"
+        },
+        "policy_version": {"type": "integer", "minimum": 1},
+        "policy_owner": {"type": "string", "minLength": 1},
+        "policy_mode": {"enum": ["shadow", "enforced"]},
+        "outcome": {
+          "enum": ["no_review", "review_recommended", "mandatory_review"]
+        },
+        "action": {"enum": ["none", "analyst_review"]},
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "model_threshold_exceeded": {"type": "boolean"},
+        "rule_evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/ruleReference"}
+        },
+        "decided_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

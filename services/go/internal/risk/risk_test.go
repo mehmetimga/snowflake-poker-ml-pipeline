@@ -111,7 +111,7 @@ func testEvents() []PairFeatureEvent {
 			events = append(events, PairFeatureEvent{
 				EventID: "event-" + pairKey, EventType: pairFeatureEventType, SchemaVersion: 1,
 				TenantID: "tenant", ProductID: "poker", DatasetID: "dataset", DatasetSplit: "test",
-				OccurredAt: "2026-07-20T00:00:00Z", EmittedAt: "2026-07-20T00:00:01Z", TraceID: "trace-1",
+				OccurredAt: "2026-07-20T00:00:00Z", EmittedAt: "2026-07-20T00:00:01Z", TraceID: "00000000-0000-5000-8000-000000000099",
 				Payload: PairFeaturePayload{
 					HandID: "hand-1", TableID: "table-1", PlayedAt: "2026-07-20T00:00:00Z",
 					PairKey: pairKey, PlayerA: players[left], PlayerB: players[right], NumPlayers: 6,
@@ -336,7 +336,21 @@ func TestOutputEventsUseDeterministicIDsAndAlertReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result.RuleEvidenceEventIDs = []string{"8bcfb4e4-2113-52c3-85c2-a6ca4cb19823"}
+	evidence, err := BuildRuleEvidenceEvent(RuleEvidenceInput{
+		TenantID: result.TenantID, ProductID: result.ProductID,
+		DatasetID: result.DatasetID, DatasetSplit: result.DatasetSplit,
+		TraceID: result.TraceID, RuleID: "pair.same-device", RuleVersion: 1,
+		RuleOwner: "trust-platform", EntityType: "pair", EntityKey: "a:b",
+		HandID: result.HandID, ObservationRevision: 1, Severity: "high", RawScore: 100,
+		Evidence:    map[string]any{"feature_name": "same_device", "observed_value": 1.0},
+		EffectiveAt: result.PlayedAt, EmittedAt: result.ScoredAt,
+		FeatureDefinitionVersion: result.FeatureDefinitionVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.RuleEvidenceEventIDs = []string{evidence.EventID}
+	result.RuleEvidenceEvents = []RuleEvidenceEvent{evidence}
 	firstScore, firstAlert, err := BuildOutputEvents(result)
 	if err != nil {
 		t.Fatal(err)
@@ -373,6 +387,54 @@ func TestOutputEventsRejectDuplicateRuleEvidenceReferences(t *testing.T) {
 	result.RuleEvidenceEventIDs = []string{reference, reference}
 	if _, _, err := BuildOutputEvents(result); err == nil || !strings.Contains(err.Error(), "references must be unique") {
 		t.Fatalf("expected duplicate rule reference rejection, got %v", err)
+	}
+}
+
+func TestHardPolicyCanRouteReviewBelowThresholdWithoutChangingProbability(t *testing.T) {
+	bundle := testBundle(t)
+	bundle.Policy.Threshold = 0.95
+	scorer, err := NewScorer(bundle, &fakeBackend{}, func() time.Time {
+		return time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scorer.ScoreHand(context.Background(), testEvents())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Alert || result.HandRiskProbability >= result.DecisionThreshold {
+		t.Fatal("test score must remain below its model threshold")
+	}
+	probability := result.HandRiskProbability
+	evidence, err := BuildRuleEvidenceEvent(RuleEvidenceInput{
+		TenantID: result.TenantID, ProductID: result.ProductID,
+		DatasetID: result.DatasetID, DatasetSplit: result.DatasetSplit,
+		TraceID: result.TraceID, RuleID: "pair.repeated-fold-to-partner-wins", RuleVersion: 1,
+		RuleOwner: "risk-analytics", EntityType: "pair", EntityKey: "a:b",
+		HandID: result.HandID, ObservationRevision: 1, Severity: "high", RawScore: 60,
+		Evidence:    map[string]any{"window_hand_count": 5, "directional_fold_win_rate": 0.6},
+		EffectiveAt: result.PlayedAt, EmittedAt: result.ScoredAt,
+		FeatureDefinitionVersion: result.FeatureDefinitionVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.RuleEvidenceEventIDs = []string{evidence.EventID}
+	result.RuleEvidenceEvents = []RuleEvidenceEvent{evidence}
+	policy := DefaultReviewPolicy()
+	repeated := policy.SoftRules[len(policy.SoftRules)-1]
+	policy.SoftRules = policy.SoftRules[:len(policy.SoftRules)-1]
+	policy.HardRules = []RulePolicySpec{repeated}
+	score, decision, alert, err := BuildSeparatedOutputEvents(result, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score.Payload.Alert || decision.Payload.Outcome != "mandatory_review" || alert == nil ||
+		alert.Payload.PolicyOutcome != "mandatory_review" ||
+		alert.Payload.RiskProbability >= alert.Payload.DecisionThreshold ||
+		result.HandRiskProbability != probability {
+		t.Fatalf("hard review routing changed or contradicted model output: score=%+v decision=%+v alert=%+v", score.Payload, decision.Payload, alert)
 	}
 }
 

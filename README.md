@@ -226,9 +226,10 @@ The service exposes `/healthz`, Triton-backed `/readyz`, Prometheus `/metrics`,
 complete-hand `/v1/score-hand`, and incremental `/v1/pair-feature` endpoints.
 Higher snapshot revisions re-score a cached complete hand; duplicates and stale
 revisions do not call the model. The Go Kafka adapter now consumes
-`poker.pair-features.v1`, publishes versioned `poker.risk-scores.v1` and
-`poker.risk-alerts.v1` events, dead-letters invalid records, and commits only
-contiguous offsets whose outputs have been acknowledged. Run it after Triton:
+`poker.pair-features.v1`, publishes versioned rule evidence, risk scores,
+independent `poker.review-decisions.v1` audit events, and policy-linked alerts.
+It dead-letters invalid records and commits only contiguous offsets whose
+outputs have been acknowledged. Run it after Triton:
 
 ```bash
 make scoring-topics

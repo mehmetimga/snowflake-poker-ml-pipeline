@@ -347,12 +347,22 @@ six-player hand:
 4. Each player's risk is the maximum calibrated probability among pairs that
    include the player.
 5. Hand risk is the maximum calibrated probability among all 15 pairs.
-6. The frozen decision threshold produces the alert decision.
+6. The frozen model threshold records whether statistical risk crossed its
+   validation-selected boundary.
+7. The separate `poker.review-routing:v1` policy emits an independent review
+   decision. It recommends review for a threshold crossing, retains soft rule
+   evidence as filters, and reserves mandatory review for explicitly governed
+   hard rules.
 
 The current artifact threshold is approximately `0.984192`, selected on
 validation data with a maximum 2% alert-rate budget. This value is specific to
 the current model run and must be loaded from `decision_policy.json`, never
 hard-coded into the service or topic schema.
+
+The current review policy is documented in
+[`decision-policy-v1.md`](decision-policy-v1.md). All current B2/B3 rules are
+soft and the hard-rule list is empty. Review policy output never changes any
+raw or calibrated probability.
 
 ## Versioning and change policy
 

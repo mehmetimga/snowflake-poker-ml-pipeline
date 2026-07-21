@@ -323,8 +323,10 @@ compatibility and test schema compatibility in CI.
 | `poker.session-context.v1` | `session_id` | Delete | Login, device, network, and session events |
 | `poker.account-links.v1` | `user_id` | Compact/delete | User-device-network-account relationships |
 | `poker.pair-features.v1` | `pair_key` | Delete | Online pair-feature snapshots |
+| `poker.rule-evidence.v1` | `entity_type:entity_key` | Delete | Governed soft/hard evidence |
 | `poker.risk-scores.v1` | `hand_id` | Delete | Model outputs and model versions |
-| `poker.risk-alerts.v1` | `hand_id` | Delete | Actionable model-risk alerts |
+| `poker.review-decisions.v1` | `hand_id` | Delete | Versioned review-routing audit decisions |
+| `poker.risk-alerts.v1` | `hand_id` | Delete | Policy-linked analyst review alerts |
 | `poker.labels.v1` | `example_id` | Restricted/delete | Delayed synthetic or analyst labels |
 | `poker.pipeline.dead-letter.v1` | `event_id` | Delete | Invalid or incompatible events |
 
@@ -569,10 +571,12 @@ The Go `risk-scorer` then:
 1. Collects all 15 pair rows for a hand.
 2. Validates the feature-definition and model-contract versions.
 3. Runs a small ONNX model locally or sends one batched request to Triton.
-4. Applies calibration and the versioned decision policy.
+4. Applies calibration and the model artifact's frozen threshold.
 5. Aggregates pair risk into player and hand risk.
-6. Publishes `poker.risk-scores.v1` and `poker.risk-alerts.v1`.
-7. Persists auditable model, feature, and policy metadata through the sink path.
+6. Evaluates the separate versioned review policy.
+7. Publishes `poker.risk-scores.v1`, `poker.review-decisions.v1`, and optional
+   `poker.risk-alerts.v1` events in one acknowledged batch.
+8. Persists auditable model, feature, rule, and policy metadata through the sink path.
 
 Keeping scoring behind a Kafka contract allows the Go implementation to be
 replaced by Rust later without redeploying Flink or retraining the model.
@@ -1207,7 +1211,8 @@ zero duplicates. The Go scorer core now verifies artifacts, reproduces the
 train-fitted feature transform, assembles/reassembles corrected 15-pair hands,
 calls the Triton V2 HTTP interface, applies calibration and decision policy,
 aggregates player/hand risk, and exposes health/readiness/metrics/scoring HTTP
-endpoints. The Go Kafka adapter now adds deterministic score/alert envelopes,
+endpoints. The Go Kafka adapter now adds deterministic score, rule-evidence,
+review-decision, and alert envelopes,
 Confluent TLS/SASL support, synchronous acknowledged publishing, contiguous
 offset commits, poison-record dead letters, and correction-aware replay. Topic
 contracts and managed topic creation are implemented. The promoted ONNX model
