@@ -94,3 +94,39 @@ for this first deployment. Before horizontal scaling, add a by-`hand_id`
 repartition topic (or change the upstream output key) so every 15-pair hand is
 owned by one group member. The adapter blocks revocation while a partial hand
 is resident rather than risking a partial commit.
+
+## CDC hand adapter
+
+The separate `cmd/hand-adapter` command owns the proposed boundary from a
+Debezium-shaped topic to a canonical hand topic. It validates the immutable
+outbox envelope, checksum, source database/table, tenant, versioned binary
+codec, hand identity, split, and event time before publishing the existing
+canonical event with source LSN/transaction headers.
+
+The runtime synchronously acknowledges either one canonical hand or one
+sanitized `poker.cdc-hand.dead-lettered` record before committing its source
+offset. Canonical output failure, DLQ failure, or commit failure returns an
+error and stops the polling loop. A commit failure therefore replays a
+deterministic output instead of losing the input. The DLQ contains hashes and
+source position, never raw proprietary hand-history bytes.
+
+```bash
+make phase-c2-runtime-check
+make go-hand-adapter-kafka-check
+```
+
+This project intentionally does not ingest production poker-server data.
+Normal mode fails closed because no production decoder is registered. The
+fixture decoder requires `--simulation-mode`, exact `poker.sim.*` topics, and
+a `sim-*` dataset ID. Run it with:
+
+```bash
+make go-hand-adapter-sim
+make phase-c2-packaging-check
+```
+
+The adapter is packaged by `Dockerfile.adapter`; its private simulation SPCS
+contract is `infra/snowflake/specs/adapter-sim.yaml.template`. See
+[`docs/debezium-hand-history-ingress.md`](../../docs/debezium-hand-history-ingress.md)
+and [`docs/spcs-c2-adapter-simulation.md`](../../docs/spcs-c2-adapter-simulation.md)
+for the source contract, safety policy, and deployment boundary.

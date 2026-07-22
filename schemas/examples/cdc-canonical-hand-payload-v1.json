@@ -1,0 +1,28 @@
+{
+  "hand_id": "C2-FIXTURE-H-000001",
+  "table_id": "c2_table_01",
+  "played_at": "2026-07-21T10:00:00Z",
+  "dataset_split": "live",
+  "generator": "poker-server",
+  "small_blind": 0.5,
+  "big_blind": 1.0,
+  "num_players": 6,
+  "pot_size": 6.0,
+  "board": ["2c", "7d", "Jh", "Qs", "Ac"],
+  "actions": [
+    {"sequence_no": 0, "player_id": "player-a", "street": "preflop", "action_type": "call", "amount": 1.0},
+    {"sequence_no": 1, "player_id": "player-b", "street": "preflop", "action_type": "fold", "amount": 0.0},
+    {"sequence_no": 2, "player_id": "player-c", "street": "preflop", "action_type": "fold", "amount": 0.0},
+    {"sequence_no": 3, "player_id": "player-d", "street": "preflop", "action_type": "fold", "amount": 0.0},
+    {"sequence_no": 4, "player_id": "player-e", "street": "preflop", "action_type": "call", "amount": 1.0},
+    {"sequence_no": 5, "player_id": "player-f", "street": "preflop", "action_type": "check", "amount": 0.0}
+  ],
+  "players": [
+    {"player_id": "player-a", "name": "PlayerA", "position": "SB", "stack_start": 100.0, "hole_cards": "As Ks", "won_amount": 6.0},
+    {"player_id": "player-b", "name": "PlayerB", "position": "BB", "stack_start": 100.0, "hole_cards": "Qh Qd", "won_amount": 0.0},
+    {"player_id": "player-c", "name": "PlayerC", "position": "UTG", "stack_start": 100.0, "hole_cards": "9c 9s", "won_amount": 0.0},
+    {"player_id": "player-d", "name": "PlayerD", "position": "MP", "stack_start": 100.0, "hole_cards": "8h 8d", "won_amount": 0.0},
+    {"player_id": "player-e", "name": "PlayerE", "position": "CO", "stack_start": 100.0, "hole_cards": "7c 7s", "won_amount": 0.0},
+    {"player_id": "player-f", "name": "PlayerF", "position": "BTN", "stack_start": 100.0, "hole_cards": "6h 6d", "won_amount": 0.0}
+  ]
+}

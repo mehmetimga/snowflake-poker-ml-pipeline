@@ -1,0 +1,57 @@
+spec:
+  containers:
+  - name: hand-adapter-sim
+    image: __ADAPTER_IMAGE_PATH__
+    command:
+    - /usr/local/bin/hand-adapter
+    args:
+    - --simulation-mode
+    - --allow-fixture-codec
+    - --metrics-listen
+    - 0.0.0.0:9093
+    env:
+      CDC_SERVICE_BUILD_VERSION: __ADAPTER_BUILD_VERSION__
+      CDC_DATASET_ID: __ADAPTER_DATASET_ID__
+      CDC_DATASET_SPLIT: live
+      CDC_EXPECTED_DATABASE: poker_sim
+      CDC_EXPECTED_SCHEMA: public
+      CDC_EXPECTED_TABLE: hand_completed_outbox
+      CDC_ALLOWED_TENANTS: "__ADAPTER_ALLOWED_TENANTS__"
+      KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_CDC_HAND_OUTBOX_TOPIC: poker.sim.cdc-hand-outbox.v1
+      KAFKA_CDC_CANONICAL_HANDS_TOPIC: poker.sim.hands.raw.v1
+      KAFKA_DEAD_LETTER_TOPIC: poker.sim.pipeline.dead-letter.v1
+      KAFKA_HAND_ADAPTER_GROUP_ID: __ADAPTER_GROUP_ID__
+    secrets:
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+      secretKeyRef: username
+      envVarName: KAFKA_SASL_USERNAME
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+      secretKeyRef: password
+      envVarName: KAFKA_SASL_PASSWORD
+    readinessProbe:
+      port: 9093
+      path: /healthz
+    resources:
+      requests:
+        cpu: 0.25
+        memory: 0.5Gi
+      limits:
+        cpu: 1
+        memory: 1Gi
+  endpoints:
+  - name: adapter-metrics
+    port: 9093
+    protocol: HTTP
+    public: false
+  logExporters:
+    eventTableConfig:
+      logLevel: INFO
+  platformMonitor:
+    metricConfig:
+      groups:
+      - system
+      - network
+      - status

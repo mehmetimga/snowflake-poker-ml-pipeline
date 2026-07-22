@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poker-ml.example/schemas/cdc/debezium.hand-completed-outbox.v1.schema.json",
+  "title": "Debezium PostgreSQL hand-completed outbox v1",
+  "description": "Adapter input after the Kafka Connect converter. PostgreSQL BYTEA is configured as strict base64. Runtime accepts schema-wrapped Connect JSON and extracts this payload first.",
+  "type": "object",
+  "required": ["before", "after", "source", "op", "ts_ms"],
+  "properties": {
+    "before": {"type": "null"},
+    "after": {"$ref": "#/$defs/outboxRow"},
+    "source": {"$ref": "#/$defs/source"},
+    "op": {"enum": ["c", "r"]},
+    "ts_ms": {"type": "integer", "minimum": 0},
+    "ts_us": {"type": ["integer", "null"], "minimum": 0},
+    "ts_ns": {"type": ["integer", "null"], "minimum": 0},
+    "transaction": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/transaction"}
+      ]
+    }
+  },
+  "$defs": {
+    "outboxRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "aggregate_type",
+        "aggregate_id",
+        "event_type",
+        "payload_schema_version",
+        "tenant_id",
+        "product_id",
+        "occurred_at",
+        "emitted_at",
+        "codec_version",
+        "payload_sha256",
+        "payload"
+      ],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "aggregate_type": {"const": "poker-hand"},
+        "aggregate_id": {"type": "string", "minLength": 1},
+        "event_type": {"const": "poker.hand.completed"},
+        "payload_schema_version": {"const": 1},
+        "tenant_id": {"type": "string", "minLength": 1},
+        "product_id": {"type": "string", "minLength": 1},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "emitted_at": {"type": "string", "format": "date-time"},
+        "codec_version": {"type": "string", "minLength": 1},
+        "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "payload": {"type": "string", "contentEncoding": "base64"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["version", "connector", "name", "ts_ms", "snapshot", "db", "schema", "table", "lsn"],
+      "properties": {
+        "version": {"type": "string", "minLength": 1},
+        "connector": {"const": "postgresql"},
+        "name": {"type": "string", "minLength": 1},
+        "ts_ms": {"type": "integer", "minimum": 0},
+        "snapshot": {
+          "enum": [true, false, "true", "false", "initial", "first", "last", "incremental"]
+        },
+        "db": {"type": "string", "minLength": 1},
+        "schema": {"type": "string", "minLength": 1},
+        "table": {"type": "string", "minLength": 1},
+        "txId": {"type": ["integer", "null"], "minimum": 0},
+        "lsn": {"type": "integer", "minimum": 0}
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "required": ["id", "total_order", "data_collection_order"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "total_order": {"type": "string", "minLength": 1},
+        "data_collection_order": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

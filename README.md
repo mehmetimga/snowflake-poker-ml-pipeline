@@ -10,6 +10,8 @@ Planning documents:
 
 - [Real-time context and ML implementation plan](docs/realtime-context-ml-implementation-plan.md)
 - [Data generation, storage, and pipeline plan](docs/data-generation-and-pipeline-plan.md)
+- [PostgreSQL/Debezium hand-history ingress contract](docs/debezium-hand-history-ingress.md)
+- [C2 simulation adapter Docker/SPCS packaging](docs/spcs-c2-adapter-simulation.md)
 - [How the Flink real-time feature pipeline works](docs/flink-realtime-feature-pipeline.md)
 - [Data science and ML/AI model development guide](docs/data-science-model-development-guide.md)
 - [ML/AI recommendations implementation plan](docs/ml-ai-recommendations-implementation-plan.md)
@@ -93,8 +95,9 @@ make world-dataset TRAIN_HANDS=20 VALIDATION_HANDS=5 \
 
 This writes separate topic-ready JSONL streams under
 `data/datasets/context-v1/<split>/events/`. Challenge labels are written only
-under `private_labels/`. Direct Kafka replay is the current project path;
-Debezium remains a future poker-server integration.
+under `private_labels/`. Direct Kafka replay is the current project path. The
+future Debezium boundary and source-independent Go runtime are offline-verifiable
+with `make phase-c2-runtime-check`; this does not deploy a connector or service.
 
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:

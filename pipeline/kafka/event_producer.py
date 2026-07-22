@@ -12,6 +12,7 @@ from pipeline.events.contracts import TOPIC_BY_EVENT_TYPE
 from pipeline.replay import PendingPublish, PublishAck, ReplayEvent
 
 from .config import kafka_client_kwargs
+from .headers import canonical_event_headers
 
 
 @dataclass(frozen=True)
@@ -82,14 +83,7 @@ class WorldEventProducer:
         envelope = validate_event(event.envelope)
         topic = self._topics[envelope.event_type]
         key = event.partition_key
-        headers = [
-            ("event_id", str(envelope.event_id).encode("utf-8")),
-            ("event_type", envelope.event_type.encode("utf-8")),
-            ("schema_version", str(envelope.schema_version).encode("ascii")),
-            ("dataset_id", envelope.dataset_id.encode("utf-8")),
-            ("trace_id", str(envelope.trace_id).encode("utf-8")),
-            ("occurred_at", envelope.occurred_at.isoformat().encode("utf-8")),
-        ]
+        headers = canonical_event_headers(envelope)
         handle = self._producer.send(
             topic,
             key=key,

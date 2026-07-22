@@ -83,12 +83,22 @@ class WorldWarehouseSink:
             raise ValueError(
                 f"event {envelope.event_id} key={message.key!r}, expected {expected_key!r}"
             )
+        source_lineage: dict[str, str] = {}
+        for name, raw_value in getattr(message, "headers", None) or ():
+            if not name.startswith("cdc_"):
+                continue
+            value = raw_value.decode("utf-8")
+            previous = source_lineage.get(name)
+            if previous is not None and previous != value:
+                raise ValueError(f"conflicting duplicate Kafka header: {name}")
+            source_lineage[name] = value
         return IngestRecord(
             envelope=envelope.model_dump(mode="json"),
             topic=message.topic,
             partition=int(message.partition),
             offset=int(message.offset),
             kafka_timestamp_ms=int(message.timestamp) if message.timestamp is not None else None,
+            source_lineage=source_lineage or None,
         )
 
     def _flush(self, records: list[IngestRecord]) -> CanonicalLoadResult:

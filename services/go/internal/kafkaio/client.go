@@ -93,16 +93,27 @@ func (client *Client) Ping(ctx context.Context) error {
 }
 
 func (client *Client) Publish(ctx context.Context, records []stream.OutputRecord) error {
-	kafkaRecords := make([]*kgo.Record, 0, len(records))
-	for _, record := range records {
-		kafkaRecords = append(kafkaRecords, &kgo.Record{Topic: record.Topic, Key: record.Key, Value: record.Value})
-	}
+	kafkaRecords := outputKafkaRecords(records)
 	for _, result := range client.client.ProduceSync(ctx, kafkaRecords...) {
 		if result.Err != nil {
 			return fmt.Errorf("produce topic %s: %w", result.Record.Topic, result.Err)
 		}
 	}
 	return nil
+}
+
+func outputKafkaRecords(records []stream.OutputRecord) []*kgo.Record {
+	kafkaRecords := make([]*kgo.Record, 0, len(records))
+	for _, record := range records {
+		headers := make([]kgo.RecordHeader, 0, len(record.Headers))
+		for _, header := range record.Headers {
+			headers = append(headers, kgo.RecordHeader{Key: header.Key, Value: header.Value})
+		}
+		kafkaRecords = append(kafkaRecords, &kgo.Record{
+			Topic: record.Topic, Key: record.Key, Value: record.Value, Headers: headers,
+		})
+	}
+	return kafkaRecords
 }
 
 func (client *Client) Commit(ctx context.Context, records []stream.RecordRef) error {

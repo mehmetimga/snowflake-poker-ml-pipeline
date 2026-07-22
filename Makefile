@@ -1,6 +1,9 @@
 .PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 .PHONY: rule-monitoring-test rule-monitor-window rule-monitoring rule-monitoring-check phase-b6-check
 .PHONY: c1-package-test c1-risk-bundle c1-render c1-build-risk c1-build-flink c1-build c1-image-smoke c1-release-check c1-push c1-mirror-triton c1-upload-model c1-deploy-risk c1-deploy-flink c1-deploy phase-c1-check
+.PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
+.PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
+.PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim phase-c2-packaging-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -90,6 +93,7 @@ GO_RISK_LISTEN ?= :8080
 TRITON_HTTP_URL ?= http://127.0.0.1:8000
 GO_RISK_FLAGS ?=
 GO_RISK_KAFKA_FLAGS ?=
+GO_HAND_ADAPTER_FLAGS ?=
 RISK_SCORE_CHECK_FLAGS ?=
 WORLD_REPLAY_MODE ?= accelerated
 WORLD_REPLAY_RATE ?= 100
@@ -177,6 +181,19 @@ help:
 	@echo "  rule-monitoring-check Recompute the B6 monitoring window and outputs"
 	@echo "  phase-b6-check Verify dashboards, alert lineage, runtime metrics, and B1-B5"
 	@echo "  phase-c1-check Verify C1 runtime bundles, SPCS specs, Go, and Flink packages"
+	@echo "  cdc-contract-test Test the future immutable Debezium hand boundary"
+	@echo "  cdc-fixture-check Verify direct and CDC canonical-hand parity"
+	@echo "  phase-c2-readiness-check Run the complete offline C2 contract gate"
+	@echo "  go-hand-adapter-test Test publish/DLQ/commit recovery behavior"
+	@echo "  go-hand-adapter Run the future CDC adapter (fixture codec requires explicit flag)"
+	@echo "  go-hand-adapter-sim Run the adapter on isolated poker.sim.* topics"
+	@echo "  go-hand-adapter-kafka-check Verify adapter Kafka authentication only"
+	@echo "  phase-c2-runtime-check Run the complete offline C2 runtime gate"
+	@echo "  phase-c2-packaging-check Verify the isolated simulation adapter image/spec"
+	@echo "  c2-adapter-build Build the linux/amd64 simulation adapter image"
+	@echo "  c2-adapter-image-smoke Check the locally built adapter executable"
+	@echo "  c2-adapter-push Push a clean-commit adapter image to Snowflake registry"
+	@echo "  c2-adapter-deploy-sim Deploy the private POKER_ADAPTER_SIM service"
 	@echo "  c1-build     Build versioned linux/amd64 poker-risk and poker-flink images"
 	@echo "  c1-image-smoke Smoke-test the two locally built C1 images"
 	@echo "  c1-push      Push the two versioned C1 images to Snowflake registry"
@@ -915,6 +932,36 @@ demo-realtime: check-kafka services
 test:
 	pytest -q
 
+cdc-contract-test:
+	$(PY) -m pytest -q tests/test_cdc_hand_history.py
+	cd services/go && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache $(GO) test ./internal/cdc
+
+cdc-fixture-check:
+	$(PY) scripts/check_cdc_hand_fixture.py
+
+phase-c2-readiness-check: cdc-contract-test cdc-fixture-check
+
+go-hand-adapter-test:
+	cd $(GO_RISK_DIR) && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache \
+		$(GO) test ./internal/cdc ./internal/kafkaio ./internal/stream ./cmd/hand-adapter
+
+go-hand-adapter:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/hand-adapter $(GO_HAND_ADAPTER_FLAGS)
+
+go-hand-adapter-sim:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/hand-adapter \
+		--simulation-mode --allow-fixture-codec \
+		--input-topic poker.sim.cdc-hand-outbox.v1 \
+		--output-topic poker.sim.hands.raw.v1 \
+		--dead-letter-topic poker.sim.pipeline.dead-letter.v1 \
+		--dataset-id $(C2_ADAPTER_DATASET_ID) $(GO_HAND_ADAPTER_FLAGS)
+
+go-hand-adapter-kafka-check:
+	cd $(GO_RISK_DIR) && $(GO) run ./cmd/hand-adapter --check-kafka-only \
+		$(GO_HAND_ADAPTER_FLAGS)
+
+phase-c2-runtime-check: phase-c2-readiness-check go-hand-adapter-test
+
 clean:
 	rm -f data/parquet/*.duckdb data/parquet/*.parquet
 	rm -f data/raw/*.jsonl
@@ -940,6 +987,12 @@ C1_ALLOWED_TENANTS ?= demo
 C1_RISK_SCORER_GROUP_ID ?= poker-go-risk-scorer-v1
 C1_FLINK_CONTEXT_SAVEPOINT_PATH ?=
 C1_FLINK_PAIR_SAVEPOINT_PATH ?=
+C2_ADAPTER_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+C2_ADAPTER_IMAGE ?= poker-adapter:$(C2_ADAPTER_IMAGE_TAG)
+C2_REMOTE_ADAPTER_IMAGE ?= $(SNOW_REPO_URL)/poker-adapter:$(C2_ADAPTER_IMAGE_TAG)
+C2_ADAPTER_DATASET_ID ?= sim-cdc-v1
+C2_ADAPTER_ALLOWED_TENANTS ?= demo
+C2_ADAPTER_GROUP_ID ?= poker-go-hand-adapter-sim-v1
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -1059,6 +1112,38 @@ phase-c1-check: c1-package-test c1-risk-bundle
 	cd services/go && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache go test ./...
 	cd $(FLINK_CONTEXT_DIR) && $(MAVEN) -Dmaven.repo.local=$(MAVEN_REPO) test package
 	cd $(FLINK_PAIR_FEATURES_DIR) && $(MAVEN) -Dmaven.repo.local=$(MAVEN_REPO) test package
+
+c2-adapter-package-test:
+	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py tests/test_snowflake_deploy.py
+
+c2-adapter-render:
+	SPCS_ADAPTER_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-adapter:$(C2_ADAPTER_IMAGE_TAG) \
+	SPCS_ADAPTER_BUILD_VERSION=$(C2_ADAPTER_IMAGE_TAG) \
+	SPCS_ADAPTER_DATASET_ID=$(C2_ADAPTER_DATASET_ID) \
+	SPCS_ADAPTER_ALLOWED_TENANTS=$(C2_ADAPTER_ALLOWED_TENANTS) \
+	SPCS_ADAPTER_GROUP_ID=$(C2_ADAPTER_GROUP_ID) \
+		$(PY) infra/snowflake/deploy.py render
+
+c2-adapter-build:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(C2_ADAPTER_IMAGE_TAG) \
+		-f Dockerfile.adapter -t $(C2_ADAPTER_IMAGE) .
+
+c2-adapter-image-smoke:
+	docker run --rm --platform linux/amd64 $(C2_ADAPTER_IMAGE) --help
+
+c2-adapter-release-check:
+	$(PY) scripts/check_c1_release.py --phase C2 --tag $(C2_ADAPTER_IMAGE_TAG)
+
+c2-adapter-push: c2-adapter-release-check
+	docker tag $(C2_ADAPTER_IMAGE) $(C2_REMOTE_ADAPTER_IMAGE)
+	docker push $(C2_REMOTE_ADAPTER_IMAGE)
+
+c2-adapter-deploy-sim: c2-adapter-release-check c2-adapter-render
+	$(PY) infra/snowflake/deploy.py deploy-adapter-sim
+
+phase-c2-packaging-check: phase-c2-runtime-check c2-adapter-package-test
+	KAFKA_BOOTSTRAP_SERVERS=broker.c2.invalid:9092 $(MAKE) c2-adapter-render
 
 # ---- AWS / Terraform ----
 # Force AWS_PROFILE=default for these targets. The shell may export

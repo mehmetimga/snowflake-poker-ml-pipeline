@@ -1,0 +1,38 @@
+{
+  "before": null,
+  "after": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "aggregate_type": "poker-hand",
+    "aggregate_id": "C2-FIXTURE-H-000001",
+    "event_type": "poker.hand.completed",
+    "payload_schema_version": 1,
+    "tenant_id": "demo",
+    "product_id": "poker",
+    "occurred_at": "2026-07-21T10:00:00Z",
+    "emitted_at": "2026-07-21T10:00:01Z",
+    "codec_version": "canonical-hand-json-v1",
+    "payload_sha256": "2825d0bf3ce6609984c722974bacacef36835015edbc1ebf6d77e39b6537150f",
+    "payload": "eyJhY3Rpb25zIjpbeyJhY3Rpb25fdHlwZSI6ImNhbGwiLCJhbW91bnQiOjEuMCwicGxheWVyX2lkIjoicGxheWVyLWEiLCJzZXF1ZW5jZV9ubyI6MCwic3RyZWV0IjoicHJlZmxvcCJ9LHsiYWN0aW9uX3R5cGUiOiJmb2xkIiwiYW1vdW50IjowLjAsInBsYXllcl9pZCI6InBsYXllci1iIiwic2VxdWVuY2Vfbm8iOjEsInN0cmVldCI6InByZWZsb3AifSx7ImFjdGlvbl90eXBlIjoiZm9sZCIsImFtb3VudCI6MC4wLCJwbGF5ZXJfaWQiOiJwbGF5ZXItYyIsInNlcXVlbmNlX25vIjoyLCJzdHJlZXQiOiJwcmVmbG9wIn0seyJhY3Rpb25fdHlwZSI6ImZvbGQiLCJhbW91bnQiOjAuMCwicGxheWVyX2lkIjoicGxheWVyLWQiLCJzZXF1ZW5jZV9ubyI6Mywic3RyZWV0IjoicHJlZmxvcCJ9LHsiYWN0aW9uX3R5cGUiOiJjYWxsIiwiYW1vdW50IjoxLjAsInBsYXllcl9pZCI6InBsYXllci1lIiwic2VxdWVuY2Vfbm8iOjQsInN0cmVldCI6InByZWZsb3AifSx7ImFjdGlvbl90eXBlIjoiY2hlY2siLCJhbW91bnQiOjAuMCwicGxheWVyX2lkIjoicGxheWVyLWYiLCJzZXF1ZW5jZV9ubyI6NSwic3RyZWV0IjoicHJlZmxvcCJ9XSwiYmlnX2JsaW5kIjoxLjAsImJvYXJkIjpbIjJjIiwiN2QiLCJKaCIsIlFzIiwiQWMiXSwiZGF0YXNldF9zcGxpdCI6ImxpdmUiLCJnZW5lcmF0b3IiOiJwb2tlci1zZXJ2ZXIiLCJoYW5kX2lkIjoiQzItRklYVFVSRS1ILTAwMDAwMSIsIm51bV9wbGF5ZXJzIjo2LCJwbGF5ZWRfYXQiOiIyMDI2LTA3LTIxVDEwOjAwOjAwWiIsInBsYXllcnMiOlt7ImhvbGVfY2FyZHMiOiJBcyBLcyIsIm5hbWUiOiJQbGF5ZXJBIiwicGxheWVyX2lkIjoicGxheWVyLWEiLCJwb3NpdGlvbiI6IlNCIiwic3RhY2tfc3RhcnQiOjEwMC4wLCJ3b25fYW1vdW50Ijo2LjB9LHsiaG9sZV9jYXJkcyI6IlFoIFFkIiwibmFtZSI6IlBsYXllckIiLCJwbGF5ZXJfaWQiOiJwbGF5ZXItYiIsInBvc2l0aW9uIjoiQkIiLCJzdGFja19zdGFydCI6MTAwLjAsIndvbl9hbW91bnQiOjAuMH0seyJob2xlX2NhcmRzIjoiOWMgOXMiLCJuYW1lIjoiUGxheWVyQyIsInBsYXllcl9pZCI6InBsYXllci1jIiwicG9zaXRpb24iOiJVVEciLCJzdGFja19zdGFydCI6MTAwLjAsIndvbl9hbW91bnQiOjAuMH0seyJob2xlX2NhcmRzIjoiOGggOGQiLCJuYW1lIjoiUGxheWVyRCIsInBsYXllcl9pZCI6InBsYXllci1kIiwicG9zaXRpb24iOiJNUCIsInN0YWNrX3N0YXJ0IjoxMDAuMCwid29uX2Ftb3VudCI6MC4wfSx7ImhvbGVfY2FyZHMiOiI3YyA3cyIsIm5hbWUiOiJQbGF5ZXJFIiwicGxheWVyX2lkIjoicGxheWVyLWUiLCJwb3NpdGlvbiI6IkNPIiwic3RhY2tfc3RhcnQiOjEwMC4wLCJ3b25fYW1vdW50IjowLjB9LHsiaG9sZV9jYXJkcyI6IjZoIDZkIiwibmFtZSI6IlBsYXllckYiLCJwbGF5ZXJfaWQiOiJwbGF5ZXItZiIsInBvc2l0aW9uIjoiQlROIiwic3RhY2tfc3RhcnQiOjEwMC4wLCJ3b25fYW1vdW50IjowLjB9XSwicG90X3NpemUiOjYuMCwic21hbGxfYmxpbmQiOjAuNSwidGFibGVfaWQiOiJjMl90YWJsZV8wMSJ9"
+  },
+  "source": {
+    "version": "3.4.0.Final",
+    "connector": "postgresql",
+    "name": "poker-postgres-v1",
+    "ts_ms": 1784628001000,
+    "snapshot": "false",
+    "db": "poker",
+    "schema": "public",
+    "table": "hand_completed_outbox",
+    "txId": 9001,
+    "lsn": 270113177
+  },
+  "op": "c",
+  "ts_ms": 1784628001050,
+  "ts_us": 1784628001050000,
+  "ts_ns": 1784628001050000000,
+  "transaction": {
+    "id": "9001:270113177",
+    "total_order": "1",
+    "data_collection_order": "1"
+  }
+}

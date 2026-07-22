@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poker-ml.example/schemas/cdc/poker.cdc-hand.dead-lettered.v1.schema.json",
+  "title": "Poker CDC hand dead letter v1",
+  "description": "Sanitized audit record for a rejected Debezium hand. Raw keys, values, and decoded binary content are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "emitted_at", "payload"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"const": "poker.cdc-hand.dead-lettered"},
+    "schema_version": {"const": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_topic",
+        "source_partition",
+        "source_offset",
+        "source_timestamp",
+        "source_key_sha256",
+        "source_value_sha256",
+        "error_code",
+        "service_build_version"
+      ],
+      "properties": {
+        "source_topic": {"type": "string", "minLength": 1},
+        "source_partition": {"type": "integer", "minimum": 0},
+        "source_offset": {"type": "integer", "minimum": 0},
+        "source_timestamp": {"type": "string", "format": "date-time"},
+        "source_key_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_value_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "error_code": {"type": "string", "pattern": "^[a-z][a-z0-9_]+$"},
+        "service_build_version": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

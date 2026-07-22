@@ -23,9 +23,12 @@ RENDERED_DIR = Path(__file__).resolve().parent / "rendered"
 DEFAULT_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev"
 DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
 DEFAULT_FLINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:dev"
+DEFAULT_ADAPTER_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-adapter:dev"
 DEFAULT_TRITON_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3"
 DEFAULT_MODEL_RUN_ID = "pair_7a1c58c1046b"
 DEFAULT_RISK_SCORER_GROUP_ID = "poker-go-risk-scorer-v1"
+DEFAULT_ADAPTER_GROUP_ID = "poker-go-hand-adapter-sim-v1"
+DEFAULT_ADAPTER_DATASET_ID = "sim-cdc-v1"
 POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
@@ -62,7 +65,11 @@ def bootstrap() -> None:
         for statement in _statements((SQL_DIR / "bootstrap.sql").read_text()):
             wh.execute(statement)
             first_line = next(
-                (line for line in statement.splitlines() if not line.lstrip().startswith("--")),
+                (
+                    line
+                    for line in statement.splitlines()
+                    if not line.lstrip().startswith("--")
+                ),
                 statement,
             )
             print(f"[snowflake] {first_line[:100]}")
@@ -155,8 +162,7 @@ def configure_kafka() -> None:
         for statement in statements:
             wh.execute(statement)
         print(
-            "[snowflake] Kafka egress and secret configured for: "
-            + ", ".join(brokers)
+            "[snowflake] Kafka egress and secret configured for: " + ", ".join(brokers)
         )
         print("[snowflake] Kafka bootstrap servers: " + ", ".join(bootstrap_brokers))
     finally:
@@ -169,13 +175,18 @@ def render_specs(
     *,
     risk_image_path: str = DEFAULT_RISK_IMAGE_PATH,
     flink_image_path: str = DEFAULT_FLINK_IMAGE_PATH,
+    adapter_image_path: str = DEFAULT_ADAPTER_IMAGE_PATH,
     triton_image_path: str = DEFAULT_TRITON_IMAGE_PATH,
     build_version: str = "dev",
     risk_build_version: str | None = None,
     flink_build_version: str | None = None,
+    adapter_build_version: str | None = None,
     model_run_id: str = DEFAULT_MODEL_RUN_ID,
     allowed_tenants: str = "demo",
     risk_scorer_group_id: str = DEFAULT_RISK_SCORER_GROUP_ID,
+    adapter_group_id: str = DEFAULT_ADAPTER_GROUP_ID,
+    adapter_dataset_id: str = DEFAULT_ADAPTER_DATASET_ID,
+    adapter_allowed_tenants: str = "demo",
     flink_context_savepoint_path: str = "",
     flink_pair_savepoint_path: str = "",
 ) -> None:
@@ -183,6 +194,7 @@ def render_specs(
         "application": image_path,
         "risk": risk_image_path,
         "flink": flink_image_path,
+        "adapter": adapter_image_path,
         "triton": triton_image_path,
     }
     for label, candidate in image_paths.items():
@@ -193,18 +205,31 @@ def render_specs(
             )
     risk_build_version = risk_build_version or build_version
     flink_build_version = flink_build_version or build_version
+    adapter_build_version = adapter_build_version or build_version
     for label, candidate in {
         "build version": build_version,
         "risk build version": risk_build_version,
         "Flink build version": flink_build_version,
+        "adapter build version": adapter_build_version,
         "model run ID": model_run_id,
         "risk scorer group ID": risk_scorer_group_id,
+        "adapter group ID": adapter_group_id,
+        "adapter dataset ID": adapter_dataset_id,
     }.items():
         if not _SAFE_ID.fullmatch(candidate):
             raise SystemExit(f"Invalid {label}: {candidate!r}")
     tenants = [value.strip() for value in allowed_tenants.split(",") if value.strip()]
     if not tenants or any(not _SAFE_ID.fullmatch(value) for value in tenants):
         raise SystemExit("RISK_ALLOWED_TENANTS must be a comma-separated ID allowlist")
+    adapter_tenants = [
+        value.strip() for value in adapter_allowed_tenants.split(",") if value.strip()
+    ]
+    if not adapter_tenants or any(
+        not _SAFE_ID.fullmatch(value) for value in adapter_tenants
+    ):
+        raise SystemExit("CDC_ALLOWED_TENANTS must be a comma-separated ID allowlist")
+    if not adapter_dataset_id.startswith("sim-"):
+        raise SystemExit("simulation adapter dataset ID must start with sim-")
     for label, candidate in {
         "context savepoint URI": flink_context_savepoint_path,
         "pair savepoint URI": flink_pair_savepoint_path,
@@ -219,12 +244,17 @@ def render_specs(
         "__IMAGE_PATH__": image_path,
         "__RISK_IMAGE_PATH__": risk_image_path,
         "__FLINK_IMAGE_PATH__": flink_image_path,
+        "__ADAPTER_IMAGE_PATH__": adapter_image_path,
         "__TRITON_IMAGE_PATH__": triton_image_path,
         "__RISK_BUILD_VERSION__": risk_build_version,
         "__FLINK_BUILD_VERSION__": flink_build_version,
+        "__ADAPTER_BUILD_VERSION__": adapter_build_version,
         "__MODEL_RUN_ID__": model_run_id,
         "__RISK_ALLOWED_TENANTS__": ",".join(tenants),
         "__RISK_SCORER_GROUP_ID__": risk_scorer_group_id,
+        "__ADAPTER_GROUP_ID__": adapter_group_id,
+        "__ADAPTER_DATASET_ID__": adapter_dataset_id,
+        "__ADAPTER_ALLOWED_TENANTS__": ",".join(adapter_tenants),
         "__FLINK_CONTEXT_SAVEPOINT_PATH__": flink_context_savepoint_path,
         "__FLINK_PAIR_SAVEPOINT_PATH__": flink_pair_savepoint_path,
     }
@@ -241,7 +271,9 @@ def render_specs(
             text = text.replace("__KAFKA_BOOTSTRAP_SERVERS__", ",".join(brokers))
         output = RENDERED_DIR / template_path.name.removesuffix(".template")
         output.write_text(text)
-        display_path = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
+        display_path = (
+            output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
+        )
         print(f"[render] {display_path}")
 
 
@@ -397,6 +429,10 @@ def main() -> None:
         default=os.environ.get("SPCS_FLINK_IMAGE_PATH", DEFAULT_FLINK_IMAGE_PATH),
     )
     render.add_argument(
+        "--adapter-image-path",
+        default=os.environ.get("SPCS_ADAPTER_IMAGE_PATH", DEFAULT_ADAPTER_IMAGE_PATH),
+    )
+    render.add_argument(
         "--triton-image-path",
         default=os.environ.get("SPCS_TRITON_IMAGE_PATH", DEFAULT_TRITON_IMAGE_PATH),
     )
@@ -410,6 +446,10 @@ def main() -> None:
         "--flink-build-version", default=os.environ.get("SPCS_FLINK_BUILD_VERSION")
     )
     render.add_argument(
+        "--adapter-build-version",
+        default=os.environ.get("SPCS_ADAPTER_BUILD_VERSION"),
+    )
+    render.add_argument(
         "--model-run-id",
         default=os.environ.get("SPCS_MODEL_RUN_ID", DEFAULT_MODEL_RUN_ID),
     )
@@ -421,6 +461,18 @@ def main() -> None:
         default=os.environ.get(
             "SPCS_RISK_SCORER_GROUP_ID", DEFAULT_RISK_SCORER_GROUP_ID
         ),
+    )
+    render.add_argument(
+        "--adapter-group-id",
+        default=os.environ.get("SPCS_ADAPTER_GROUP_ID", DEFAULT_ADAPTER_GROUP_ID),
+    )
+    render.add_argument(
+        "--adapter-dataset-id",
+        default=os.environ.get("SPCS_ADAPTER_DATASET_ID", DEFAULT_ADAPTER_DATASET_ID),
+    )
+    render.add_argument(
+        "--adapter-allowed-tenants",
+        default=os.environ.get("SPCS_ADAPTER_ALLOWED_TENANTS", "demo"),
     )
     render.add_argument(
         "--flink-context-savepoint-path",
@@ -437,6 +489,7 @@ def main() -> None:
     sub.add_parser("deploy-realtime")
     sub.add_parser("deploy-risk")
     sub.add_parser("deploy-flink")
+    sub.add_parser("deploy-adapter-sim")
     upload = sub.add_parser("upload-risk-bundle")
     upload.add_argument(
         "--bundle-dir", type=Path, default=ROOT / "build/c1/risk-runtime"
@@ -461,13 +514,18 @@ def main() -> None:
             kafka_bootstrap_servers,
             risk_image_path=args.risk_image_path,
             flink_image_path=args.flink_image_path,
+            adapter_image_path=args.adapter_image_path,
             triton_image_path=args.triton_image_path,
             build_version=args.build_version,
             risk_build_version=args.risk_build_version,
             flink_build_version=args.flink_build_version,
+            adapter_build_version=args.adapter_build_version,
             model_run_id=args.model_run_id,
             allowed_tenants=args.allowed_tenants,
             risk_scorer_group_id=args.risk_scorer_group_id,
+            adapter_group_id=args.adapter_group_id,
+            adapter_dataset_id=args.adapter_dataset_id,
+            adapter_allowed_tenants=args.adapter_allowed_tenants,
             flink_context_savepoint_path=args.flink_context_savepoint_path,
             flink_pair_savepoint_path=args.flink_pair_savepoint_path,
         )
@@ -483,6 +541,8 @@ def main() -> None:
         deploy_service("POKER_RISK", "risk.yaml", kafka_eai=True)
     elif args.command == "deploy-flink":
         deploy_service("POKER_FLINK", "flink.yaml", kafka_eai=True)
+    elif args.command == "deploy-adapter-sim":
+        deploy_service("POKER_ADAPTER_SIM", "adapter-sim.yaml", kafka_eai=True)
     elif args.command == "upload-risk-bundle":
         upload_risk_bundle(args.bundle_dir)
     elif args.command == "run-training-job":

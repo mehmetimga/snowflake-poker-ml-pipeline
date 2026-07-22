@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GO_VERSION=1.23.8
+FROM golang:${GO_VERSION}-bookworm@sha256:0b4f8c5d414756a53ba0e4d235151f9b246552e512c3feaad5f9a3251376b279 AS build
+
+ARG BUILD_VERSION=dev
+WORKDIR /src
+
+COPY services/go/go.mod services/go/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY services/go/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" -o /out/hand-adapter ./cmd/hand-adapter
+
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-adapter" \
+      org.opencontainers.image.description="Acknowledged simulation CDC-to-canonical poker hand adapter" \
+      org.opencontainers.image.revision="${BUILD_VERSION}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 poker \
+    && useradd --system --uid 65532 --gid 65532 --no-create-home poker
+
+COPY --from=build --chown=65532:65532 /out/hand-adapter /usr/local/bin/hand-adapter
+
+USER 65532:65532
+WORKDIR /opt/poker
+
+ENV CDC_SERVICE_BUILD_VERSION=${BUILD_VERSION} \
+    CDC_METRICS_LISTEN=0.0.0.0:9093
+
+EXPOSE 9093
+ENTRYPOINT ["/usr/local/bin/hand-adapter"]

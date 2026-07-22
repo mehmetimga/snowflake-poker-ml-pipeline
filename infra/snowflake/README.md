@@ -20,6 +20,10 @@ the production-shaped Go scorer and Java/Flink jobs as separate
 validated; registry push and live service deployment remain explicit release
 operations.
 
+Phase C2 also packages a separate `poker-adapter:<git-sha>` image and private
+`POKER_ADAPTER_SIM` spec. It accepts only isolated synthetic CDC envelopes on
+`poker.sim.*` topics. It is not a real poker-server or Debezium integration.
+
 That is the current test topology, not the final production boundary. The
 target is:
 
@@ -33,7 +37,7 @@ Debezium CDC in future ---+                            +--> SPCS POKER_SINK
 ```
 
 Target SPCS images are `poker-flink:<git-sha>`, `poker-risk:<git-sha>`,
-`poker-sink:<git-sha>`, `poker-train:<git-sha>`, and
+`poker-adapter:<git-sha>`, `poker-sink:<git-sha>`, `poker-train:<git-sha>`, and
 `poker-admin:<git-sha>`. An optional pinned CPU Triton container can run beside
 Go in each `POKER_RISK` service instance and be called over localhost. For the
 current small CatBoost ONNX model, embedding ONNX in Go is simpler and is the
@@ -153,3 +157,17 @@ make evaluate-challenge
   from the generic SPCS training job to Snowflake ML Jobs/Tasks.
 - Move training to a GPU-capable Snowflake region, build a CUDA runtime image,
   and enable `scripts/train.py --profile full` for DL, GNN, and meta-learning.
+
+## Simulation adapter
+
+The simulation adapter is built and rendered separately:
+
+```bash
+make phase-c2-packaging-check
+make c2-adapter-build
+make c2-adapter-image-smoke
+make c2-adapter-render
+```
+
+Push and `POKER_ADAPTER_SIM` deployment are guarded release operations. See
+[`docs/spcs-c2-adapter-simulation.md`](../../docs/spcs-c2-adapter-simulation.md).

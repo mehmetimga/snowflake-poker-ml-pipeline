@@ -23,10 +23,16 @@ type InputRecord struct {
 	Timestamp time.Time
 }
 
-type OutputRecord struct {
-	Topic string
-	Key   []byte
+type Header struct {
+	Key   string
 	Value []byte
+}
+
+type OutputRecord struct {
+	Topic   string
+	Key     []byte
+	Value   []byte
+	Headers []Header
 }
 
 type Publisher interface {

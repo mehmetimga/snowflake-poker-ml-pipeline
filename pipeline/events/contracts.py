@@ -121,7 +121,9 @@ class HandCompletedPayload(_ContractModel):
     table_id: str = Field(min_length=1)
     played_at: datetime
     dataset_split: str = Field(min_length=1)
-    generator: Literal["pokerkit"]
+    # Kept as ``generator`` for v1 wire compatibility.  The second value is
+    # the production source emitted by the future hand-history adapter.
+    generator: Literal["pokerkit", "poker-server"]
     small_blind: float = Field(gt=0)
     big_blind: float = Field(gt=0)
     num_players: int = Field(ge=2)

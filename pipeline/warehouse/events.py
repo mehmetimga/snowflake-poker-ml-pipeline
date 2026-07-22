@@ -28,6 +28,7 @@ class IngestRecord:
     partition: int | None = None
     offset: int | None = None
     kafka_timestamp_ms: int | None = None
+    source_lineage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,15 @@ def _audit_frame(validated: list[tuple[IngestRecord, Any]]) -> pd.DataFrame:
                 "kafka_partition": record.partition,
                 "kafka_offset": record.offset,
                 "kafka_timestamp_ms": record.kafka_timestamp_ms,
+                "source_lineage": (
+                    json.dumps(
+                        record.source_lineage,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    if record.source_lineage
+                    else None
+                ),
                 "payload": json.dumps(
                     envelope.payload,
                     sort_keys=True,

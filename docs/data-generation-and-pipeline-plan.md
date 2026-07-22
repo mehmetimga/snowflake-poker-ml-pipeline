@@ -102,10 +102,14 @@ Company user/account DB -> outbox/CDC -> canonical context topics
 ```
 
 The preferred poker-server change is to insert the binary hand history and a
-`hand_completed` outbox row in the same PostgreSQL transaction. Debezium's
+`hand_completed` outbox row in the same PostgreSQL transaction. Debezium then
+publishes the committed change without an unsafe application-level dual write.
+The frozen C2 mapping consumes the raw PostgreSQL change envelope so the
+versioned adapter retains the original binary payload, transaction, and LSN.
+Debezium's
 [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)
-then publishes the committed event without an unsafe application-level dual
-write.
+is an optional routing layer only if all frozen payload and lineage fields are
+provably retained.
 
 If the external poker server cannot add an outbox, Debezium may capture its
 append-only hand-history table. A boundary adapter must decode the binary using
@@ -122,6 +126,9 @@ future adapter.
 For parity fixtures, direct and CDC modes must emit semantically equivalent
 canonical payloads after CDC envelope translation. Downstream Flink, Snowflake,
 and scoring components must not know which integration produced an event.
+The executable source row, envelope, codec seam, lineage headers, and parity
+gate are documented in
+[`docs/debezium-hand-history-ingress.md`](debezium-hand-history-ingress.md).
 
 ### Production replacement
 
@@ -766,16 +773,17 @@ a deterministic 62 MB artifact.
 The first GraphSAGE run improved over the neural tabular/sequence candidates
 but remained below CatBoost on both benchmarks, so it is not a serving input.
 
-### Stage 6: future poker-server and company CDC integration
+### Stage 6: CDC-shaped real-time simulation
 
-- Agree on the external poker-server binary codec and completion semantics.
-- Prefer a transactional hand-completed outbox maintained by the poker server.
-- Add Debezium/Kafka Connect and the versioned hand-history adapter.
-- Connect external user/account changes through outbox or CDC.
-- Validate direct-versus-CDC canonical parity.
+- Generate deterministic PokerKit hands and wrap completed payloads in the
+  frozen Debezium/outbox envelope.
+- Publish the envelopes only to the isolated simulation ingress topic.
+- Run the versioned Go hand adapter in `POKER_ADAPTER_SIM`.
+- Validate direct-versus-simulated-CDC canonical parity and failure recovery.
+- Feed simulated user/account context directly to separate Kafka topics.
 
-Accept when downstream consumers can switch between direct and CDC sources
-without configuration or schema changes.
+Accept when the simulation produces expected canonical/DLQ counts, complete
+lineage, deterministic replay, and no records on production topic names.
 
 ## First implementation slice
 
@@ -790,5 +798,8 @@ The next build slice is deliberately small:
 6. Persist raw events and temporal context in Snowflake.
 7. Preserve a versioned canonical boundary for future Debezium integration.
 
-PostgreSQL, Debezium, and the poker-server binary adapter remain explicitly
-deferred until integration with the external poker platform.
+The offline Debezium-to-canonical contract, fixture adapters, Go
+publish-or-DLQ-before-commit runtime, Docker image, and private simulation SPCS
+specification are now implemented. The next slice is the real-time synthetic
+envelope generator and isolated Confluent/SPCS replay. Real PostgreSQL,
+Debezium, and poker-server binary ingestion are outside current project scope.
