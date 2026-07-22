@@ -3,7 +3,7 @@
 .PHONY: c1-package-test c1-risk-bundle c1-render c1-build-risk c1-build-flink c1-build c1-image-smoke c1-release-check c1-push c1-mirror-triton c1-upload-model c1-deploy-risk c1-deploy-flink c1-deploy phase-c1-check
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
 .PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
-.PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim phase-c2-packaging-check
+.PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim c2-adapter-configure-kafka c2-adapter-sim-topics c2-adapter-remote-replay c2-adapter-remote-verify c2-adapter-remote-e2e phase-c2-packaging-check
 .PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
@@ -106,6 +106,9 @@ CDC_SIM_FAULT_GROUP_ID := poker-go-hand-adapter-fault-$(shell date +%s)
 CDC_SIM_RECOVERY_BASELINE_DATASET_ID := sim-cdc-recovery-baseline-$(shell date -u +%Y%m%d%H%M%S)
 CDC_SIM_RECOVERY_SOURCE_DATASET_ID := sim-cdc-recovery-$(shell date -u +%Y%m%d%H%M%S)
 CDC_SIM_RECOVERY_GROUP_ID := poker-go-hand-adapter-recovery-$(shell date +%s)
+C2_REMOTE_SIM_SOURCE_DATASET_ID := sim-cdc-remote-$(shell date -u +%Y%m%d%H%M%S)
+C2_REMOTE_SIM_MANIFEST ?= build/c2/remote/$(C2_REMOTE_SIM_SOURCE_DATASET_ID).json
+C2_ADAPTER_KAFKA_CONFIG_FLAGS ?=
 RISK_SCORE_CHECK_FLAGS ?=
 WORLD_REPLAY_MODE ?= accelerated
 WORLD_REPLAY_RATE ?= 100
@@ -211,6 +214,8 @@ help:
 	@echo "  c2-adapter-image-smoke Check the locally built adapter executable"
 	@echo "  c2-adapter-push Push a clean-commit adapter image to Snowflake registry"
 	@echo "  c2-adapter-deploy-sim Deploy the private POKER_ADAPTER_SIM service"
+	@echo "  c2-adapter-sim-topics Create only the isolated poker.sim.* Confluent topics"
+	@echo "  c2-adapter-remote-e2e Replay local Debezium faults through Confluent/SPCS"
 	@echo "  c1-build     Build versioned linux/amd64 poker-risk and poker-flink images"
 	@echo "  c1-image-smoke Smoke-test the two locally built C1 images"
 	@echo "  c1-push      Push the two versioned C1 images to Snowflake registry"
@@ -1231,7 +1236,8 @@ phase-c1-check: c1-package-test c1-risk-bundle
 	cd $(FLINK_PAIR_FEATURES_DIR) && $(MAVEN) -Dmaven.repo.local=$(MAVEN_REPO) test package
 
 c2-adapter-package-test:
-	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py tests/test_snowflake_deploy.py
+	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py \
+		tests/test_snowflake_deploy.py tests/test_cdc_remote_simulation.py
 
 c2-adapter-render:
 	SPCS_ADAPTER_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-adapter:$(C2_ADAPTER_IMAGE_TAG) \
@@ -1258,6 +1264,36 @@ c2-adapter-push: c2-adapter-release-check
 
 c2-adapter-deploy-sim: c2-adapter-release-check c2-adapter-render
 	$(PY) infra/snowflake/deploy.py deploy-adapter-sim
+
+c2-adapter-configure-kafka:
+	$(PY) infra/snowflake/deploy.py configure-adapter-sim-kafka \
+		$(C2_ADAPTER_KAFKA_CONFIG_FLAGS)
+
+c2-adapter-sim-topics:
+	$(PY) scripts/ensure_cdc_simulation_topics.py
+
+c2-adapter-remote-replay:
+	$(PY) scripts/replay_cdc_simulation_remote.py \
+		--source-dataset-id $(C2_REMOTE_SIM_SOURCE_DATASET_ID) \
+		--adapter-dataset-id $(C2_ADAPTER_DATASET_ID) \
+		--adapter-group-id $(C2_ADAPTER_GROUP_ID) \
+		--adapter-build-version $(C2_ADAPTER_IMAGE_TAG) \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--manifest $(C2_REMOTE_SIM_MANIFEST)
+
+c2-adapter-remote-verify:
+	$(PY) scripts/verify_cdc_simulation_remote.py \
+		--manifest $(C2_REMOTE_SIM_MANIFEST)
+
+c2-adapter-remote-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register c2-adapter-sim-topics
+	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) $(PY) scripts/simulate_postgres_cdc_faults.py \
+		--dataset-id $(C2_REMOTE_SIM_SOURCE_DATASET_ID) \
+		--start-at $(CDC_SIM_START_AT)
+	$(MAKE) c2-adapter-remote-replay \
+		C2_REMOTE_SIM_SOURCE_DATASET_ID=$(C2_REMOTE_SIM_SOURCE_DATASET_ID) \
+		C2_REMOTE_SIM_MANIFEST=$(C2_REMOTE_SIM_MANIFEST)
+	$(MAKE) c2-adapter-remote-verify \
+		C2_REMOTE_SIM_MANIFEST=$(C2_REMOTE_SIM_MANIFEST)
 
 phase-c2-packaging-check: phase-c2-runtime-check c2-adapter-package-test
 	KAFKA_BOOTSTRAP_SERVERS=broker.c2.invalid:9092 $(MAKE) c2-adapter-render

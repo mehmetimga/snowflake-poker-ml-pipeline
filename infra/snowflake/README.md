@@ -103,6 +103,20 @@ make snow-configure-kafka
 The credentials are written to a Snowflake password Secret. They are not
 written to YAML, `.env`, or the container image.
 
+The C2 simulation adapter uses a separate Secret, network rule, and EAI. Prefer
+a Confluent principal restricted to the three `poker.sim.*` topics and the
+`poker-go-hand-adapter-sim-v1` consumer group:
+
+```bash
+export KAFKA_ADAPTER_SIM_SASL_USERNAME='...'
+export KAFKA_ADAPTER_SIM_SASL_PASSWORD='...'
+make c2-adapter-sim-topics
+make c2-adapter-configure-kafka
+```
+
+For a bounded demo, shared Kafka credentials require the explicit
+`C2_ADAPTER_KAFKA_CONFIG_FLAGS=--allow-shared-credentials` override.
+
 ## 4. Render and deploy
 
 ```bash
@@ -168,6 +182,9 @@ make c2-adapter-build
 make c2-adapter-image-smoke
 make c2-adapter-render
 ```
+
+After releasing and deploying the private service, run the offset-bounded
+local-Debezium to Confluent/SPCS replay with `make c2-adapter-remote-e2e`.
 
 Push and `POKER_ADAPTER_SIM` deployment are guarded release operations. See
 [`docs/spcs-c2-adapter-simulation.md`](../../docs/spcs-c2-adapter-simulation.md).

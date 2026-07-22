@@ -55,6 +55,111 @@ class ScoringTopics:
         )
 
 
+@dataclass(frozen=True)
+class CdcSimulationTopics:
+    """Strictly isolated topics used by the synthetic C2 adapter."""
+
+    source: str = "poker.sim.cdc-hand-outbox.v1"
+    canonical: str = "poker.sim.hands.raw.v1"
+    dead_letters: str = "poker.sim.pipeline.dead-letter.v1"
+
+
+def cdc_simulation_topic_specs(
+    topics: CdcSimulationTopics | None = None,
+    *,
+    output_partitions: int = 3,
+    replication_factor: int = 3,
+) -> tuple[WorldTopicSpec, ...]:
+    """Return the fixed C2 simulation boundary and retention policy.
+
+    The source stays single-partition so deterministic fault and recovery
+    replays preserve their input order. Derived outputs can fan out.
+    """
+    if output_partitions < 1 or replication_factor < 1:
+        raise ValueError("partitions and replication_factor must be positive")
+    names = topics or CdcSimulationTopics()
+    topic_names = (names.source, names.canonical, names.dead_letters)
+    if len(set(topic_names)) != len(topic_names) or any(
+        not name.startswith("poker.sim.") for name in topic_names
+    ):
+        raise ValueError("CDC simulation topics must be unique poker.sim.* names")
+    seven_days_ms = str(7 * 24 * 60 * 60 * 1_000)
+    configs = {"cleanup.policy": "delete", "retention.ms": seven_days_ms}
+    return (
+        WorldTopicSpec(
+            name=names.source,
+            partitions=1,
+            replication_factor=replication_factor,
+            configs=dict(configs),
+        ),
+        WorldTopicSpec(
+            name=names.canonical,
+            partitions=output_partitions,
+            replication_factor=replication_factor,
+            configs=dict(configs),
+        ),
+        WorldTopicSpec(
+            name=names.dead_letters,
+            partitions=output_partitions,
+            replication_factor=replication_factor,
+            configs=dict(configs),
+        ),
+    )
+
+
+def ensure_cdc_simulation_topics(
+    *,
+    bootstrap_servers: str | None = None,
+    topics: CdcSimulationTopics | None = None,
+    output_partitions: int = 3,
+    replication_factor: int = 3,
+    admin_client: object | None = None,
+) -> dict[str, list[str]]:
+    """Create only missing isolated C2 topics; never alter existing topics."""
+    specs = cdc_simulation_topic_specs(
+        topics,
+        output_partitions=output_partitions,
+        replication_factor=replication_factor,
+    )
+    owns_client = admin_client is None
+    if admin_client is None:
+        from kafka.admin import KafkaAdminClient
+
+        settings = get_settings()
+        admin_client = KafkaAdminClient(
+            bootstrap_servers=(
+                bootstrap_servers or settings.kafka_bootstrap_servers
+            ).split(","),
+            client_id="poker-cdc-simulation-topic-manager-v1",
+            **kafka_client_kwargs(),
+        )
+    try:
+        existing = set(admin_client.list_topics())
+        missing = [spec for spec in specs if spec.name not in existing]
+        if missing:
+            from kafka.admin import NewTopic
+
+            admin_client.create_topics(
+                [
+                    NewTopic(
+                        name=spec.name,
+                        num_partitions=spec.partitions,
+                        replication_factor=spec.replication_factor,
+                        topic_configs=spec.configs,
+                    )
+                    for spec in missing
+                ],
+                validate_only=False,
+            )
+        return {
+            "created": [spec.name for spec in missing],
+            "existing": [spec.name for spec in specs if spec.name in existing],
+        }
+    finally:
+        if owns_client:
+            admin_client.close()
+
+
 def world_topic_specs(
     topics: WorldTopics | None = None,
     *,

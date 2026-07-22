@@ -18,8 +18,51 @@ def test_configured_kafka_egress_uses_explicit_brokers(monkeypatch):
     monkeypatch.setenv("KAFKA_EGRESS_BROKERS", "b0.example.com:9092,b1.example.com:9092")
 
     assert deploy._configured_kafka_egress("bootstrap.example.com:9092") == (
-        "b0.example.com:9092,b1.example.com:9092"
+        "bootstrap.example.com:9092,b0.example.com:9092,b1.example.com:9092"
     )
+
+
+def test_adapter_sim_kafka_requires_dedicated_credentials(monkeypatch):
+    monkeypatch.delenv("KAFKA_ADAPTER_SIM_SASL_USERNAME", raising=False)
+    monkeypatch.delenv("KAFKA_ADAPTER_SIM_SASL_PASSWORD", raising=False)
+    monkeypatch.setattr(
+        deploy,
+        "_configured_kafka",
+        lambda: ("bootstrap.example.com:9092", "shared-user", "shared-password"),
+    )
+    with pytest.raises(SystemExit, match="dedicated"):
+        deploy.configure_adapter_sim_kafka()
+
+
+def test_adapter_sim_kafka_uses_isolated_secret_and_eai(monkeypatch):
+    class Warehouse:
+        def __init__(self):
+            self.statements: list[str] = []
+
+        def execute(self, statement: str):
+            self.statements.append(statement)
+
+        def close(self):
+            return None
+
+    warehouse = Warehouse()
+    monkeypatch.setenv("KAFKA_ADAPTER_SIM_SASL_USERNAME", "adapter-user")
+    monkeypatch.setenv("KAFKA_ADAPTER_SIM_SASL_PASSWORD", "adapter-password")
+    monkeypatch.setattr(
+        deploy,
+        "_configured_kafka",
+        lambda: ("bootstrap.example.com:9092", "shared-user", "shared-password"),
+    )
+    monkeypatch.setattr(deploy, "_warehouse", lambda: warehouse)
+
+    deploy.configure_adapter_sim_kafka()
+
+    joined = "\n".join(warehouse.statements)
+    assert "KAFKA_ADAPTER_SIM_EGRESS_RULE" in joined
+    assert "KAFKA_ADAPTER_SIM_CREDENTIALS" in joined
+    assert deploy.ADAPTER_SIM_KAFKA_EAI in joined
+    assert "adapter-user" in joined
+    assert "shared-user" not in joined
 
 
 @pytest.mark.parametrize("value", ["", "https://broker:9092", "broker", "broker:25"])

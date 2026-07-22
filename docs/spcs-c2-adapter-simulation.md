@@ -65,7 +65,8 @@ defines one small CPU container with:
 - a private `/healthz` readiness probe and `/metrics` endpoint;
 - dedicated, least-privilege Kafka SASL credentials injected from the required
   `POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS` secret;
-- outbound Kafka access through the existing `POKER_KAFKA_EAI`; and
+- outbound Kafka access through the simulation-only
+  `POKER_ADAPTER_SIM_KAFKA_EAI`; and
 - no public endpoint, stage mount, database credential, or GPU.
 
 The deployment name is `POKER_ML_DEMO.SPCS.POKER_ADAPTER_SIM`. It is separate
@@ -97,16 +98,26 @@ Kafka username or password.
 
 ## Release operations
 
-Push and deployment are intentionally separate, mutating operations. Before
-deployment, the simulation phase must create the dedicated adapter secret and
-grant it only simulation-topic permissions:
+Push and deployment are intentionally separate, mutating operations. Create a
+dedicated Confluent principal with source-topic read, output/DLQ write, and
+simulation consumer-group access, then configure its isolated Snowflake Secret
+and EAI:
 
 ```bash
+make c2-adapter-sim-topics
+make c2-adapter-configure-kafka
 snow spcs image-registry login
 make c2-adapter-push
 make c2-adapter-render
 make c2-adapter-deploy-sim
 ```
+
+Set `KAFKA_ADAPTER_SIM_SASL_USERNAME` and
+`KAFKA_ADAPTER_SIM_SASL_PASSWORD` for the dedicated principal. A bounded demo
+can explicitly use the already configured Kafka principal with
+`C2_ADAPTER_KAFKA_CONFIG_FLAGS=--allow-shared-credentials`; that is not the
+least-privilege production configuration. The EAI allowlist must contain the
+bootstrap endpoint and every broker returned in Kafka metadata.
 
 Both push and deployment require a clean committed worktree and an image tag
 equal to the current 12-character Git SHA. Development images use an obvious
@@ -129,13 +140,28 @@ real publish-success/commit-failure/restart replay with byte-identical output.
 See [`postgres-debezium-simulation.md`](postgres-debezium-simulation.md) for
 the exact topology and runbook.
 
-The next remote phase is to create isolated Confluent topics, release the
-clean-commit image, and deploy the private SPCS adapter. It must repeat:
+The remote phase uses a run-scoped manifest and output-offset baselines:
 
-- valid, filtered, malformed, checksum, codec, and replay scenarios;
+```bash
+make c2-adapter-remote-e2e
+```
+
+The command writes six fault rows to the retained local PostgreSQL simulator,
+waits for actual Debezium output, replays only the five database-eligible raw
+CDC records to Confluent, and waits for the SPCS consumer-group commit. It then
+checks exactly one canonical output and four sanitized DLQs within that run's
+output bounds. Old simulation records cannot satisfy the verifier.
+
+The remote phase must repeat:
+
+- valid, filtered, malformed, checksum, and codec scenarios;
 - expected-output manifests for canonical and DLQ counts; and
-- an end-to-end Confluent/SPCS verification that confirms output before source
-  offset commit and byte-identical replay after a forced commit failure.
+- an end-to-end Confluent/SPCS verification that waits for the source offset
+  commit only after the corresponding output is acknowledged.
+
+Forced commit-failure injection remains a local-only safety test and is absent
+from the SPCS spec. The accepted local recovery drill proves byte-identical
+same-offset replay without putting a failure switch into a deployed service.
 
 The external poker-server database, its binary format, and production CDC
 topics are outside the current project scope.

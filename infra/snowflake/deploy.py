@@ -32,6 +32,7 @@ DEFAULT_ADAPTER_DATASET_ID = "sim-cdc-v1"
 POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
+ADAPTER_SIM_KAFKA_EAI = "POKER_ADAPTER_SIM_KAFKA_EAI"
 
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:[0-9]{2,5}$")
 _IMAGE = re.compile(
@@ -113,11 +114,15 @@ def _configured_kafka_egress(raw_bootstrap_servers: str) -> str:
     from pipeline.config import get_settings
 
     settings = get_settings()
-    return (
-        os.environ.get("KAFKA_EGRESS_BROKERS")
-        or settings.kafka_egress_brokers
-        or raw_bootstrap_servers
+    advertised = (
+        os.environ.get("KAFKA_EGRESS_BROKERS") or settings.kafka_egress_brokers or ""
     )
+    combined = [
+        item.strip()
+        for item in f"{raw_bootstrap_servers},{advertised}".split(",")
+        if item.strip()
+    ]
+    return ",".join(dict.fromkeys(combined))
 
 
 def configure_kafka() -> None:
@@ -163,6 +168,75 @@ def configure_kafka() -> None:
             wh.execute(statement)
         print(
             "[snowflake] Kafka egress and secret configured for: " + ", ".join(brokers)
+        )
+        print("[snowflake] Kafka bootstrap servers: " + ", ".join(bootstrap_brokers))
+    finally:
+        wh.close()
+
+
+def configure_adapter_sim_kafka(*, allow_shared_credentials: bool = False) -> None:
+    """Configure an isolated EAI and Secret for the synthetic C2 adapter."""
+    raw_brokers, shared_username, shared_password = _configured_kafka()
+    bootstrap_brokers = _parse_brokers(raw_brokers)
+    brokers = _parse_brokers(_configured_kafka_egress(raw_brokers))
+    username = os.environ.get("KAFKA_ADAPTER_SIM_SASL_USERNAME")
+    password = os.environ.get("KAFKA_ADAPTER_SIM_SASL_PASSWORD")
+    if bool(username) != bool(password):
+        raise SystemExit(
+            "Set both KAFKA_ADAPTER_SIM_SASL_USERNAME and "
+            "KAFKA_ADAPTER_SIM_SASL_PASSWORD"
+        )
+    shared = False
+    if not username and allow_shared_credentials:
+        username, password = shared_username, shared_password
+        shared = True
+    if not username or not password:
+        raise SystemExit(
+            "Set dedicated KAFKA_ADAPTER_SIM_SASL_USERNAME and "
+            "KAFKA_ADAPTER_SIM_SASL_PASSWORD. For a bounded demo only, pass "
+            "--allow-shared-credentials to copy the configured Kafka principal."
+        )
+
+    value_list = ", ".join(_sql_string(broker) for broker in brokers)
+    wh = _warehouse()
+    try:
+        statements = [
+            "USE ROLE SYSADMIN",
+            f"USE DATABASE {DATABASE}",
+            f"USE SCHEMA {SCHEMA}",
+            (
+                "CREATE OR REPLACE NETWORK RULE KAFKA_ADAPTER_SIM_EGRESS_RULE "
+                "MODE = EGRESS TYPE = HOST_PORT "
+                f"VALUE_LIST = ({value_list})"
+            ),
+            (
+                "CREATE OR REPLACE SECRET KAFKA_ADAPTER_SIM_CREDENTIALS "
+                "TYPE = PASSWORD "
+                f"USERNAME = {_sql_string(username)} PASSWORD = {_sql_string(password)}"
+            ),
+            "USE ROLE ACCOUNTADMIN",
+            (
+                f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {ADAPTER_SIM_KAFKA_EAI} "
+                "ALLOWED_NETWORK_RULES = "
+                "(POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_EGRESS_RULE) ENABLED = TRUE"
+            ),
+            (
+                f"GRANT USAGE ON INTEGRATION {ADAPTER_SIM_KAFKA_EAI} "
+                "TO ROLE SYSADMIN"
+            ),
+            "USE ROLE SYSADMIN",
+            (
+                "GRANT READ ON SECRET "
+                "POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS "
+                "TO ROLE SYSADMIN"
+            ),
+        ]
+        for statement in statements:
+            wh.execute(statement)
+        mode = "shared demo principal" if shared else "dedicated principal"
+        print(
+            "[snowflake] isolated adapter Kafka access configured "
+            f"mode={mode} egress={','.join(brokers)}"
         )
         print("[snowflake] Kafka bootstrap servers: " + ", ".join(bootstrap_brokers))
     finally:
@@ -333,9 +407,16 @@ def _read_rendered(name: str) -> str:
     return spec
 
 
-def deploy_service(name: str, spec_name: str, *, kafka_eai: bool = False) -> None:
+def deploy_service(
+    name: str,
+    spec_name: str,
+    *,
+    kafka_eai: bool | str = False,
+) -> None:
     spec = _read_rendered(spec_name)
-    eai = " EXTERNAL_ACCESS_INTEGRATIONS = (POKER_KAFKA_EAI)" if kafka_eai else ""
+    if kafka_eai is True:
+        kafka_eai = "POKER_KAFKA_EAI"
+    eai = f" EXTERNAL_ACCESS_INTEGRATIONS = ({kafka_eai})" if kafka_eai else ""
     wh = _warehouse()
     try:
         wh.execute("USE ROLE SYSADMIN")
@@ -411,6 +492,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("bootstrap")
     sub.add_parser("configure-kafka")
+    adapter_kafka = sub.add_parser("configure-adapter-sim-kafka")
+    adapter_kafka.add_argument("--allow-shared-credentials", action="store_true")
 
     render = sub.add_parser("render")
     render.add_argument(
@@ -503,6 +586,10 @@ def main() -> None:
         bootstrap()
     elif args.command == "configure-kafka":
         configure_kafka()
+    elif args.command == "configure-adapter-sim-kafka":
+        configure_adapter_sim_kafka(
+            allow_shared_credentials=args.allow_shared_credentials
+        )
     elif args.command == "render":
         kafka_bootstrap_servers = args.kafka_bootstrap_servers
         if not kafka_bootstrap_servers:
@@ -542,7 +629,11 @@ def main() -> None:
     elif args.command == "deploy-flink":
         deploy_service("POKER_FLINK", "flink.yaml", kafka_eai=True)
     elif args.command == "deploy-adapter-sim":
-        deploy_service("POKER_ADAPTER_SIM", "adapter-sim.yaml", kafka_eai=True)
+        deploy_service(
+            "POKER_ADAPTER_SIM",
+            "adapter-sim.yaml",
+            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+        )
     elif args.command == "upload-risk-bundle":
         upload_risk_bundle(args.bundle_dir)
     elif args.command == "run-training-job":
