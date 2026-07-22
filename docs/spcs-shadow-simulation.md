@@ -100,8 +100,15 @@ are unbounded. The replay therefore publishes explicit simulation-only
 watermark records:
 
 - one unused context event per context-topic partition; and
-- one direct canonical watermark hand two event-time minutes after the CDC
-  target, in the same canonical partition.
+- two direct canonical watermark hands, two and four event-time minutes after
+  the CDC target, in the same canonical partition.
+
+The first hand advances the context join past the target hand. The second
+advances the context join past the first watermark hand, causing that hand's
+six later enriched rows to cross the Kafka boundary and advance the pair-job
+watermark past the target's event-time timers. This second marker is required
+because Kafka records do not transport Flink watermarks between independent
+jobs.
 
 The manifest labels these records and the verifier excludes them from target
 counts. The simulation Flink source-idleness timeout is five seconds, while
@@ -156,8 +163,13 @@ services.
 
 ## Current status
 
-The topic definitions, SPCS specifications, runtime guards, deterministic
-context/watermark publisher, offset-bounded verifier, and packaging tests are
-implemented locally. Remote topic creation, immutable image release, service
-deployment, and the first accepted full-shadow run remain pending a clean
-committed and pushed revision.
+The isolated full-shadow path is accepted. Clean commit `658213c71f80` was
+released as immutable Flink and risk images, all simulation topics exist, and
+private `POKER_FLINK_SIM` plus `POKER_RISK_SIM` were deployed successfully.
+
+Accepted dataset `sim-shadow-20260722140340` produced one canonical target,
+six matched players, fifteen online/offline-identical pair features, one score,
+seven rule-evidence records, one review decision, zero broken references, and
+zero DLQs. Both simulation services were suspended after acceptance and the
+shared compute-pool maximum was restored from four nodes to two. Resume only
+for a bounded simulation run; production-shaped services were not changed.

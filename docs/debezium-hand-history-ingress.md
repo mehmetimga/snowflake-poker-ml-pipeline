@@ -325,17 +325,14 @@ are documented in
 Package verification and image commands are documented in
 [`spcs-c2-adapter-simulation.md`](spcs-c2-adapter-simulation.md).
 
-## Remaining remote simulation gates
+## Remote simulation status
 
-C2 is proven locally. Remote shadow simulation is not complete until:
-
-1. Create the three isolated `poker.sim.*` Confluent topics.
-2. Give the adapter a least-privilege simulation service account.
-3. Release the clean-commit image and deploy `POKER_ADAPTER_SIM` privately.
-4. Repeat the locally accepted canonical/DLQ, lineage, replay, lag, and
-   commit-recovery checks in the remote environment.
-5. Configure a separate simulation Flink input before exercising downstream
-   scoring; never redirect the deployed production-shaped Flink service.
+The isolated synthetic remote path is accepted through `POKER_ADAPTER_SIM`,
+`POKER_FLINK_SIM`, and `POKER_RISK_SIM`. It uses only `poker.sim.*` topics and
+does not redirect the production-shaped Flink or risk services. Before using
+this boundary as a production template, replace the currently shared
+Confluent principal stored in the separate simulation Secret/EAI with a
+dedicated topic- and group-scoped principal.
 
 The real external poker-server schema, binary hand history, and production CDC
 topics remain explicitly deferred. The local simulation is active only on the

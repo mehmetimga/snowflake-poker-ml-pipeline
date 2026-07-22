@@ -409,8 +409,9 @@ Prometheus rules, Grafana dashboard, and Streamlit page are documented in
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
-Status: `COMPLETE` for C1 and C2 local contract/runtime/packaging plus
-PostgreSQL/Debezium simulation. Immutable images,
+Status: `COMPLETE` for C1 and the synthetic C2 contract, runtime, packaging,
+PostgreSQL/Debezium simulation, remote adapter, and isolated full-shadow path.
+Immutable images,
 governed model artifacts, live SPCS services, periodic checkpoints, two-job
 savepoint restore, post-restore online/offline parity, scorer recovery, and a
 bounded end-to-end replay are verified. The proposed outbox/envelope contract,
@@ -418,9 +419,9 @@ Python and Go mapping, binary codec seam, lineage, parity fixtures, and the Go
 publish-or-DLQ-before-commit runtime, isolated simulation topics, adapter
 image, private SPCS specification, local logical-WAL source, database filter,
 Debezium connector, deterministic Protobuf codec, and bounded Kafka replay are
-also verified. The isolated Confluent/SPCS adapter simulation is deployed and
-its bounded six-scenario live replay is accepted. Real poker-server
-ingestion is outside the current project scope;
+also verified. The isolated Confluent/SPCS adapter simulation and full
+Flink/Go/Triton continuation are deployed, and both bounded live replays are
+accepted. Real poker-server ingestion is outside the current project scope;
 real-data C3–C5 remain deferred until independently reviewed data and labels
 exist.
 
@@ -489,9 +490,9 @@ new checkpoints, and passed a collision-aware post-restore replay.
 - [x] Add deterministic six-player context, explicit event-time watermark
   records, a run manifest, and offset-bounded full-path verification with
   online/offline pair-feature parity and output-reference checks.
-- [ ] Release immutable Flink/risk images from a clean pushed commit and deploy
+- [x] Release immutable Flink/risk images from a clean pushed commit and deploy
   both simulation services.
-- [ ] Accept one managed CDC-to-score shadow replay with 6 enriched players,
+- [x] Accept one managed CDC-to-score shadow replay with 6 enriched players,
   15 pair features, 1 complete score, 1 review decision, intact rule/alert
   references, and 0 DLQs.
 
@@ -922,3 +923,4 @@ Add dated entries here as phases move:
 | 2026-07-22 | C2 fault and recovery | Added a six-row deterministic fault manifest, run-scoped canonical/DLQ verifier, retained-volume schema migration, stable-consumer readiness barrier, and a simulation-only fail-first-commit wrapper that production mode rejects. One scenario is canonical, one is filtered before Kafka, and four poison records exercise checksum, malformed Protobuf, row/binary game mismatch, and unknown codec. | Live fault run: 6 source, 1 filtered, 5 CDC inputs, 1 canonical, 4 committed sanitized DLQs with the four exact codes, 0 raw-value/hand-ID leaks; adapter metrics were `InputRecords=5`, `CanonicalPublished=1`, `DeadLetters=4`, `CommittedRecords=5`. Recovery run published once, failed before committing source offset `19`, proved committed offset remained `19`, restarted the same group, published a byte-identical retry with one stable event ID, and committed offset `20`. The initial sleep-based consumer race was reproduced and removed with an explicit stable-assignment barrier. All 224 Python tests, all Go packages, Compose/config validation, and the complete C2 gate passed. Local image `poker-adapter:dev-653be3a18da1` is `linux/amd64`, non-root `65532:65532`, image ID `sha256:4e5b089d42d5ab98ccd4404cb900d92eafd23bee9f60aea8d212a264362ba8a7`, and passed entrypoint smoke. | Local fault/replay gate complete. Failure injection is impossible outside explicit simulation mode. The development image is not releaseable from a dirty tree. No image was pushed and no Confluent, Snowflake, SPCS, model, threshold, rule, or production topic changed. Isolated Confluent/SPCS replay is next. |
 | 2026-07-22 | C2 remote deployment | Released immutable `poker-adapter:7ef0e7dd16d5`, created the exact three managed `poker.sim.*` topics, configured a simulation-only Snowflake Secret/network rule/EAI, and deployed private `POKER_ADAPTER_SIM`. Added actual-local-Debezium to Confluent replay, a six-scenario run manifest, consumer-group commit wait, and output-offset-bounded canonical/DLQ verification. Forced commit failure remains local-only and cannot be enabled by the SPCS spec. | Registry digest `sha256:2e617a1114db1f600504b0d27f1540741b24db89ee46d2d092ce5c0890ef4bc7`; service/container `READY`, zero restarts, simulation flags enabled, failure injection false. Accepted dataset `sim-cdc-remote-20260722115831`: 6 PostgreSQL source rows, 1 filtered before managed Kafka, 5 real Debezium inputs at source offsets `0..4`, group committed offset `5`, exactly 1 canonical hand and 4 sanitized DLQs (`checksum_mismatch`, `invalid_binary_payload`, `game_type_mismatch`, `unknown_codec_version`), one each. The verifier checked released build identity, source digests, lineage offsets, output bounds, and no raw source/hand identity leakage. | C2 synthetic remote adapter phase complete. No production topic, model, threshold, rule, `POKER_FLINK`, or `POKER_RISK` configuration changed. This bounded demo uses the shared Confluent principal in a separate Snowflake Secret/EAI; rotate to a dedicated topic/group-scoped principal before production. The next synthetic phase is an isolated Flink/risk shadow continuation from `poker.sim.hands.raw.v1`. |
 | 2026-07-22 | C2 full-shadow packaging | Added eight managed topic definitions, separate private `POKER_FLINK_SIM`/`POKER_RISK_SIM` specs, independent Flink state and groups, exact Java/Go topic, group, and dataset guards, deterministic context plus watermark publishing, and an offset-bounded CDC-to-score verifier. | `make phase-c2-shadow-packaging-check` passed 24 focused Python tests, 7 context Java tests, 10 pair-feature Java tests, and every Go package; all 234 Python tests also passed with pinned temporary dependencies. Local amd64 images are Flink `sha256:7297609e231c...` and risk `sha256:ac520c6a67cc...`; the packaged scorer rejected a misconfigured simulation group before model/Kafka startup. A real retained PostgreSQL hand decoded as six players and was located in actual Debezium partition `0`, offset `25`. The verifier requires 1 canonical hand, 6 matched players, 15 parity-checked pairs, 1 score, 1 decision, intact evidence/alert references, and 0 DLQs. | Local shadow packaging is complete. No new managed topic, image push, Snowflake service, model, threshold, rule, or production service changed. Clean commit/push, immutable Flink/risk release, simulation service deployment, and live replay acceptance are next. |
+| 2026-07-22 | C2 full-shadow acceptance | Released clean commit `658213c71f80` as immutable Flink and risk images, created the remaining isolated managed topics, and deployed private `POKER_FLINK_SIM` plus `POKER_RISK_SIM`. The first bounded run correctly isolated a missing cross-Kafka downstream watermark (`1` canonical, `6` enriched, `0` pairs, `0` DLQ); the local replay harness now emits a second terminal marker because Kafka does not carry Flink watermarks between independent jobs. | Remote digests: Flink `sha256:7c941af9054a0929e2fdb21fd4d411b3f43e2da249176cdb695f0527d00b2a60`, risk `sha256:31bca5f7b3a6f7d63055dc7ffb53c95a0e4ad25b84204ec2bb26307784e8575d`. Accepted dataset `sim-shadow-20260722140340`: adapter commit `7`, 1 canonical hand, 6 matched players, 15 unique online/offline-identical pair features, 1 score, 7 evidence records, 1 `no_review` decision, probability `0.819271614560276`, 0 alerts, 0 broken references, and 0 DLQs. Focused correction tests passed `4/4`. | Synthetic C2 full shadow is accepted with CatBoost, Rules v2, and policy unchanged. Only simulation services were suspended afterward; pool maximum and active target were restored from 4 to 2. Production topics and `POKER_FLINK`/`POKER_RISK` were untouched. Real poker-server ingestion and real-data C3–C5 remain deferred. |

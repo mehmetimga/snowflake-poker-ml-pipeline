@@ -213,6 +213,36 @@ def build_context_watermark(
     )
 
 
+def build_hand_watermarks(
+    canonical_event: Any, canonical_payload: HandCompletedPayload
+) -> list[tuple[str, HandCompletedPayload, Any]]:
+    """Build the two markers needed to advance event time across both jobs."""
+    watermarks = []
+    for role, suffix, delta in (
+        ("context-join-flush", "watermark", timedelta(minutes=2)),
+        ("downstream-pair-flush", "terminal-watermark", timedelta(minutes=4)),
+    ):
+        occurred_at = canonical_payload.played_at + delta
+        payload = canonical_payload.model_copy(
+            update={
+                "hand_id": f"{canonical_payload.hand_id}-{suffix}",
+                "played_at": occurred_at,
+            }
+        )
+        event = build_event(
+            event_type=HAND_COMPLETED,
+            aggregate_id=payload.hand_id,
+            payload=payload,
+            dataset_id=canonical_event.dataset_id,
+            dataset_split=canonical_event.dataset_split,
+            occurred_at=occurred_at,
+            tenant_id=canonical_event.tenant_id,
+            product_id=canonical_event.product_id,
+        )
+        watermarks.append((role, payload, event))
+    return watermarks
+
+
 def wait_for_target_canonical(
     topic: str,
     starts: dict[str, int],
@@ -347,28 +377,25 @@ def main() -> None:
             timeout_seconds=args.timeout_seconds,
         )
         canonical_payload = HandCompletedPayload.model_validate(canonical_event.payload)
-        watermark_payload = canonical_payload.model_copy(
-            update={
-                "hand_id": f"{canonical_payload.hand_id}-watermark",
-                "played_at": watermark_at,
-            }
-        )
-        watermark_event = build_event(
-            event_type=HAND_COMPLETED,
-            aggregate_id=watermark_payload.hand_id,
-            payload=watermark_payload,
-            dataset_id=args.adapter_dataset_id,
-            dataset_split="live",
-            occurred_at=watermark_at,
-            tenant_id=canonical_event.tenant_id,
-            product_id=canonical_event.product_id,
-        )
-        watermark_metadata = producer.send(
-            cdc_topics.canonical,
-            partition=canonical_message.partition,
-            key=watermark_payload.table_id.encode(),
-            value=_json_bytes(watermark_event),
-        ).get(timeout=args.timeout_seconds)
+        hand_watermark_positions = []
+        for role, payload, event in build_hand_watermarks(
+            canonical_event, canonical_payload
+        ):
+            metadata = producer.send(
+                cdc_topics.canonical,
+                partition=canonical_message.partition,
+                key=payload.table_id.encode(),
+                value=_json_bytes(event),
+            ).get(timeout=args.timeout_seconds)
+            hand_watermark_positions.append(
+                {
+                    "role": role,
+                    "event_id": str(event.event_id),
+                    "hand_id": payload.hand_id,
+                    "partition": metadata.partition,
+                    "offset": metadata.offset,
+                }
+            )
         producer.flush(timeout=args.timeout_seconds)
     finally:
         producer.close(timeout=args.timeout_seconds)
@@ -406,10 +433,7 @@ def main() -> None:
         "contexts": context_positions,
         "watermarks": {
             "context": context_watermarks,
-            "hand_event_id": str(watermark_event.event_id),
-            "hand_id": watermark_payload.hand_id,
-            "partition": watermark_metadata.partition,
-            "offset": watermark_metadata.offset,
+            "hands": hand_watermark_positions,
         },
     }
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
