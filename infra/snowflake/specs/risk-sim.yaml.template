@@ -1,0 +1,77 @@
+spec:
+  containers:
+  - name: risk-sim
+    image: __RISK_IMAGE_PATH__
+    command: [/usr/local/bin/risk-kafka]
+    args:
+    - --simulation-mode
+    - --model-dir
+    - /opt/models
+    - --metrics-listen
+    - 0.0.0.0:9091
+    env:
+      RISK_SERVICE_BUILD_VERSION: __RISK_BUILD_VERSION__
+      RISK_REVIEW_POLICY_PATH: /opt/poker/contracts/review-policy-v1.json
+      RISK_RULE_ROLLOUT_PATH: /opt/poker/contracts/rule-rollout-v1.json
+      RISK_ALLOWED_TENANTS: "__RISK_ALLOWED_TENANTS__"
+      TRITON_HTTP_URL: http://127.0.0.1:8000
+      KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_PAIR_FEATURES_TOPIC: poker.sim.pair-features.v1
+      KAFKA_RISK_SCORES_TOPIC: poker.sim.risk-scores.v1
+      KAFKA_RULE_EVIDENCE_TOPIC: poker.sim.rule-evidence.v1
+      KAFKA_REVIEW_DECISIONS_TOPIC: poker.sim.review-decisions.v1
+      KAFKA_RISK_ALERTS_TOPIC: poker.sim.risk-alerts.v1
+      KAFKA_DEAD_LETTER_TOPIC: poker.sim.pipeline.dead-letter.v1
+      KAFKA_RISK_SCORER_GROUP_ID: poker-go-risk-scorer-sim-v1
+    secrets:
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+      secretKeyRef: username
+      envVarName: KAFKA_SASL_USERNAME
+    - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+      secretKeyRef: password
+      envVarName: KAFKA_SASL_PASSWORD
+    volumeMounts:
+    - name: risk-model
+      mountPath: /opt/models
+    readinessProbe: {port: 9091, path: /healthz}
+    resources:
+      requests: {cpu: 0.5, memory: 0.5Gi}
+      limits: {cpu: 1, memory: 1Gi}
+  - name: triton
+    image: __TRITON_IMAGE_PATH__
+    command: [tritonserver]
+    args:
+    - --model-repository=/models
+    - --strict-model-config=true
+    - --exit-on-error=true
+    - --allow-gpu-metrics=false
+    volumeMounts:
+    - name: triton-model
+      mountPath: /models
+    readinessProbe: {port: 8000, path: /v2/health/ready}
+    resources:
+      requests: {cpu: 1, memory: 2Gi}
+      limits: {cpu: 2, memory: 4Gi}
+  endpoints:
+  - {name: risk-sim-metrics, port: 9091, protocol: HTTP, public: false}
+  - {name: triton-sim-metrics, port: 8002, protocol: HTTP, public: false}
+  volumes:
+  - name: risk-model
+    source: stage
+    uid: 65532
+    gid: 65532
+    stageConfig:
+      name: "@POKER_ML_DEMO.SPCS.MODEL_ARTIFACTS/risk/__MODEL_RUN_ID__"
+      metadataCache: 10m
+  - name: triton-model
+    source: stage
+    stageConfig:
+      name: "@POKER_ML_DEMO.SPCS.MODEL_ARTIFACTS/risk/__MODEL_RUN_ID__/triton"
+      metadataCache: 10m
+  logExporters:
+    eventTableConfig: {logLevel: INFO}
+  platformMonitor:
+    metricConfig:
+      groups: [system, network, status]

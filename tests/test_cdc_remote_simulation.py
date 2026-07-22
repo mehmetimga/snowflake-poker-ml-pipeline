@@ -7,8 +7,11 @@ import pytest
 
 from pipeline.kafka.topics import (
     CdcSimulationTopics,
+    ShadowSimulationTopics,
     cdc_simulation_topic_specs,
     ensure_cdc_simulation_topics,
+    ensure_shadow_simulation_topics,
+    shadow_simulation_topic_specs,
 )
 from scripts.verify_cdc_simulation_remote import load_manifest
 
@@ -66,6 +69,50 @@ def test_cdc_simulation_topics_reject_production_names():
     with pytest.raises(ValueError, match=r"poker\.sim"):
         cdc_simulation_topic_specs(
             CdcSimulationTopics(canonical="poker.hands.raw.v1")
+        )
+
+
+def test_shadow_simulation_topics_are_complete_and_isolated():
+    topics = ShadowSimulationTopics()
+    specs = shadow_simulation_topic_specs(
+        topics,
+        partitions=3,
+        replication_factor=2,
+    )
+
+    assert [spec.name for spec in specs] == [
+        topics.user_context,
+        topics.player_context,
+        topics.pair_features,
+        topics.risk_scores,
+        topics.rule_evidence,
+        topics.review_decisions,
+        topics.risk_alerts,
+        topics.dead_letters,
+    ]
+    assert all(spec.partitions == 3 for spec in specs)
+    assert specs[0].configs["cleanup.policy"] == "compact"
+    assert all(spec.configs["cleanup.policy"] == "delete" for spec in specs[1:])
+
+    admin = _Admin({topics.dead_letters})
+    result = ensure_shadow_simulation_topics(
+        topics=topics,
+        partitions=3,
+        replication_factor=2,
+        admin_client=admin,
+    )
+    assert result["existing"] == [topics.dead_letters]
+    assert set(result["created"]) == set(spec.name for spec in specs[:-1])
+
+
+def test_shadow_simulation_topics_reject_production_names_and_duplicates():
+    with pytest.raises(ValueError, match=r"poker\.sim"):
+        shadow_simulation_topic_specs(
+            ShadowSimulationTopics(pair_features="poker.pair-features.v1")
+        )
+    with pytest.raises(ValueError, match="unique"):
+        shadow_simulation_topic_specs(
+            ShadowSimulationTopics(risk_scores="poker.sim.risk-alerts.v1")
         )
 
 

@@ -387,6 +387,60 @@ func TestProcessorDeadLettersPoisonRecordBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestProcessorSimulationBoundaryIsFailClosed(t *testing.T) {
+	publisher, committer := &fakePublisher{}, &fakeCommitter{}
+	scorer := &fakeScorer{}
+	scorer.contract.FeatureDefinitionVersion = "pair-features-v1"
+	assembler, _ := risk.NewHandAssembler(15, time.Hour)
+	base := Config{
+		InputTopic: simulationTopics["input"], RiskScoresTopic: simulationTopics["scores"],
+		RuleEvidenceTopic: simulationTopics["rules"], PolicyDecisionsTopic: simulationTopics["decisions"],
+		RiskAlertsTopic: simulationTopics["alerts"], DeadLetterTopic: simulationTopics["dead_letter"],
+		ReviewPolicy: risk.DefaultReviewPolicy(), SimulationMode: true,
+	}
+	if _, err := NewProcessor(base, scorer, assembler, publisher, committer, nil); err != nil {
+		t.Fatalf("valid simulation boundary rejected: %v", err)
+	}
+	bad := base
+	bad.RiskScoresTopic = "poker.risk-scores.v1"
+	if _, err := NewProcessor(bad, scorer, assembler, publisher, committer, nil); err == nil {
+		t.Fatal("simulation mode accepted a production output topic")
+	}
+	production := base
+	production.SimulationMode = false
+	if _, err := NewProcessor(production, scorer, assembler, publisher, committer, nil); err == nil {
+		t.Fatal("production mode accepted simulation topics")
+	}
+}
+
+func TestProcessorSimulationModeDeadLettersNonSimulationDataset(t *testing.T) {
+	publisher, committer := &fakePublisher{}, &fakeCommitter{}
+	scorer := &fakeScorer{}
+	scorer.contract.FeatureDefinitionVersion = "pair-features-v1"
+	assembler, _ := risk.NewHandAssembler(15, time.Hour)
+	processor, err := NewProcessor(Config{
+		InputTopic: simulationTopics["input"], RiskScoresTopic: simulationTopics["scores"],
+		RuleEvidenceTopic: simulationTopics["rules"], PolicyDecisionsTopic: simulationTopics["decisions"],
+		RiskAlertsTopic: simulationTopics["alerts"], DeadLetterTopic: simulationTopics["dead_letter"],
+		ReviewPolicy: risk.DefaultReviewPolicy(), SimulationMode: true,
+	}, scorer, assembler, publisher, committer, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := pairEvents("hand-live")[0]
+	value, _ := json.Marshal(event)
+	result, err := processor.Handle(context.Background(), InputRecord{
+		RecordRef: RecordRef{Topic: simulationTopics["input"], Partition: 0, Offset: 3},
+		Key:       []byte(event.Payload.PairKey), Value: value,
+	})
+	if err != nil || result.Status != "dead_lettered" || scorer.calls != 0 {
+		t.Fatalf("non-simulation dataset escaped isolation: result=%+v err=%v", result, err)
+	}
+	if len(publisher.records) != 1 || publisher.records[0].Topic != simulationTopics["dead_letter"] {
+		t.Fatalf("unexpected simulation DLQ output: %+v", publisher.records)
+	}
+}
+
 func TestProcessorDeadLettersCausallyInvalidPairBeforeAssembly(t *testing.T) {
 	publisher, committer := &fakePublisher{}, &fakeCommitter{}
 	processor, scorer := newTestProcessor(t, publisher, committer)

@@ -54,4 +54,29 @@ class JobConfigTest {
                 () -> PairFeaturesJob.JobConfig.parse(
                         new String[] {"--stateful-rule-enabled", "maybe"}, Map.of()));
     }
+
+    @Test
+    void simulationModeRequiresExactIsolatedBoundary() {
+        PairFeaturesJob.JobConfig config = PairFeaturesJob.JobConfig.parse(
+                new String[] {"--simulation-mode"},
+                Map.of(
+                        "KAFKA_PLAYER_CONTEXT_TOPIC", "poker.sim.hand-player-context.v1",
+                        "KAFKA_PAIR_FEATURES_TOPIC", "poker.sim.pair-features.v1",
+                        "KAFKA_DEAD_LETTER_TOPIC", "poker.sim.pipeline.dead-letter.v1",
+                        "FLINK_PAIR_FEATURES_GROUP_ID", "flink-pair-features-sim-v1",
+                        "FLINK_PAIR_IDLE_SOURCE_TIMEOUT_MS", "5000"));
+        assertTrue(config.simulationMode());
+        assertEquals(5_000L, config.idleSourceTimeoutMs());
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PairFeaturesJob.JobConfig.parse(
+                        new String[] {"--simulation-mode"},
+                        Map.of("KAFKA_PAIR_FEATURES_TOPIC", "poker.pair-features.v1")));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PairFeaturesJob.JobConfig.parse(
+                        new String[0],
+                        Map.of("KAFKA_PAIR_FEATURES_TOPIC", "poker.sim.pair-features.v1")));
+    }
 }

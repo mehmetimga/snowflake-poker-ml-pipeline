@@ -163,5 +163,23 @@ Forced commit-failure injection remains a local-only safety test and is absent
 from the SPCS spec. The accepted local recovery drill proves byte-identical
 same-offset replay without putting a failure switch into a deployed service.
 
+## Accepted remote run
+
+On 2026-07-22, release `7ef0e7dd16d5` was pushed at registry digest
+`sha256:2e617a1114db1f600504b0d27f1540741b24db89ee46d2d092ce5c0890ef4bc7`.
+`POKER_ADAPTER_SIM` reached `READY` with zero restarts and failure injection
+disabled. Dataset `sim-cdc-remote-20260722115831` produced six PostgreSQL rows,
+one pre-Kafka exclusion, and five managed inputs at offsets `0..4`. The SPCS
+group committed offset `5` after publishing exactly one canonical hand and the
+four expected sanitized DLQs. The bounded verifier confirmed build identity,
+source digests, lineage positions, and no raw source or hand-identity leakage.
+
+The accepted demo copied the existing Confluent principal into the separate
+simulation Secret. Before production, replace it with a dedicated principal
+restricted to the three simulation topics and adapter consumer group.
+
 The external poker-server database, its binary format, and production CDC
 topics are outside the current project scope.
+
+The isolated continuation through Java/Flink and Go/Triton is specified in
+[`spcs-shadow-simulation.md`](spcs-shadow-simulation.md).

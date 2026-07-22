@@ -64,6 +64,111 @@ class CdcSimulationTopics:
     dead_letters: str = "poker.sim.pipeline.dead-letter.v1"
 
 
+@dataclass(frozen=True)
+class ShadowSimulationTopics:
+    """Complete isolated topic boundary for the synthetic shadow pipeline."""
+
+    user_context: str = "poker.sim.user-context.v1"
+    player_context: str = "poker.sim.hand-player-context.v1"
+    pair_features: str = "poker.sim.pair-features.v1"
+    risk_scores: str = "poker.sim.risk-scores.v1"
+    rule_evidence: str = "poker.sim.rule-evidence.v1"
+    review_decisions: str = "poker.sim.review-decisions.v1"
+    risk_alerts: str = "poker.sim.risk-alerts.v1"
+    dead_letters: str = "poker.sim.pipeline.dead-letter.v1"
+
+
+def shadow_simulation_topic_specs(
+    topics: ShadowSimulationTopics | None = None,
+    *,
+    partitions: int = 3,
+    replication_factor: int = 3,
+) -> tuple[WorldTopicSpec, ...]:
+    """Return only the derived topics used by isolated Flink/risk services."""
+    if partitions < 1 or replication_factor < 1:
+        raise ValueError("partitions and replication_factor must be positive")
+    names = topics or ShadowSimulationTopics()
+    topic_names = (
+        names.user_context,
+        names.player_context,
+        names.pair_features,
+        names.risk_scores,
+        names.rule_evidence,
+        names.review_decisions,
+        names.risk_alerts,
+        names.dead_letters,
+    )
+    if len(set(topic_names)) != len(topic_names) or any(
+        not name.startswith("poker.sim.") for name in topic_names
+    ):
+        raise ValueError("shadow simulation topics must be unique poker.sim.* names")
+    seven_days_ms = str(7 * 24 * 60 * 60 * 1_000)
+    compact = {"cleanup.policy": "compact", "retention.ms": seven_days_ms}
+    delete = {"cleanup.policy": "delete", "retention.ms": seven_days_ms}
+    return tuple(
+        WorldTopicSpec(
+            name=name,
+            partitions=partitions,
+            replication_factor=replication_factor,
+            configs=dict(compact if name == names.user_context else delete),
+        )
+        for name in topic_names
+    )
+
+
+def ensure_shadow_simulation_topics(
+    *,
+    bootstrap_servers: str | None = None,
+    topics: ShadowSimulationTopics | None = None,
+    partitions: int = 3,
+    replication_factor: int = 3,
+    admin_client: object | None = None,
+) -> dict[str, list[str]]:
+    """Create only missing full-shadow topics; never alter existing topics."""
+    specs = shadow_simulation_topic_specs(
+        topics,
+        partitions=partitions,
+        replication_factor=replication_factor,
+    )
+    owns_client = admin_client is None
+    if admin_client is None:
+        from kafka.admin import KafkaAdminClient
+
+        settings = get_settings()
+        admin_client = KafkaAdminClient(
+            bootstrap_servers=(
+                bootstrap_servers or settings.kafka_bootstrap_servers
+            ).split(","),
+            client_id="poker-shadow-simulation-topic-manager-v1",
+            **kafka_client_kwargs(),
+        )
+    try:
+        existing = set(admin_client.list_topics())
+        missing = [spec for spec in specs if spec.name not in existing]
+        if missing:
+            from kafka.admin import NewTopic
+
+            admin_client.create_topics(
+                [
+                    NewTopic(
+                        name=spec.name,
+                        num_partitions=spec.partitions,
+                        replication_factor=spec.replication_factor,
+                        topic_configs=spec.configs,
+                    )
+                    for spec in missing
+                ],
+                validate_only=False,
+            )
+        return {
+            "created": [spec.name for spec in missing],
+            "existing": [spec.name for spec in specs if spec.name in existing],
+        }
+    finally:
+        if owns_client:
+            admin_client.close()
+
+
 def cdc_simulation_topic_specs(
     topics: CdcSimulationTopics | None = None,
     *,

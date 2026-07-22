@@ -33,7 +33,8 @@ public final class PairFeaturesJob {
         SingleOutputStreamOperator<String> valid = environment
                 .fromSource(source, WatermarkStrategy.noWatermarks(), "enriched-player-hand-source")
                 .uid("enriched-player-hand-source-v1")
-                .process(new EnvelopeValidationFunction(config.inputTopic()), Types.STRING)
+                .process(new EnvelopeValidationFunction(
+                        config.inputTopic(), config.simulationMode()), Types.STRING)
                 .name("validate-enriched-player-hands")
                 .uid("validate-enriched-player-hands-v1");
 
@@ -158,6 +159,7 @@ public final class PairFeaturesJob {
             boolean statefulRuleEnabled,
             long checkpointIntervalMs,
             int parallelism,
+            boolean simulationMode,
             Properties kafkaProperties) {
 
         static JobConfig parse(String[] arguments, Map<String, String> environment) {
@@ -175,7 +177,9 @@ public final class PairFeaturesJob {
             boolean fromBeginning = args.containsKey("from-beginning");
             boolean bounded = args.containsKey("bounded");
             long outOfOrderness = longValue(args, "out-of-orderness-ms", 30_000L, 0L);
-            long idle = longValue(args, "idle-source-timeout-ms", 60_000L, 1L);
+            long idle = longValue(
+                    args, environment, "idle-source-timeout-ms",
+                    "FLINK_PAIR_IDLE_SOURCE_TIMEOUT_MS", 60_000L, 1L);
             long ttl = longValue(args, "state-ttl-hours", 720L, 1L);
             long ruleWindow = longValue(args, "stateful-rule-window-hours", 24L, 1L);
             int ruleMinimumHands = Math.toIntExact(
@@ -194,23 +198,53 @@ public final class PairFeaturesJob {
                     args, environment, "stateful-rule-enabled", "FLINK_STATEFUL_RULE_ENABLED", true);
             long checkpoint = longValue(args, "checkpoint-interval-ms", 30_000L, 0L);
             int parallelism = Math.toIntExact(longValue(args, "parallelism", 1L, 1L));
-            return new JobConfig(
+            boolean simulation = booleanValue(
+                    args, environment, "simulation-mode", "FLINK_SIMULATION_MODE", false);
+            JobConfig config = new JobConfig(
                     bootstrap, input, output, dlq, group, fromBeginning, bounded,
                     outOfOrderness, idle, ttl,
                     ruleWindow, ruleMinimumHands, ruleMinimumDirectional, ruleRate,
                     ruleLateness, correctionHorizon, ruleTtl,
                     ruleEnabled,
                     checkpoint, parallelism,
+                    simulation,
                     kafkaProperties(environment));
+            config.validateTopicBoundary();
+            return config;
         }
 
         String safeSummary() {
             return String.format(
                     "{\"job\":\"pair-features\",\"input\":\"%s\","
                             + "\"output\":\"%s\",\"feature_version\":\"%s\","
-                            + "\"stateful_rule\":\"%s\",\"stateful_rule_enabled\":%s}",
+                            + "\"stateful_rule\":\"%s\",\"stateful_rule_enabled\":%s,"
+                            + "\"simulation\":%s}",
                     inputTopic, outputTopic, PairEventJson.FEATURE_VERSION,
-                    StatefulFoldRuleEngine.RULE_ID, statefulRuleEnabled);
+                    StatefulFoldRuleEngine.RULE_ID, statefulRuleEnabled, simulationMode);
+        }
+
+        private void validateTopicBoundary() {
+            if (simulationMode) {
+                requireExact("input", inputTopic, "poker.sim.hand-player-context.v1");
+                requireExact("output", outputTopic, "poker.sim.pair-features.v1");
+                requireExact("dead-letter", deadLetterTopic,
+                        "poker.sim.pipeline.dead-letter.v1");
+                requireExact("group", groupId, "flink-pair-features-sim-v1");
+                return;
+            }
+            for (String topic : new String[] {inputTopic, outputTopic, deadLetterTopic}) {
+                if (topic.startsWith("poker.sim.")) {
+                    throw new IllegalArgumentException(
+                            "production mode rejects simulation topic " + topic);
+                }
+            }
+        }
+
+        private static void requireExact(String role, String actual, String expected) {
+            if (!expected.equals(actual)) {
+                throw new IllegalArgumentException(
+                        "simulation topic boundary: " + role + " must be " + expected);
+            }
         }
 
         private static Map<String, String> parseArguments(String[] arguments) {
@@ -221,7 +255,8 @@ public final class PairFeaturesJob {
                     throw new IllegalArgumentException("unexpected argument: " + argument);
                 }
                 String key = argument.substring(2);
-                if (key.equals("from-beginning") || key.equals("bounded")) {
+                if (key.equals("from-beginning") || key.equals("bounded")
+                        || key.equals("simulation-mode")) {
                     parsed.put(key, "true");
                     continue;
                 }
@@ -245,6 +280,21 @@ public final class PairFeaturesJob {
         private static long longValue(
                 Map<String, String> args, String key, long fallback, long minimum) {
             long value = Long.parseLong(args.getOrDefault(key, Long.toString(fallback)));
+            if (value < minimum) {
+                throw new IllegalArgumentException("--" + key + " must be >= " + minimum);
+            }
+            return value;
+        }
+
+        private static long longValue(
+                Map<String, String> args,
+                Map<String, String> environment,
+                String key,
+                String environmentName,
+                long fallback,
+                long minimum) {
+            long value = Long.parseLong(value(
+                    args, environment, key, environmentName, Long.toString(fallback)));
             if (value < minimum) {
                 throw new IllegalArgumentException("--" + key + " must be >= " + minimum);
             }

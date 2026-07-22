@@ -58,6 +58,16 @@ type Config struct {
 	AllowedTenants       []string
 	ReviewPolicy         risk.ReviewPolicyDefinition
 	RuleRollout          *risk.RuleRolloutConfig
+	SimulationMode       bool
+}
+
+var simulationTopics = map[string]string{
+	"input":       "poker.sim.pair-features.v1",
+	"scores":      "poker.sim.risk-scores.v1",
+	"rules":       "poker.sim.rule-evidence.v1",
+	"decisions":   "poker.sim.review-decisions.v1",
+	"alerts":      "poker.sim.risk-alerts.v1",
+	"dead_letter": "poker.sim.pipeline.dead-letter.v1",
 }
 
 type ProcessResult struct {
@@ -106,6 +116,9 @@ func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssemble
 		config.PolicyDecisionsTopic == "" || config.RiskAlertsTopic == "" || config.DeadLetterTopic == "" {
 		return nil, fmt.Errorf("all stream topics are required")
 	}
+	if err := validateSimulationBoundary(config); err != nil {
+		return nil, err
+	}
 	if err := config.ReviewPolicy.Validate(); err != nil {
 		return nil, fmt.Errorf("review policy: %w", err)
 	}
@@ -138,6 +151,28 @@ func NewProcessor(config Config, scorer HandScorer, assembler *risk.HandAssemble
 	}, nil
 }
 
+func validateSimulationBoundary(config Config) error {
+	topics := map[string]string{
+		"input": config.InputTopic, "scores": config.RiskScoresTopic,
+		"rules": config.RuleEvidenceTopic, "decisions": config.PolicyDecisionsTopic,
+		"alerts": config.RiskAlertsTopic, "dead_letter": config.DeadLetterTopic,
+	}
+	if config.SimulationMode {
+		for role, expected := range simulationTopics {
+			if topics[role] != expected {
+				return fmt.Errorf("simulation topic boundary: %s must be %s", role, expected)
+			}
+		}
+		return nil
+	}
+	for role, topic := range topics {
+		if strings.HasPrefix(topic, "poker.sim.") {
+			return fmt.Errorf("production mode rejects simulation %s topic %s", role, topic)
+		}
+	}
+	return nil
+}
+
 func (processor *Processor) Handle(ctx context.Context, record InputRecord) (ProcessResult, error) {
 	processor.offsets.Observe(record.RecordRef)
 	if record.Topic != processor.config.InputTopic {
@@ -146,6 +181,9 @@ func (processor *Processor) Handle(ctx context.Context, record InputRecord) (Pro
 	var event risk.PairFeatureEvent
 	if err := json.Unmarshal(record.Value, &event); err != nil {
 		return processor.deadLetter(ctx, record, "invalid_json", err)
+	}
+	if processor.config.SimulationMode && !strings.HasPrefix(event.DatasetID, "sim-") {
+		return processor.deadLetter(ctx, record, "non_simulation_dataset", fmt.Errorf("dataset_id must start with sim-"))
 	}
 	featureVersion := processor.scorer.Contract().FeatureDefinitionVersion
 	if err := event.Validate(featureVersion); err != nil {

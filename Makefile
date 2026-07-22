@@ -4,6 +4,7 @@
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
 .PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
 .PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim c2-adapter-configure-kafka c2-adapter-sim-topics c2-adapter-remote-replay c2-adapter-remote-verify c2-adapter-remote-e2e phase-c2-packaging-check
+.PHONY: shadow-sim-package-test shadow-sim-java-test shadow-sim-topics shadow-sim-render shadow-sim-deploy-flink shadow-sim-deploy-risk shadow-sim-deploy shadow-sim-generate shadow-sim-replay shadow-sim-verify shadow-sim-e2e phase-c2-shadow-packaging-check
 .PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
@@ -108,6 +109,10 @@ CDC_SIM_RECOVERY_SOURCE_DATASET_ID := sim-cdc-recovery-$(shell date -u +%Y%m%d%H
 CDC_SIM_RECOVERY_GROUP_ID := poker-go-hand-adapter-recovery-$(shell date +%s)
 C2_REMOTE_SIM_SOURCE_DATASET_ID := sim-cdc-remote-$(shell date -u +%Y%m%d%H%M%S)
 C2_REMOTE_SIM_MANIFEST ?= build/c2/remote/$(C2_REMOTE_SIM_SOURCE_DATASET_ID).json
+C2_SHADOW_SOURCE_DATASET_ID := sim-shadow-$(shell date -u +%Y%m%d%H%M%S)
+C2_SHADOW_START_AT ?= $(shell $(PY) -c 'from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)-timedelta(minutes=15)).replace(microsecond=0).isoformat().replace("+00:00","Z"))')
+C2_SHADOW_MANIFEST ?= build/c2/shadow/$(C2_SHADOW_SOURCE_DATASET_ID).json
+C2_SHADOW_ADAPTER_BUILD_VERSION ?= 7ef0e7dd16d5
 C2_ADAPTER_KAFKA_CONFIG_FLAGS ?=
 RISK_SCORE_CHECK_FLAGS ?=
 WORLD_REPLAY_MODE ?= accelerated
@@ -215,6 +220,9 @@ help:
 	@echo "  c2-adapter-push Push a clean-commit adapter image to Snowflake registry"
 	@echo "  c2-adapter-deploy-sim Deploy the private POKER_ADAPTER_SIM service"
 	@echo "  c2-adapter-sim-topics Create only the isolated poker.sim.* Confluent topics"
+	@echo "  shadow-sim-topics Create isolated Flink/risk shadow topics"
+	@echo "  shadow-sim-deploy Deploy POKER_FLINK_SIM and POKER_RISK_SIM"
+	@echo "  shadow-sim-e2e Run one bounded CDC-to-score managed shadow replay"
 	@echo "  c2-adapter-remote-e2e Replay local Debezium faults through Confluent/SPCS"
 	@echo "  c1-build     Build versioned linux/amd64 poker-risk and poker-flink images"
 	@echo "  c1-image-smoke Smoke-test the two locally built C1 images"
@@ -1297,6 +1305,77 @@ c2-adapter-remote-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-registe
 
 phase-c2-packaging-check: phase-c2-runtime-check c2-adapter-package-test
 	KAFKA_BOOTSTRAP_SERVERS=broker.c2.invalid:9092 $(MAKE) c2-adapter-render
+
+shadow-sim-package-test:
+	$(PY) -m pytest -q tests/test_shadow_simulation_packaging.py \
+		tests/test_shadow_simulation_replay.py \
+		tests/test_cdc_remote_simulation.py tests/test_snowflake_deploy.py
+
+shadow-sim-java-test:
+	docker run --rm -v $(CURDIR):/workspace -v $(MAVEN_REPO):/root/.m2 \
+		-w /workspace/$(FLINK_CONTEXT_DIR) \
+		maven:3.9.9-eclipse-temurin-17 mvn -q test package
+	docker run --rm -v $(CURDIR):/workspace -v $(MAVEN_REPO):/root/.m2 \
+		-w /workspace/$(FLINK_PAIR_FEATURES_DIR) \
+		maven:3.9.9-eclipse-temurin-17 mvn -q test package
+
+shadow-sim-topics:
+	$(PY) scripts/ensure_shadow_simulation_topics.py
+
+shadow-sim-render:
+	SPCS_RISK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:$(C1_RISK_IMAGE_TAG) \
+	SPCS_FLINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:$(C1_FLINK_IMAGE_TAG) \
+	SPCS_TRITON_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3 \
+	SPCS_RISK_BUILD_VERSION=$(C1_RISK_IMAGE_TAG) \
+	SPCS_FLINK_BUILD_VERSION=$(C1_FLINK_IMAGE_TAG) \
+	SPCS_MODEL_RUN_ID=$(C1_MODEL_RUN_ID) \
+	RISK_ALLOWED_TENANTS=$(C1_ALLOWED_TENANTS) \
+		$(PY) infra/snowflake/deploy.py render
+
+shadow-sim-deploy-flink: c1-release-check shadow-sim-render
+	$(PY) infra/snowflake/deploy.py deploy-flink-sim
+
+shadow-sim-deploy-risk: c1-release-check shadow-sim-render
+	$(PY) infra/snowflake/deploy.py deploy-risk-sim
+
+shadow-sim-deploy: shadow-sim-deploy-flink shadow-sim-deploy-risk
+
+shadow-sim-generate:
+	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) $(PY) scripts/simulate_postgres_cdc.py \
+		--hands 1 --players 6 --tables 1 --pairs 1 --seed 9221 --rate 0 \
+		--game-types NLH_CASH_6MAX --allowed-game-types NLH_CASH_6MAX \
+		--dataset-id $(C2_SHADOW_SOURCE_DATASET_ID) \
+		--start-at $(C2_SHADOW_START_AT)
+
+shadow-sim-replay:
+	$(PY) scripts/replay_shadow_simulation.py \
+		--source-dataset-id $(C2_SHADOW_SOURCE_DATASET_ID) \
+		--adapter-dataset-id $(C2_ADAPTER_DATASET_ID) \
+		--adapter-group-id $(C2_ADAPTER_GROUP_ID) \
+		--adapter-build-version $(C2_SHADOW_ADAPTER_BUILD_VERSION) \
+		--flink-build-version $(C1_FLINK_IMAGE_TAG) \
+		--risk-build-version $(C1_RISK_IMAGE_TAG) \
+		--model-run-id $(C1_MODEL_RUN_ID) \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--manifest $(C2_SHADOW_MANIFEST)
+
+shadow-sim-verify:
+	$(PY) scripts/verify_shadow_simulation.py \
+		--manifest $(C2_SHADOW_MANIFEST)
+
+shadow-sim-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register shadow-sim-topics
+	$(MAKE) shadow-sim-generate \
+		C2_SHADOW_SOURCE_DATASET_ID=$(C2_SHADOW_SOURCE_DATASET_ID) \
+		C2_SHADOW_START_AT=$(C2_SHADOW_START_AT)
+	$(MAKE) shadow-sim-replay \
+		C2_SHADOW_SOURCE_DATASET_ID=$(C2_SHADOW_SOURCE_DATASET_ID) \
+		C2_SHADOW_MANIFEST=$(C2_SHADOW_MANIFEST)
+	$(MAKE) shadow-sim-verify C2_SHADOW_MANIFEST=$(C2_SHADOW_MANIFEST)
+
+phase-c2-shadow-packaging-check: shadow-sim-package-test shadow-sim-java-test
+	KAFKA_BOOTSTRAP_SERVERS=broker.c2.invalid:9092 $(MAKE) shadow-sim-render
+	cd $(GO_RISK_DIR) && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache \
+		$(GO) test ./...
 
 # ---- AWS / Terraform ----
 # Force AWS_PROFILE=default for these targets. The shell may export

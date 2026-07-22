@@ -44,7 +44,15 @@ func main() {
 	allowedTenants := flag.String("allowed-tenants", envDefault("RISK_ALLOWED_TENANTS", ""), "comma-separated tenant allowlist; empty allows all for development")
 	buildVersion := flag.String("build-version", envDefault("RISK_SERVICE_BUILD_VERSION", "dev"), "immutable service image or source build version")
 	metricsListen := flag.String("metrics-listen", envDefault("RISK_METRICS_LISTEN", "127.0.0.1:9091"), "Prometheus metrics listen address; empty disables")
+	simulationMode := flag.Bool("simulation-mode", false, "require the exact poker.sim.* topic boundary and sim-* datasets")
 	flag.Parse()
+	if err := validateKafkaBoundary(*simulationMode, *groupID, map[string]string{
+		"input": *inputTopic, "scores": *scoresTopic, "rules": *ruleEvidenceTopic,
+		"decisions": *policyDecisionsTopic, "alerts": *alertsTopic,
+		"dead_letter": *deadLetterTopic,
+	}); err != nil {
+		log.Fatalf("Kafka isolation: %v", err)
+	}
 
 	bundle, err := risk.LoadArtifactBundle(*modelDir)
 	if err != nil {
@@ -93,6 +101,7 @@ func main() {
 		AllowedTenants: splitNonEmpty(*allowedTenants),
 		ReviewPolicy:   reviewPolicy,
 		RuleRollout:    ruleRollout,
+		SimulationMode: *simulationMode,
 	}, scorer, assembler, kafkaClient, kafkaClient, nil)
 	if err != nil {
 		log.Fatalf("configure stream processor: %v", err)
@@ -136,7 +145,7 @@ func main() {
 		}()
 		log.Printf("risk-kafka metrics listen=%s", *metricsListen)
 	}
-	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d rule_rollout=%s input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, ruleRollout.RolloutID, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
+	log.Printf("risk-kafka model=%s run=%s review_policy=%s:v%d rule_rollout=%s simulation=%t input=%s scores=%s rules=%s decisions=%s alerts=%s", bundle.Contract.ModelName, bundle.Contract.RunID, reviewPolicy.PolicyID, reviewPolicy.PolicyVersion, ruleRollout.RolloutID, *simulationMode, *inputTopic, *scoresTopic, *ruleEvidenceTopic, *policyDecisionsTopic, *alertsTopic)
 	scores, err := kafkaClient.Run(ctx, processor, *maxScores)
 	if metricsServer != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -154,6 +163,31 @@ func main() {
 		scores, policyMetrics.Decisions, policyMetrics.ReviewRate,
 		policyMetrics.MandatoryReviewRate, policyMetrics.MinimumSampleReached,
 		policyMetrics.WithinConfiguredRateLimits, policyMetrics.PromotionGatePassed)
+}
+
+func validateKafkaBoundary(simulation bool, groupID string, topics map[string]string) error {
+	expected := map[string]string{
+		"input": "poker.sim.pair-features.v1", "scores": "poker.sim.risk-scores.v1",
+		"rules": "poker.sim.rule-evidence.v1", "decisions": "poker.sim.review-decisions.v1",
+		"alerts": "poker.sim.risk-alerts.v1", "dead_letter": "poker.sim.pipeline.dead-letter.v1",
+	}
+	if simulation {
+		if groupID != "poker-go-risk-scorer-sim-v1" {
+			return fmt.Errorf("simulation group must be poker-go-risk-scorer-sim-v1")
+		}
+		for role, expectedTopic := range expected {
+			if topics[role] != expectedTopic {
+				return fmt.Errorf("simulation %s topic must be %s", role, expectedTopic)
+			}
+		}
+		return nil
+	}
+	for role, topic := range topics {
+		if strings.HasPrefix(topic, "poker.sim.") {
+			return fmt.Errorf("production mode rejects simulation %s topic %s", role, topic)
+		}
+	}
+	return nil
 }
 
 func splitNonEmpty(value string) []string {

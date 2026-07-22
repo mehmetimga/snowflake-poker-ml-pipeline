@@ -573,6 +573,8 @@ def main() -> None:
     sub.add_parser("deploy-risk")
     sub.add_parser("deploy-flink")
     sub.add_parser("deploy-adapter-sim")
+    sub.add_parser("deploy-flink-sim")
+    sub.add_parser("deploy-risk-sim")
     upload = sub.add_parser("upload-risk-bundle")
     upload.add_argument(
         "--bundle-dir", type=Path, default=ROOT / "build/c1/risk-runtime"
@@ -632,6 +634,18 @@ def main() -> None:
         deploy_service(
             "POKER_ADAPTER_SIM",
             "adapter-sim.yaml",
+            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+        )
+    elif args.command == "deploy-flink-sim":
+        deploy_service(
+            "POKER_FLINK_SIM",
+            "flink-sim.yaml",
+            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+        )
+    elif args.command == "deploy-risk-sim":
+        deploy_service(
+            "POKER_RISK_SIM",
+            "risk-sim.yaml",
             kafka_eai=ADAPTER_SIM_KAFKA_EAI,
         )
     elif args.command == "upload-risk-bundle":

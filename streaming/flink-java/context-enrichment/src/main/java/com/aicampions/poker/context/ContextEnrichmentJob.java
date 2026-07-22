@@ -41,7 +41,8 @@ public final class ContextEnrichmentJob {
                         "canonical-hands-source")
                 .uid("canonical-hands-source-v1")
                 .process(new EnvelopeValidationFunction(
-                        config.handTopic(), EventJson.HAND_COMPLETED), Types.STRING)
+                        config.handTopic(), EventJson.HAND_COMPLETED,
+                        config.simulationMode()), Types.STRING)
                 .name("validate-hand-envelopes")
                 .uid("validate-hand-envelopes-v1");
         SingleOutputStreamOperator<String> validContexts = environment
@@ -51,7 +52,8 @@ public final class ContextEnrichmentJob {
                         "user-context-source")
                 .uid("user-context-source-v1")
                 .process(new EnvelopeValidationFunction(
-                        config.contextTopic(), EventJson.USER_CONTEXT_UPDATED), Types.STRING)
+                        config.contextTopic(), EventJson.USER_CONTEXT_UPDATED,
+                        config.simulationMode()), Types.STRING)
                 .name("validate-context-envelopes")
                 .uid("validate-context-envelopes-v1");
 
@@ -149,6 +151,7 @@ public final class ContextEnrichmentJob {
             long contextBootstrapWaitMs,
             long checkpointIntervalMs,
             int parallelism,
+            boolean simulationMode,
             Properties kafkaProperties) {
 
         static JobConfig parse(String[] arguments, Map<String, String> environment) {
@@ -167,15 +170,21 @@ public final class ContextEnrichmentJob {
                     "FLINK_CONTEXT_GROUP_ID", "flink-context-enrichment-v1");
             boolean fromBeginning = args.containsKey("from-beginning");
             boolean bounded = args.containsKey("bounded");
-            long lateness = longValue(args, "allowed-lateness-ms", 30_000L, 0L);
+            long lateness = longValue(
+                    args, environment, "allowed-lateness-ms",
+                    "FLINK_CONTEXT_ALLOWED_LATENESS_MS", 30_000L, 0L);
             long corrections = longValue(args, "correction-window-ms", 300_000L, 0L);
-            long idle = longValue(args, "idle-source-timeout-ms", 60_000L, 1L);
+            long idle = longValue(
+                    args, environment, "idle-source-timeout-ms",
+                    "FLINK_CONTEXT_IDLE_SOURCE_TIMEOUT_MS", 60_000L, 1L);
             long ttl = longValue(args, "state-ttl-hours", 720L, 1L);
             long bootstrapWait = longValue(
                     args, "context-bootstrap-wait-ms", bounded ? 0L : 30_000L, 0L);
             long checkpoint = longValue(args, "checkpoint-interval-ms", 30_000L, 0L);
             int parallelism = Math.toIntExact(longValue(args, "parallelism", 1L, 1L));
-            return new JobConfig(
+            boolean simulation = booleanValue(
+                    args, environment, "simulation-mode", "FLINK_SIMULATION_MODE", false);
+            JobConfig config = new JobConfig(
                     bootstrap,
                     hands,
                     contexts,
@@ -191,15 +200,46 @@ public final class ContextEnrichmentJob {
                     bootstrapWait,
                     checkpoint,
                     parallelism,
+                    simulation,
                     kafkaProperties(environment));
+            config.validateTopicBoundary();
+            return config;
         }
 
         String safeSummary() {
             return String.format(
                     "{\"job\":\"context-enrichment\",\"hands\":\"%s\","
                             + "\"contexts\":\"%s\",\"output\":\"%s\","
-                            + "\"allowed_lateness_ms\":%d,\"correction_window_ms\":%d}",
-                    handTopic, contextTopic, outputTopic, allowedLatenessMs, correctionWindowMs);
+                            + "\"allowed_lateness_ms\":%d,\"correction_window_ms\":%d,"
+                            + "\"simulation\":%s}",
+                    handTopic, contextTopic, outputTopic, allowedLatenessMs,
+                    correctionWindowMs, simulationMode);
+        }
+
+        private void validateTopicBoundary() {
+            if (simulationMode) {
+                requireExact("hand", handTopic, "poker.sim.hands.raw.v1");
+                requireExact("context", contextTopic, "poker.sim.user-context.v1");
+                requireExact("output", outputTopic, "poker.sim.hand-player-context.v1");
+                requireExact("dead-letter", deadLetterTopic,
+                        "poker.sim.pipeline.dead-letter.v1");
+                requireExact("group", groupId, "flink-context-enrichment-sim-v1");
+                return;
+            }
+            for (String topic : new String[] {
+                    handTopic, contextTopic, outputTopic, deadLetterTopic}) {
+                if (topic.startsWith("poker.sim.")) {
+                    throw new IllegalArgumentException(
+                            "production mode rejects simulation topic " + topic);
+                }
+            }
+        }
+
+        private static void requireExact(String role, String actual, String expected) {
+            if (!expected.equals(actual)) {
+                throw new IllegalArgumentException(
+                        "simulation topic boundary: " + role + " must be " + expected);
+            }
         }
 
         private static Map<String, String> parseArguments(String[] arguments) {
@@ -210,7 +250,8 @@ public final class ContextEnrichmentJob {
                     throw new IllegalArgumentException("unexpected argument: " + argument);
                 }
                 String key = argument.substring(2);
-                if (key.equals("from-beginning") || key.equals("bounded")) {
+                if (key.equals("from-beginning") || key.equals("bounded")
+                        || key.equals("simulation-mode")) {
                     parsed.put(key, "true");
                     continue;
                 }
@@ -238,6 +279,35 @@ public final class ContextEnrichmentJob {
                 throw new IllegalArgumentException("--" + key + " must be >= " + minimum);
             }
             return value;
+        }
+
+        private static long longValue(
+                Map<String, String> args,
+                Map<String, String> environment,
+                String key,
+                String environmentName,
+                long fallback,
+                long minimum) {
+            long value = Long.parseLong(value(
+                    args, environment, key, environmentName, Long.toString(fallback)));
+            if (value < minimum) {
+                throw new IllegalArgumentException("--" + key + " must be >= " + minimum);
+            }
+            return value;
+        }
+
+        private static boolean booleanValue(
+                Map<String, String> args,
+                Map<String, String> environment,
+                String argument,
+                String environmentName,
+                boolean fallback) {
+            String raw = value(
+                    args, environment, argument, environmentName, Boolean.toString(fallback));
+            if (!raw.equalsIgnoreCase("true") && !raw.equalsIgnoreCase("false")) {
+                throw new IllegalArgumentException("--" + argument + " must be true or false");
+            }
+            return Boolean.parseBoolean(raw);
         }
 
         private static Properties kafkaProperties(Map<String, String> environment) {
