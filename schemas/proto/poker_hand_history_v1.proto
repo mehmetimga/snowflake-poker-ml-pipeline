@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package poker.simulation.v1;
+
+option go_package = "github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/cdc/proto;handpb";
+
+// Simulation-only binary contract stored in PostgreSQL BYTEA. Monetary values
+// use millionths of one currency unit so the wire format never depends on
+// floating-point rounding.
+message HandHistoryV1 {
+  string hand_id = 1;
+  string game_type = 2;
+  string table_id = 3;
+  int64 played_at_unix_ms = 4;
+  string dataset_split = 5;
+  string generator = 6;
+  int64 small_blind_micros = 7;
+  int64 big_blind_micros = 8;
+  int32 num_players = 9;
+  int64 pot_size_micros = 10;
+  repeated string board = 11;
+  repeated HandActionV1 actions = 12;
+  repeated HandPlayerV1 players = 13;
+}
+
+message HandActionV1 {
+  uint32 sequence_no = 1;
+  string player_id = 2;
+  string street = 3;
+  string action_type = 4;
+  int64 amount_micros = 5;
+}
+
+message HandPlayerV1 {
+  string player_id = 1;
+  string name = 2;
+  string position = 3;
+  int64 stack_start_micros = 4;
+  repeated string hole_cards = 5;
+  int64 won_amount_micros = 6;
+}

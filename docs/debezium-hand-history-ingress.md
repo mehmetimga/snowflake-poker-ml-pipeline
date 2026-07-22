@@ -2,15 +2,18 @@
 
 ## Status and scope
 
-The C2 contract, Go runtime, and simulation-only Docker/SPCS packaging are
-implemented and tested. A local linux/amd64 adapter image was built and smoke
-tested. No image was pushed, and no poker-server database, Debezium connector,
-Kafka Connect worker, Confluent record, or SPCS service was changed.
+The C2 contract, Go runtime, simulation-only Docker/SPCS packaging, and local
+PostgreSQL/Debezium simulation are implemented and tested. A real local
+PostgreSQL 17.5 logical-WAL source, Debezium 3.6 worker, Kafka broker, PokerKit
+writer, Protobuf binary, and Go adapter completed a bounded end-to-end run.
+No image was pushed, and no poker-server database, Confluent environment,
+Snowflake object, or SPCS service was changed.
 
 The repository now freezes the proposed boundary between a future external
 poker platform and the existing canonical ML pipeline. It provides:
 
 - a proposed immutable PostgreSQL outbox row;
+- a database-owned game-type allowlist that filters before Kafka;
 - a Debezium PostgreSQL envelope contract;
 - Python and Go adapters that produce the same canonical hand identity;
 - a versioned binary-decoder interface;
@@ -18,6 +21,7 @@ poker platform and the existing canonical ML pipeline. It provides:
 - direct-versus-CDC parity fixtures;
 - a Go consume/publish/DLQ processor with commit-after-ack recovery;
 - an isolated `poker.sim.*` SPCS service contract and immutable image; and
+- a deterministic `poker-hand-protobuf-v1` simulation codec; and
 - rejection tests for mutable, malformed, unknown-codec, label-bearing, and
   publish-failure records.
 
@@ -90,6 +94,7 @@ application failure cannot silently rewrite canonical hand history.
 | `payload_schema_version` | Canonical target family | Exactly `1` |
 | `tenant_id` | Security and state boundary | Non-empty and adapter-allowlisted |
 | `product_id` | Product boundary | Non-empty |
+| `game_type` | Trusted routing metadata | Filtered in PostgreSQL and rechecked by the adapter |
 | `occurred_at` | Semantic hand completion time | Must equal decoded `played_at` |
 | `emitted_at` | Stable outbox creation time | Must be at or after `occurred_at` |
 | `codec_version` | Binary decoder selection | Exact registered value; no guessing |
@@ -183,9 +188,11 @@ would require a future canonical schema version rather than an in-place break.
 
 ## Binary codec boundary
 
-The fixture codec is `canonical-hand-json-v1`. It base64-decodes JSON bytes so
-the mapping can be tested without inventing the external poker-server format.
-It must never be relabeled as the production decoder.
+Two repository-owned simulation codecs exist. `canonical-hand-json-v1` remains
+the small mapping fixture. `poker-hand-protobuf-v1` is the deterministic binary
+stored in the local PostgreSQL `BYTEA` column and decoded by both Python and
+Go. Neither is a production poker-server decoder, and neither may be relabeled
+as one.
 
 The real integration requires the poker-platform owner to provide:
 
@@ -269,6 +276,7 @@ Run the complete offline contract, runtime, and packaging gate:
 
 ```bash
 make phase-c2-packaging-check
+make phase-c2-cdc-simulation-check
 ```
 
 The deterministic fixture report should include:
@@ -296,28 +304,37 @@ Kafka authentication can be checked without enabling a decoder or consuming:
 make go-hand-adapter-kafka-check
 ```
 
-The only currently runnable decoder is the synthetic fixture codec. A bounded
-simulation-topic run must opt in visibly and remains isolated:
+The currently runnable decoders are repository-owned simulation codecs. A
+bounded simulation-topic run must opt in visibly and remains isolated:
 
 ```bash
 make go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--from-beginning --max-records 1"
 ```
 
+The complete local PostgreSQL/Debezium path is one bounded command:
+
+```bash
+make cdc-sim-e2e
+```
+
+Its architecture, filter/parse boundary, runbook, and production transition
+are documented in
+[`postgres-debezium-simulation.md`](postgres-debezium-simulation.md).
+
 Package verification and image commands are documented in
 [`spcs-c2-adapter-simulation.md`](spcs-c2-adapter-simulation.md).
 
-## Remaining simulation gates
+## Remaining remote simulation gates
 
-C2 simulation is not live until all of these are complete:
+C2 is proven locally. Remote shadow simulation is not complete until:
 
-1. Build the deterministic PokerKit-to-Debezium-envelope simulator.
-2. Create the three isolated `poker.sim.*` Confluent topics.
-3. Give the adapter a least-privilege simulation service account.
-4. Release the clean-commit image and deploy `POKER_ADAPTER_SIM` privately.
-5. Verify canonical/DLQ counts, lineage, replay, lag, and commit recovery.
-6. Configure a separate simulation Flink input before exercising downstream
+1. Create the three isolated `poker.sim.*` Confluent topics.
+2. Give the adapter a least-privilege simulation service account.
+3. Release the clean-commit image and deploy `POKER_ADAPTER_SIM` privately.
+4. Repeat canonical/DLQ, lineage, replay, lag, and commit-recovery checks.
+5. Configure a separate simulation Flink input before exercising downstream
    scoring; never redirect the deployed production-shaped Flink service.
 
-Real PostgreSQL, Debezium, binary hand history, and production CDC topics are
-explicitly deferred. Until the simulator phase, PokerKit direct publishing
-remains the only active input path.
+The real external poker-server schema, binary hand history, and production CDC
+topics remain explicitly deferred. The local simulation is active only on the
+isolated `poker.sim.*` path.

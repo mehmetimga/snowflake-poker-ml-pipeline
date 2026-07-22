@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -146,7 +147,7 @@ func TestConnectWrapperAndSnapshotPreserveCanonicalEvent(t *testing.T) {
 type binaryV42 struct{ payload json.RawMessage }
 
 func (binaryV42) Version() string { return "poker-server-binary-v42" }
-func (decoder binaryV42) Decode(payload []byte) (json.RawMessage, error) {
+func (decoder binaryV42) Decode(payload []byte, _ DecodeContext) (json.RawMessage, error) {
 	if !reflect.DeepEqual(payload, []byte{0, 1, 2, 3}) {
 		return nil, reject("invalid_binary_payload", "unexpected test bytes")
 	}
@@ -164,6 +165,51 @@ func TestRealBinaryDecoderIsVersionedPlugin(t *testing.T) {
 	}
 	if adapted.Event.EventID != "f00d27af-a72b-58bd-8180-14d6e38d3040" {
 		t.Fatal("binary decoder changed canonical identity")
+	}
+}
+
+func TestSimulationProtobufFixtureDecodesAndChecksGameType(t *testing.T) {
+	binary, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(
+		fixtureBytes(t, "poker-hand-protobuf-v1.base64"),
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := fixtureRecord(t)
+	afterRow(t, record)["codec_version"] = SimulationProtobufCodec
+	replaceBinary(t, record, binary)
+	adapted, err := Adapt(
+		encodeRecord(t, record),
+		testConfig(),
+		map[string]Decoder{SimulationProtobufCodec: SimulationProtobufDecoder{}},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(adapted.Event.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["generator"] != "pokerkit" || HeaderMap(adapted.Headers)["cdc_game_type"] != "NLH_CASH_6MAX" {
+		t.Fatalf("simulation codec lost source identity: payload=%v headers=%v", payload, HeaderMap(adapted.Headers))
+	}
+
+	mismatch := fixtureRecord(t)
+	afterRow(t, mismatch)["codec_version"] = SimulationProtobufCodec
+	afterRow(t, mismatch)["game_type"] = "PLO_CASH_6MAX"
+	replaceBinary(t, mismatch, binary)
+	requireReject(
+		t, "game_type_mismatch", encodeRecord(t, mismatch),
+		map[string]Decoder{SimulationProtobufCodec: SimulationProtobufDecoder{}},
+	)
+
+	notAllowed := testConfig()
+	notAllowed.AllowedGameTypes = map[string]bool{"PLO_CASH_6MAX": true}
+	if _, err := Adapt(encodeRecord(t, record), notAllowed, map[string]Decoder{
+		SimulationProtobufCodec: SimulationProtobufDecoder{},
+	}, nil); err == nil || RejectCode(err) != "game_type_not_allowed" {
+		t.Fatalf("unapproved game type was not rejected: %v", err)
 	}
 }
 

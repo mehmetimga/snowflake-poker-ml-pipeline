@@ -6,7 +6,7 @@ spec:
     - /usr/local/bin/hand-adapter
     args:
     - --simulation-mode
-    - --allow-fixture-codec
+    - --allow-simulation-codecs
     - --metrics-listen
     - 0.0.0.0:9093
     env:
@@ -17,6 +17,7 @@ spec:
       CDC_EXPECTED_SCHEMA: public
       CDC_EXPECTED_TABLE: hand_completed_outbox
       CDC_ALLOWED_TENANTS: "__ADAPTER_ALLOWED_TENANTS__"
+      CDC_ALLOWED_GAME_TYPES: NLH_CASH_6MAX,NLH_TOURNAMENT_6MAX
       KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
       KAFKA_SECURITY_PROTOCOL: SASL_SSL
       KAFKA_SASL_MECHANISM: PLAIN

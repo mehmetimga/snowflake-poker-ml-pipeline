@@ -3,11 +3,12 @@
 ## Decision and scope
 
 This project will not decode or ingest the real poker-server hand-history
-format. The C2 adapter is packaged only for a controlled real-time simulation
-that will be implemented in the next phase.
+format. The C2 adapter is packaged only for a controlled real-time simulation.
+That simulation is now implemented and verified locally with PostgreSQL,
+Debezium, Kafka, a deterministic Protobuf hand, and the Go adapter.
 
-The simulator will emit synthetic, Debezium-shaped completed-hand envelopes.
-The adapter validates them, decodes the test-only canonical JSON payload, and
+Debezium emits completed-hand envelopes from a real local PostgreSQL outbox.
+The adapter validates them, decodes the test-only Protobuf payload, and
 publishes a canonical hand. This exercises the same Kafka acknowledgement,
 lineage, validation, DLQ, and replay behavior without claiming compatibility
 with a company poker server.
@@ -17,9 +18,9 @@ No image push or SPCS deployment happens during the offline packaging gate.
 ## Isolated runtime boundary
 
 ```text
-future synthetic simulator
+PokerKit writer -> PostgreSQL trigger -> Debezium
         |
-        | Debezium-shaped JSON + canonical-hand-json-v1 payload
+        | Debezium JSON + poker-hand-protobuf-v1 payload
         v
 poker.sim.cdc-hand-outbox.v1
         |
@@ -35,7 +36,7 @@ poker-adapter:<git-sha>
 Simulation never shares the proposed production CDC, canonical, or DLQ topics.
 The Go process enforces all of the following before opening Kafka:
 
-- `--simulation-mode` and `--allow-fixture-codec` must be supplied together;
+- `--simulation-mode` and `--allow-simulation-codecs` must be supplied together;
 - the input, output, and DLQ topics must be the exact `poker.sim.*` topics;
 - the dataset ID must start with `sim-`; and
 - normal mode remains unavailable because no production decoder is registered.
@@ -60,7 +61,7 @@ default.
 [`adapter-sim.yaml.template`](../infra/snowflake/specs/adapter-sim.yaml.template)
 defines one small CPU container with:
 
-- the explicit simulation and fixture-codec flags;
+- the explicit simulation and simulation-codec flags;
 - a private `/healthz` readiness probe and `/metrics` endpoint;
 - dedicated, least-privilege Kafka SASL credentials injected from the required
   `POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS` secret;
@@ -111,19 +112,27 @@ Both push and deployment require a clean committed worktree and an image tag
 equal to the current 12-character Git SHA. Development images use an obvious
 `dev-<sha>` tag and cannot pass the release guard.
 
-## Next phase: real-time simulator
+## Local simulation verification
 
-The next implementation phase will generate many deterministic PokerKit hands
-and wrap each completed canonical payload in the frozen Debezium/outbox
-envelope. It will publish only to `poker.sim.cdc-hand-outbox.v1` and support:
+Run the complete local path with:
 
-- bounded hand counts and configurable event rates;
-- multiple tenants, tables, sessions, and users;
-- deterministic seeds and replay IDs;
+```bash
+make cdc-sim-e2e
+```
+
+The accepted run wrote eight source rows across four game types. The database
+trigger wrote four eligible outbox rows, Debezium published four CDC records,
+and the Go adapter published four canonical hands with zero dead letters.
+See [`postgres-debezium-simulation.md`](postgres-debezium-simulation.md) for
+the exact topology and runbook.
+
+The next remote phase is to create isolated Confluent topics, release the
+clean-commit image, and deploy the private SPCS adapter. It must also add:
+
 - valid, duplicate, malformed, checksum-failure, and out-of-order scenarios;
 - expected-output manifests for canonical and DLQ counts; and
 - an end-to-end Confluent/SPCS verification that confirms output before source
   offset commit and byte-identical replay after a forced commit failure.
 
-Real PostgreSQL, Debezium, poker-server binaries, and production CDC topics are
-outside the current project scope.
+The external poker-server database, its binary format, and production CDC
+topics are outside the current project scope.

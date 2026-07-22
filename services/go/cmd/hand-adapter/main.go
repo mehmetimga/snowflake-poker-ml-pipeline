@@ -34,12 +34,13 @@ func main() {
 	expectedSchema := flag.String("expected-schema", envDefault("CDC_EXPECTED_SCHEMA", "public"), "allowlisted Debezium source schema")
 	expectedTable := flag.String("expected-table", envDefault("CDC_EXPECTED_TABLE", "hand_completed_outbox"), "allowlisted Debezium source table")
 	allowedTenants := flag.String("allowed-tenants", envDefault("CDC_ALLOWED_TENANTS", "demo"), "comma-separated tenant allowlist; empty allows all only for development")
+	allowedGameTypes := flag.String("allowed-game-types", envDefault("CDC_ALLOWED_GAME_TYPES", "NLH_CASH_6MAX,NLH_TOURNAMENT_6MAX"), "comma-separated game-type allowlist")
 	buildVersion := flag.String("build-version", envDefault("CDC_SERVICE_BUILD_VERSION", "dev"), "immutable service image or source build version")
 	metricsListen := flag.String("metrics-listen", envDefault("CDC_METRICS_LISTEN", "127.0.0.1:9093"), "private health/Prometheus listen address; empty disables")
 	fromBeginning := flag.Bool("from-beginning", false, "start at the earliest offset when no group offset exists")
 	checkKafkaOnly := flag.Bool("check-kafka-only", false, "verify Kafka authentication without consuming")
 	simulationMode := flag.Bool("simulation-mode", envBool("CDC_SIMULATION_MODE", false), "run only on isolated poker.sim.* topics and sim-* datasets")
-	allowFixtureCodec := flag.Bool("allow-fixture-codec", envBool("CDC_ALLOW_FIXTURE_CODEC", false), "allow test-only canonical JSON codec; never enable for real poker traffic")
+	allowSimulationCodecs := flag.Bool("allow-simulation-codecs", envBool("CDC_ALLOW_SIMULATION_CODECS", false), "enable repository-owned simulation codecs")
 	maxPollRecords := flag.Int("max-poll-records", 100, "maximum records returned from one poll")
 	maxRecords := flag.Int("max-records", 0, "stop after committing this many inputs; zero runs continuously")
 	requestTimeout := flag.Duration("request-timeout", 10*time.Second, "Kafka startup and HTTP shutdown timeout")
@@ -50,7 +51,7 @@ func main() {
 	decoders := map[string]cdc.Decoder{}
 	var runtimeConfig cdc.RuntimeConfig
 	if !*checkKafkaOnly {
-		configured, decoderErr := configuredDecoders(*simulationMode, *allowFixtureCodec)
+		configured, decoderErr := configuredDecoders(*simulationMode, *allowSimulationCodecs)
 		if decoderErr != nil {
 			log.Fatal(decoderErr)
 		}
@@ -62,8 +63,9 @@ func main() {
 			Adapter: cdc.Config{
 				DatasetID: *datasetID, DatasetSplit: *datasetSplit,
 				ExpectedDB: *expectedDatabase, ExpectedSchema: *expectedSchema,
-				ExpectedTable:  *expectedTable,
-				AllowedTenants: tenantAllowlist(*allowedTenants),
+				ExpectedTable:    *expectedTable,
+				AllowedTenants:   valueAllowlist(*allowedTenants),
+				AllowedGameTypes: valueAllowlist(*allowedGameTypes),
 			},
 		}
 		var configErr error
@@ -104,9 +106,9 @@ func main() {
 	}
 	metricsServer := startMetricsServer(*metricsListen, *buildVersion, processor)
 	log.Printf(
-		"hand-adapter build=%s input=%s output=%s dlq=%s dataset=%s split=%s simulation=%t fixture_codec=%t",
+		"hand-adapter build=%s input=%s output=%s dlq=%s dataset=%s split=%s simulation=%t simulation_codecs=%t",
 		*buildVersion, *inputTopic, *outputTopic, *deadLetterTopic,
-		*datasetID, *datasetSplit, *simulationMode, *allowFixtureCodec,
+		*datasetID, *datasetSplit, *simulationMode, *allowSimulationCodecs,
 	)
 	processed, runErr := kafkaClient.RunAdapter(ctx, processor, *maxRecords)
 	if metricsServer != nil {
@@ -122,22 +124,25 @@ func main() {
 	log.Printf("hand-adapter stopped cleanly processed=%d metrics=%+v", processed, processor.Metrics())
 }
 
-func configuredDecoders(simulationMode, allowFixtureCodec bool) (map[string]cdc.Decoder, error) {
-	if allowFixtureCodec && !simulationMode {
-		return nil, fmt.Errorf("--allow-fixture-codec requires --simulation-mode")
+func configuredDecoders(simulationMode, allowSimulationCodecs bool) (map[string]cdc.Decoder, error) {
+	if allowSimulationCodecs && !simulationMode {
+		return nil, fmt.Errorf("--allow-simulation-codecs requires --simulation-mode")
 	}
-	if simulationMode && !allowFixtureCodec {
-		return nil, fmt.Errorf("--simulation-mode requires --allow-fixture-codec")
+	if simulationMode && !allowSimulationCodecs {
+		return nil, fmt.Errorf("--simulation-mode requires --allow-simulation-codecs")
 	}
 	if simulationMode {
-		return map[string]cdc.Decoder{cdc.FixtureCodec: cdc.CanonicalJSONDecoder{}}, nil
+		return map[string]cdc.Decoder{
+			cdc.FixtureCodec:            cdc.CanonicalJSONDecoder{},
+			cdc.SimulationProtobufCodec: cdc.SimulationProtobufDecoder{},
+		}, nil
 	}
 	return nil, fmt.Errorf(
 		"no production poker-server decoder is registered; this project currently supports isolated simulation only",
 	)
 }
 
-func tenantAllowlist(value string) map[string]bool {
+func valueAllowlist(value string) map[string]bool {
 	allowlist := map[string]bool{}
 	for _, tenant := range splitNonEmpty(value) {
 		allowlist[tenant] = true

@@ -32,7 +32,10 @@ def test_simulation_adapter_spec_is_private_and_topic_isolated(
 
     assert container["name"] == "hand-adapter-sim"
     assert container["image"].endswith("poker-adapter:0123456789ab")
-    assert container["args"][:2] == ["--simulation-mode", "--allow-fixture-codec"]
+    assert container["args"][:2] == [
+        "--simulation-mode",
+        "--allow-simulation-codecs",
+    ]
     assert container["env"]["CDC_DATASET_ID"] == "sim-cdc-v1"
     assert container["env"]["CDC_ALLOWED_TENANTS"] == "tenant-a,tenant-b"
     assert container["env"]["KAFKA_CDC_HAND_OUTBOX_TOPIC"] == (

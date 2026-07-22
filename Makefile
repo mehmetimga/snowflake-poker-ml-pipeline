@@ -4,6 +4,7 @@
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
 .PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
 .PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim phase-c2-packaging-check
+.PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -94,6 +95,12 @@ TRITON_HTTP_URL ?= http://127.0.0.1:8000
 GO_RISK_FLAGS ?=
 GO_RISK_KAFKA_FLAGS ?=
 GO_HAND_ADAPTER_FLAGS ?=
+CDC_SIM_HANDS ?= 8
+CDC_SIM_EXPECTED_CANONICAL ?= 4
+CDC_SIM_SOURCE_DATASET_ID := sim-cdc-smoke-$(shell date -u +%Y%m%d%H%M%S)
+CDC_SIM_START_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+CDC_SIM_GROUP_ID := poker-go-hand-adapter-cdc-sim-$(shell date +%s)
+CDC_SIM_POSTGRES_DSN ?= postgresql://poker_sim:poker_sim@localhost:5433/poker_sim
 RISK_SCORE_CHECK_FLAGS ?=
 WORLD_REPLAY_MODE ?= accelerated
 WORLD_REPLAY_RATE ?= 100
@@ -190,6 +197,9 @@ help:
 	@echo "  go-hand-adapter-kafka-check Verify adapter Kafka authentication only"
 	@echo "  phase-c2-runtime-check Run the complete offline C2 runtime gate"
 	@echo "  phase-c2-packaging-check Verify the isolated simulation adapter image/spec"
+	@echo "  cdc-sim-up   Start local PostgreSQL, Kafka, and Debezium containers"
+	@echo "  cdc-sim-e2e  Run the PostgreSQL -> Debezium -> Kafka -> Go smoke test"
+	@echo "  cdc-sim-stop Stop Debezium and PostgreSQL while retaining their volume"
 	@echo "  c2-adapter-build Build the linux/amd64 simulation adapter image"
 	@echo "  c2-adapter-image-smoke Check the locally built adapter executable"
 	@echo "  c2-adapter-push Push a clean-commit adapter image to Snowflake registry"
@@ -950,7 +960,7 @@ go-hand-adapter:
 
 go-hand-adapter-sim:
 	cd $(GO_RISK_DIR) && $(GO) run ./cmd/hand-adapter \
-		--simulation-mode --allow-fixture-codec \
+		--simulation-mode --allow-simulation-codecs \
 		--input-topic poker.sim.cdc-hand-outbox.v1 \
 		--output-topic poker.sim.hands.raw.v1 \
 		--dead-letter-topic poker.sim.pipeline.dead-letter.v1 \
@@ -961,6 +971,59 @@ go-hand-adapter-kafka-check:
 		$(GO_HAND_ADAPTER_FLAGS)
 
 phase-c2-runtime-check: phase-c2-readiness-check go-hand-adapter-test
+
+cdc-sim-config-check:
+	docker compose --profile cdc-sim config --quiet
+	$(PY) scripts/register_debezium_sim.py --check-only
+	$(PY) scripts/simulate_postgres_cdc.py --dry-run --hands $(CDC_SIM_HANDS) \
+		--rate 0 --dataset-id $(CDC_SIM_SOURCE_DATASET_ID) \
+		--start-at $(CDC_SIM_START_AT)
+
+cdc-sim-up:
+	docker compose --profile cdc-sim up -d kafka postgres-cdc debezium-connect
+
+cdc-sim-topics:
+	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9094 --create --if-not-exists \
+		--topic poker.sim.cdc-hand-outbox.v1 --partitions 3 --replication-factor 1
+	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9094 --create --if-not-exists \
+		--topic poker.sim.hands.raw.v1 --partitions 3 --replication-factor 1
+	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9094 --create --if-not-exists \
+		--topic poker.sim.pipeline.dead-letter.v1 --partitions 3 --replication-factor 1
+
+cdc-sim-register:
+	$(PY) scripts/register_debezium_sim.py --timeout 120
+
+cdc-sim-status:
+	docker compose --profile cdc-sim ps kafka postgres-cdc debezium-connect
+	$(PY) scripts/register_debezium_sim.py --status-only --timeout 15
+
+cdc-sim-generate:
+	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) $(PY) scripts/simulate_postgres_cdc.py \
+		--hands $(CDC_SIM_HANDS) --rate 0 \
+		--dataset-id $(CDC_SIM_SOURCE_DATASET_ID) --start-at $(CDC_SIM_START_AT)
+
+cdc-sim-verify:
+	$(PY) scripts/check_postgres_cdc_simulation.py \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--source-dataset-id $(CDC_SIM_SOURCE_DATASET_ID) \
+		--expected-source-rows $(CDC_SIM_HANDS) \
+		--expected-canonical-records $(CDC_SIM_EXPECTED_CANONICAL)
+
+cdc-sim-e2e: cdc-sim-up cdc-sim-topics cdc-sim-register
+	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records $(CDC_SIM_EXPECTED_CANONICAL) --group-id $(CDC_SIM_GROUP_ID) --metrics-listen=" & \
+	adapter_pid=$$!; \
+	sleep 3; \
+	$(MAKE) cdc-sim-generate CDC_SIM_SOURCE_DATASET_ID=$(CDC_SIM_SOURCE_DATASET_ID) CDC_SIM_START_AT=$(CDC_SIM_START_AT); \
+	wait $$adapter_pid
+	$(MAKE) cdc-sim-verify CDC_SIM_SOURCE_DATASET_ID=$(CDC_SIM_SOURCE_DATASET_ID)
+
+cdc-sim-stop:
+	docker compose --profile cdc-sim stop debezium-connect postgres-cdc
+
+phase-c2-cdc-simulation-check: phase-c2-packaging-check cdc-sim-config-check
 
 clean:
 	rm -f data/parquet/*.duckdb data/parquet/*.parquet

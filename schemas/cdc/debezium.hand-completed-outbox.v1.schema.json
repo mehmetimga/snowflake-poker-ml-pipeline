@@ -32,6 +32,7 @@
         "payload_schema_version",
         "tenant_id",
         "product_id",
+        "game_type",
         "occurred_at",
         "emitted_at",
         "codec_version",
@@ -46,6 +47,7 @@
         "payload_schema_version": {"const": 1},
         "tenant_id": {"type": "string", "minLength": 1},
         "product_id": {"type": "string", "minLength": 1},
+        "game_type": {"type": "string", "minLength": 1},
         "occurred_at": {"type": "string", "format": "date-time"},
         "emitted_at": {"type": "string", "format": "date-time"},
         "codec_version": {"type": "string", "minLength": 1},
@@ -76,8 +78,8 @@
       "required": ["id", "total_order", "data_collection_order"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "total_order": {"type": "string", "minLength": 1},
-        "data_collection_order": {"type": "string", "minLength": 1}
+        "total_order": {"type": "integer", "minimum": 0},
+        "data_collection_order": {"type": "integer", "minimum": 0}
       }
     }
   }

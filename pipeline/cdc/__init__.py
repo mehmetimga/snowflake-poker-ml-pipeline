@@ -1,7 +1,8 @@
-"""Future PostgreSQL/Debezium ingress contracts.
+"""PostgreSQL/Debezium ingress and local simulation contracts.
 
-This package is executable readiness code.  It does not connect to a poker
-server, PostgreSQL, Debezium, or Kafka by itself.
+The production decoder remains intentionally absent. Connection-owning
+simulation commands live under ``scripts/``; this package keeps mapping,
+binary codecs, and database writer boundaries testable in isolation.
 """
 
 from .hand_history import (
@@ -16,6 +17,12 @@ from .hand_history import (
     adapt_debezium_hand_change,
     cdc_lineage_headers,
 )
+from .simulation_codec import (
+    SIMULATION_PROTOBUF_CODEC_VERSION,
+    SimulationProtobufV1Decoder,
+    encode_simulation_hand,
+    public_hand_payload,
+)
 
 __all__ = [
     "CDC_HAND_OUTBOX_TOPIC",
@@ -28,4 +35,8 @@ __all__ = [
     "KafkaSourcePosition",
     "adapt_debezium_hand_change",
     "cdc_lineage_headers",
+    "SIMULATION_PROTOBUF_CODEC_VERSION",
+    "SimulationProtobufV1Decoder",
+    "encode_simulation_hand",
+    "public_hand_payload",
 ]

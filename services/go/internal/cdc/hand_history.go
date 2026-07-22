@@ -24,6 +24,7 @@ const (
 	SimulationDeadLetterTopic = "poker.sim.pipeline.dead-letter.v1"
 	HandEventType             = "poker.hand.completed"
 	FixtureCodec              = "canonical-hand-json-v1"
+	SimulationProtobufCodec   = "poker-hand-protobuf-v1"
 	expectedAggregate         = "poker-hand"
 	payloadSchemaV1           = 1
 )
@@ -40,12 +41,13 @@ func reject(code, format string, args ...any) error {
 }
 
 type Config struct {
-	DatasetID      string
-	DatasetSplit   string
-	ExpectedDB     string
-	ExpectedSchema string
-	ExpectedTable  string
-	AllowedTenants map[string]bool
+	DatasetID        string
+	DatasetSplit     string
+	ExpectedDB       string
+	ExpectedSchema   string
+	ExpectedTable    string
+	AllowedTenants   map[string]bool
+	AllowedGameTypes map[string]bool
 }
 
 func (c Config) withDefaults() Config {
@@ -82,8 +84,8 @@ type source struct {
 
 type transaction struct {
 	ID                  string `json:"id"`
-	TotalOrder          string `json:"total_order"`
-	DataCollectionOrder string `json:"data_collection_order"`
+	TotalOrder          int64  `json:"total_order"`
+	DataCollectionOrder int64  `json:"data_collection_order"`
 }
 
 type change struct {
@@ -103,6 +105,7 @@ type outboxRow struct {
 	PayloadSchemaVersion int    `json:"payload_schema_version"`
 	TenantID             string `json:"tenant_id"`
 	ProductID            string `json:"product_id"`
+	GameType             string `json:"game_type"`
 	OccurredAt           string `json:"occurred_at"`
 	EmittedAt            string `json:"emitted_at"`
 	CodecVersion         string `json:"codec_version"`
@@ -165,14 +168,15 @@ type Lineage struct {
 	SourceLSN                  int64
 	SourceTxID                 *int64
 	TransactionID              string
-	TransactionTotalOrder      string
-	TransactionCollectionOrder string
+	TransactionTotalOrder      int64
+	TransactionCollectionOrder int64
 	Operation                  string
 	Snapshot                   string
 	SourceTSMS                 int64
 	ConnectorTSMS              int64
 	OutboxID                   string
 	PayloadSHA256              string
+	GameType                   string
 	SourcePosition             *SourcePosition
 }
 
@@ -191,13 +195,17 @@ type AdaptedHand struct {
 
 type Decoder interface {
 	Version() string
-	Decode(payload []byte) (json.RawMessage, error)
+	Decode(payload []byte, context DecodeContext) (json.RawMessage, error)
+}
+
+type DecodeContext struct {
+	GameType string
 }
 
 type CanonicalJSONDecoder struct{}
 
 func (CanonicalJSONDecoder) Version() string { return FixtureCodec }
-func (CanonicalJSONDecoder) Decode(payload []byte) (json.RawMessage, error) {
+func (CanonicalJSONDecoder) Decode(payload []byte, _ DecodeContext) (json.RawMessage, error) {
 	if !json.Valid(payload) {
 		return nil, reject("invalid_binary_payload", "fixture codec payload is not JSON")
 	}
@@ -405,13 +413,13 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 		return AdaptedHand{}, reject("missing_after_image", "record has no completed outbox row")
 	}
 	var row outboxRow
-	if err := requireFields(changeEvent.After, "id", "aggregate_type", "aggregate_id", "event_type", "payload_schema_version", "tenant_id", "product_id", "occurred_at", "emitted_at", "codec_version", "payload_sha256", "payload"); err != nil {
+	if err := requireFields(changeEvent.After, "id", "aggregate_type", "aggregate_id", "event_type", "payload_schema_version", "tenant_id", "product_id", "game_type", "occurred_at", "emitted_at", "codec_version", "payload_sha256", "payload"); err != nil {
 		return AdaptedHand{}, reject("invalid_envelope", "outbox row violates v1: %v", err)
 	}
 	if err := decodeStrict(changeEvent.After, &row); err != nil {
 		return AdaptedHand{}, reject("invalid_envelope", "outbox row violates v1: %v", err)
 	}
-	if !validUUID(row.ID) || row.AggregateType != expectedAggregate || row.AggregateID == "" || row.EventType != HandEventType || row.PayloadSchemaVersion != payloadSchemaV1 || row.TenantID == "" || row.ProductID == "" || row.CodecVersion == "" || row.Payload == "" || !validLowerHex64(row.PayloadSHA256) {
+	if !validUUID(row.ID) || row.AggregateType != expectedAggregate || row.AggregateID == "" || row.EventType != HandEventType || row.PayloadSchemaVersion != payloadSchemaV1 || row.TenantID == "" || row.ProductID == "" || row.GameType == "" || row.CodecVersion == "" || row.Payload == "" || !validLowerHex64(row.PayloadSHA256) {
 		return AdaptedHand{}, reject("invalid_envelope", "outbox identity fields are invalid")
 	}
 	snapshot, err := snapshotText(changeEvent.Source.Snapshot)
@@ -427,8 +435,8 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 	if changeEvent.Source.Connector != "postgresql" || changeEvent.Source.Version == "" || changeEvent.Source.Name == "" || changeEvent.Source.DB == "" || changeEvent.Source.LSN == nil || *changeEvent.Source.LSN < 0 || changeEvent.Source.TSMS == nil || *changeEvent.Source.TSMS < 0 || changeEvent.TSMS == nil || *changeEvent.TSMS < 0 {
 		return AdaptedHand{}, reject("invalid_envelope", "Debezium source lineage is incomplete")
 	}
-	if changeEvent.Transaction != nil && (changeEvent.Transaction.ID == "" || changeEvent.Transaction.TotalOrder == "" || changeEvent.Transaction.DataCollectionOrder == "") {
-		return AdaptedHand{}, reject("invalid_envelope", "transaction lineage fields must be non-empty")
+	if changeEvent.Transaction != nil && (changeEvent.Transaction.ID == "" || changeEvent.Transaction.TotalOrder < 0 || changeEvent.Transaction.DataCollectionOrder < 0) {
+		return AdaptedHand{}, reject("invalid_envelope", "transaction lineage fields are invalid")
 	}
 	if changeEvent.Source.Schema != config.ExpectedSchema || changeEvent.Source.Table != config.ExpectedTable {
 		return AdaptedHand{}, reject("unexpected_source_table", "unexpected source %s.%s", changeEvent.Source.Schema, changeEvent.Source.Table)
@@ -438,6 +446,9 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 	}
 	if len(config.AllowedTenants) > 0 && !config.AllowedTenants[row.TenantID] {
 		return AdaptedHand{}, reject("tenant_not_allowed", "tenant %q is not allowlisted", row.TenantID)
+	}
+	if len(config.AllowedGameTypes) > 0 && !config.AllowedGameTypes[row.GameType] {
+		return AdaptedHand{}, reject("game_type_not_allowed", "game type %q is not allowlisted", row.GameType)
 	}
 	if position != nil {
 		copy := *position
@@ -468,7 +479,7 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 	if decoder.Version() != row.CodecVersion {
 		return AdaptedHand{}, reject("decoder_identity_mismatch", "decoder and row versions differ")
 	}
-	payload, err := decoder.Decode(binary)
+	payload, err := decoder.Decode(binary, DecodeContext{GameType: row.GameType})
 	if err != nil {
 		return AdaptedHand{}, err
 	}
@@ -479,7 +490,7 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 	eventID := uuidV5URL(strings.Join([]string{config.DatasetID, config.DatasetSplit, HandEventType, row.AggregateID}, ":"))
 	traceID := uuidV5URL(strings.Join([]string{config.DatasetID, config.DatasetSplit, "trace", row.AggregateID}, ":"))
 	event := Event{EventID: eventID, EventType: HandEventType, SchemaVersion: 1, TenantID: row.TenantID, ProductID: row.ProductID, DatasetID: config.DatasetID, DatasetSplit: config.DatasetSplit, OccurredAt: occurredAt.Format(time.RFC3339Nano), EmittedAt: emittedAt.Format(time.RFC3339Nano), TraceID: traceID, Payload: payload}
-	lineage := Lineage{Connector: changeEvent.Source.Connector, ConnectorName: changeEvent.Source.Name, Database: changeEvent.Source.DB, Schema: changeEvent.Source.Schema, Table: changeEvent.Source.Table, SourceLSN: *changeEvent.Source.LSN, SourceTxID: changeEvent.Source.TxID, Operation: changeEvent.Operation, Snapshot: snapshot, SourceTSMS: *changeEvent.Source.TSMS, ConnectorTSMS: *changeEvent.TSMS, OutboxID: row.ID, PayloadSHA256: row.PayloadSHA256, SourcePosition: position}
+	lineage := Lineage{Connector: changeEvent.Source.Connector, ConnectorName: changeEvent.Source.Name, Database: changeEvent.Source.DB, Schema: changeEvent.Source.Schema, Table: changeEvent.Source.Table, SourceLSN: *changeEvent.Source.LSN, SourceTxID: changeEvent.Source.TxID, Operation: changeEvent.Operation, Snapshot: snapshot, SourceTSMS: *changeEvent.Source.TSMS, ConnectorTSMS: *changeEvent.TSMS, OutboxID: row.ID, PayloadSHA256: row.PayloadSHA256, GameType: row.GameType, SourcePosition: position}
 	if changeEvent.Transaction != nil {
 		lineage.TransactionID = changeEvent.Transaction.ID
 		lineage.TransactionTotalOrder = changeEvent.Transaction.TotalOrder
@@ -495,15 +506,18 @@ func Adapt(value []byte, config Config, decoders map[string]Decoder, position *S
 	if lineage.SourceTxID != nil {
 		headers = appendLineage(headers, "cdc_source_tx_id", *lineage.SourceTxID)
 	}
-	headers = appendLineage(headers, "cdc_transaction_id", lineage.TransactionID)
-	headers = appendLineage(headers, "cdc_transaction_total_order", lineage.TransactionTotalOrder)
-	headers = appendLineage(headers, "cdc_transaction_collection_order", lineage.TransactionCollectionOrder)
+	if lineage.TransactionID != "" {
+		headers = appendLineage(headers, "cdc_transaction_id", lineage.TransactionID)
+		headers = appendLineage(headers, "cdc_transaction_total_order", lineage.TransactionTotalOrder)
+		headers = appendLineage(headers, "cdc_transaction_collection_order", lineage.TransactionCollectionOrder)
+	}
 	headers = appendLineage(headers, "cdc_operation", lineage.Operation)
 	headers = appendLineage(headers, "cdc_snapshot", lineage.Snapshot)
 	headers = appendLineage(headers, "cdc_source_ts_ms", lineage.SourceTSMS)
 	headers = appendLineage(headers, "cdc_connector_ts_ms", lineage.ConnectorTSMS)
 	headers = appendLineage(headers, "cdc_outbox_id", lineage.OutboxID)
 	headers = appendLineage(headers, "cdc_payload_sha256", lineage.PayloadSHA256)
+	headers = appendLineage(headers, "cdc_game_type", lineage.GameType)
 	if position != nil {
 		headers = appendLineage(headers, "cdc_source_topic", position.Topic)
 		headers = appendLineage(headers, "cdc_source_partition", position.Partition)

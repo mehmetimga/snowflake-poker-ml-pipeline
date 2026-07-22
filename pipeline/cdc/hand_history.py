@@ -84,8 +84,8 @@ class DebeziumSource(_DebeziumModel):
 
 class DebeziumTransaction(_DebeziumModel):
     id: str = Field(min_length=1)
-    total_order: str = Field(min_length=1)
-    data_collection_order: str = Field(min_length=1)
+    total_order: int = Field(ge=0)
+    data_collection_order: int = Field(ge=0)
 
 
 class HandCompletedOutboxRow(_StrictModel):
@@ -98,6 +98,7 @@ class HandCompletedOutboxRow(_StrictModel):
     payload_schema_version: Literal[1]
     tenant_id: str = Field(min_length=1)
     product_id: str = Field(min_length=1)
+    game_type: str = Field(min_length=1)
     occurred_at: datetime
     emitted_at: datetime
     codec_version: str = Field(min_length=1)
@@ -138,6 +139,7 @@ class CdcAdapterConfig(_StrictModel):
     expected_schema: str = Field(default="public", min_length=1)
     expected_table: str = Field(default="hand_completed_outbox", min_length=1)
     allowed_tenants: tuple[str, ...] = ()
+    allowed_game_types: tuple[str, ...] = ()
 
 
 class KafkaSourcePosition(_StrictModel):
@@ -155,14 +157,15 @@ class CdcLineage(_StrictModel):
     source_lsn: int
     source_tx_id: int | None
     transaction_id: str | None
-    transaction_total_order: str | None
-    transaction_collection_order: str | None
+    transaction_total_order: int | None
+    transaction_collection_order: int | None
     operation: Literal["c", "r"]
     snapshot: str
     source_ts_ms: int
     connector_ts_ms: int
     outbox_id: uuid.UUID
     payload_sha256: str
+    game_type: str
     kafka_topic: str | None = None
     kafka_partition: int | None = None
     kafka_offset: int | None = None
@@ -268,14 +271,13 @@ def cdc_lineage_headers(lineage: CdcLineage) -> KafkaHeaders:
         ("cdc_connector_ts_ms", lineage.connector_ts_ms),
         ("cdc_outbox_id", lineage.outbox_id),
         ("cdc_payload_sha256", lineage.payload_sha256),
+        ("cdc_game_type", lineage.game_type),
         ("cdc_source_topic", lineage.kafka_topic),
         ("cdc_source_partition", lineage.kafka_partition),
         ("cdc_source_offset", lineage.kafka_offset),
     )
     return tuple(
-        (key, str(value).encode("utf-8"))
-        for key, value in values
-        if value is not None
+        (key, str(value).encode("utf-8")) for key, value in values if value is not None
     )
 
 
@@ -355,13 +357,17 @@ def adapt_debezium_hand_change(
         )
     if change.before is not None:
         raise CdcRecordRejected(
-            "invalid_before_image", "create/snapshot records must not carry a before row"
+            "invalid_before_image",
+            "create/snapshot records must not carry a before row",
         )
     if change.after is None:
-        raise CdcRecordRejected("missing_after_image", "record has no completed outbox row")
+        raise CdcRecordRejected(
+            "missing_after_image", "record has no completed outbox row"
+        )
     if change.op == "r" and _snapshot_text(change.source.snapshot) == "false":
         raise CdcRecordRejected(
-            "invalid_snapshot_marker", "snapshot read operation requires snapshot lineage"
+            "invalid_snapshot_marker",
+            "snapshot read operation requires snapshot lineage",
         )
     if change.op == "c" and change.source.tx_id is None:
         raise CdcRecordRejected(
@@ -373,6 +379,11 @@ def adapt_debezium_hand_change(
     if config.allowed_tenants and row.tenant_id not in config.allowed_tenants:
         raise CdcRecordRejected(
             "tenant_not_allowed", f"tenant {row.tenant_id!r} is not allowlisted"
+        )
+    if config.allowed_game_types and row.game_type not in config.allowed_game_types:
+        raise CdcRecordRejected(
+            "game_type_not_allowed",
+            f"game type {row.game_type!r} is not allowlisted",
         )
 
     raw_payload = _decode_binary(row)
@@ -439,6 +450,7 @@ def adapt_debezium_hand_change(
         connector_ts_ms=change.ts_ms,
         outbox_id=row.id,
         payload_sha256=row.payload_sha256,
+        game_type=row.game_type,
         kafka_topic=source_position.topic if source_position else None,
         kafka_partition=source_position.partition if source_position else None,
         kafka_offset=source_position.offset if source_position else None,

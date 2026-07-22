@@ -30,6 +30,55 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
+  postgres-cdc:
+    image: postgres:17.5-bookworm
+    container_name: poker-postgres-cdc
+    profiles: ["cdc-sim"]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: poker_sim
+      POSTGRES_USER: poker_sim
+      POSTGRES_PASSWORD: poker_sim
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+    volumes:
+      - postgres_cdc_data:/var/lib/postgresql/data
+      - ./infra/simulation/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poker_sim -d poker_sim"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  debezium-connect:
+    image: quay.io/debezium/connect:3.6
+    container_name: poker-debezium-connect
+    profiles: ["cdc-sim"]
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres-cdc:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9094
+      GROUP_ID: poker-debezium-connect-sim-v1
+      CONFIG_STORAGE_TOPIC: poker.sim.connect-configs.v1
+      OFFSET_STORAGE_TOPIC: poker.sim.connect-offsets.v1
+      STATUS_STORAGE_TOPIC: poker.sim.connect-statuses.v1
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      REST_HOST_NAME: 0.0.0.0
+
   generator:
     build:
       context: .
@@ -114,3 +163,4 @@ services:
 
 volumes:
   qdrant_storage:
+  postgres_cdc_data:

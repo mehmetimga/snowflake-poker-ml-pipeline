@@ -10,14 +10,14 @@ func TestConfiguredDecodersRequiresExplicitIsolatedSimulation(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		simulation bool
-		fixture    bool
+		codecs     bool
 	}{
-		{name: "no production decoder", simulation: false, fixture: false},
-		{name: "fixture outside simulation", simulation: false, fixture: true},
-		{name: "simulation without fixture", simulation: true, fixture: false},
+		{name: "no production decoder", simulation: false, codecs: false},
+		{name: "codecs outside simulation", simulation: false, codecs: true},
+		{name: "simulation without codecs", simulation: true, codecs: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := configuredDecoders(test.simulation, test.fixture); err == nil {
+			if _, err := configuredDecoders(test.simulation, test.codecs); err == nil {
 				t.Fatal("unsafe decoder mode was accepted")
 			}
 		})
@@ -30,5 +30,8 @@ func TestConfiguredDecodersRequiresExplicitIsolatedSimulation(t *testing.T) {
 	decoder, ok := decoders[cdc.FixtureCodec]
 	if !ok || decoder.Version() != cdc.FixtureCodec {
 		t.Fatalf("simulation codec registry is wrong: %v", decoders)
+	}
+	if _, ok := decoders[cdc.SimulationProtobufCodec]; !ok {
+		t.Fatal("simulation Protobuf decoder is not registered")
 	}
 }

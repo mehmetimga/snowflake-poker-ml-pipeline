@@ -8,6 +8,7 @@
     "payload_schema_version": 1,
     "tenant_id": "demo",
     "product_id": "poker",
+    "game_type": "NLH_CASH_6MAX",
     "occurred_at": "2026-07-21T10:00:00Z",
     "emitted_at": "2026-07-21T10:00:01Z",
     "codec_version": "canonical-hand-json-v1",
@@ -32,7 +33,7 @@
   "ts_ns": 1784628001050000000,
   "transaction": {
     "id": "9001:270113177",
-    "total_order": "1",
-    "data_collection_order": "1"
+    "total_order": 1,
+    "data_collection_order": 1
   }
 }

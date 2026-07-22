@@ -35,8 +35,9 @@ Kafka feeds the live pipeline.
 Snowflake feeds model training.
 ```
 
-For the current project, immutable files feed Kafka directly. PostgreSQL,
-Debezium, and access to a real poker server are not runtime dependencies.
+The main frozen dataset path still feeds Kafka directly. An isolated local
+simulation now also uses PostgreSQL and Debezium to prove the future CDC
+boundary. Access to a real poker server is not a runtime dependency.
 
 No producer may bypass Kafka and write a live hand directly into a feature or
 training table. A batch loader may ingest a frozen dataset into raw Snowflake
@@ -775,11 +776,14 @@ but remained below CatBoost on both benchmarks, so it is not a serving input.
 
 ### Stage 6: CDC-shaped real-time simulation
 
-- Generate deterministic PokerKit hands and wrap completed payloads in the
-  frozen Debezium/outbox envelope.
-- Publish the envelopes only to the isolated simulation ingress topic.
-- Run the versioned Go hand adapter in `POKER_ADAPTER_SIM`.
-- Validate direct-versus-simulated-CDC canonical parity and failure recovery.
+- [x] Generate deterministic PokerKit hands as Protobuf bytes in PostgreSQL.
+- [x] Filter allowed game types transactionally into an immutable outbox.
+- [x] Run Debezium against logical WAL and publish only to the isolated local
+  simulation ingress topic.
+- [x] Run the versioned Go hand adapter locally and validate canonical output,
+  lineage, topic keys, and zero-DLQ acceptance.
+- [ ] Add fault/replay manifests and run the same adapter image in
+  `POKER_ADAPTER_SIM` against isolated Confluent topics.
 - Feed simulated user/account context directly to separate Kafka topics.
 
 Accept when the simulation produces expected canonical/DLQ counts, complete
@@ -798,8 +802,8 @@ The next build slice is deliberately small:
 6. Persist raw events and temporal context in Snowflake.
 7. Preserve a versioned canonical boundary for future Debezium integration.
 
-The offline Debezium-to-canonical contract, fixture adapters, Go
+The offline contract, local PostgreSQL/Debezium simulation, Protobuf codec, Go
 publish-or-DLQ-before-commit runtime, Docker image, and private simulation SPCS
-specification are now implemented. The next slice is the real-time synthetic
-envelope generator and isolated Confluent/SPCS replay. Real PostgreSQL,
-Debezium, and poker-server binary ingestion are outside current project scope.
+specification are now implemented. The next slice is fault/replay coverage and
+an isolated Confluent/SPCS replay. The external poker-server database and real
+binary codec remain outside current project scope.

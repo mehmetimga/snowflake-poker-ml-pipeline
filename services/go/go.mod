@@ -2,7 +2,10 @@ module github.com/ai-campions/snowflake-poker-ml-pipeline/services/go
 
 go 1.23.8
 
-require github.com/twmb/franz-go v1.19.5
+require (
+	github.com/twmb/franz-go v1.19.5
+	google.golang.org/protobuf v1.36.6
+)
 
 require (
 	github.com/klauspost/compress v1.18.0 // indirect

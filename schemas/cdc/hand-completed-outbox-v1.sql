@@ -8,6 +8,7 @@ CREATE TABLE public.hand_completed_outbox (
     payload_schema_version INTEGER     NOT NULL CHECK (payload_schema_version = 1),
     tenant_id              TEXT        NOT NULL,
     product_id             TEXT        NOT NULL,
+    game_type              TEXT        NOT NULL,
     occurred_at            TIMESTAMPTZ NOT NULL,
     emitted_at             TIMESTAMPTZ NOT NULL CHECK (emitted_at >= occurred_at),
     codec_version          TEXT        NOT NULL,

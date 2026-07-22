@@ -117,16 +117,20 @@ make go-hand-adapter-kafka-check
 
 This project intentionally does not ingest production poker-server data.
 Normal mode fails closed because no production decoder is registered. The
-fixture decoder requires `--simulation-mode`, exact `poker.sim.*` topics, and
-a `sim-*` dataset ID. Run it with:
+repository-owned JSON fixture and Protobuf simulation decoders require
+`--simulation-mode` plus `--allow-simulation-codecs`, exact `poker.sim.*`
+topics, and a `sim-*` dataset ID. Run the adapter or full local CDC path with:
 
 ```bash
 make go-hand-adapter-sim
 make phase-c2-packaging-check
+make cdc-sim-e2e
 ```
 
 The adapter is packaged by `Dockerfile.adapter`; its private simulation SPCS
 contract is `infra/snowflake/specs/adapter-sim.yaml.template`. See
 [`docs/debezium-hand-history-ingress.md`](../../docs/debezium-hand-history-ingress.md)
 and [`docs/spcs-c2-adapter-simulation.md`](../../docs/spcs-c2-adapter-simulation.md)
-for the source contract, safety policy, and deployment boundary.
+for the source contract, safety policy, and deployment boundary. The complete
+local topology and operating commands are in
+[`docs/postgres-debezium-simulation.md`](../../docs/postgres-debezium-simulation.md).

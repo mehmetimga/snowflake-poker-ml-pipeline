@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 17 |
+| Plan version | 18 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Build the isolated real-time PokerKit CDC-envelope simulator and verify it through Confluent and `POKER_ADAPTER_SIM` |
+| Immediate next phase | Add CDC failure/replay scenarios, then repeat the isolated simulation through Confluent and `POKER_ADAPTER_SIM` |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -409,14 +409,17 @@ Prometheus rules, Grafana dashboard, and Streamlit page are documented in
 
 ## 6. Phase C — Target runtime and real-data shadow evaluation
 
-Status: `COMPLETE` for C1 and C2 offline contract/runtime/packaging readiness. Immutable images,
+Status: `COMPLETE` for C1 and C2 local contract/runtime/packaging plus
+PostgreSQL/Debezium simulation. Immutable images,
 governed model artifacts, live SPCS services, periodic checkpoints, two-job
 savepoint restore, post-restore online/offline parity, scorer recovery, and a
 bounded end-to-end replay are verified. The proposed outbox/envelope contract,
 Python and Go mapping, binary codec seam, lineage, parity fixtures, and the Go
 publish-or-DLQ-before-commit runtime, isolated simulation topics, adapter
-image, and private SPCS specification are also verified. Live simulation is
-`NEXT`. Real poker-server ingestion is outside the current project scope;
+image, private SPCS specification, local logical-WAL source, database filter,
+Debezium connector, deterministic Protobuf codec, and bounded Kafka replay are
+also verified. Remote Confluent/SPCS simulation is `NEXT`. Real poker-server
+ingestion is outside the current project scope;
 real-data C3–C5 remain deferred until independently reviewed data and labels
 exist.
 
@@ -464,8 +467,16 @@ new checkpoints, and passed a collision-aware post-restore replay.
   publish-before-commit recovery tests.
 - [x] Package the adapter in its own immutable Docker image and private
   simulation-only SPCS service specification.
-- [ ] Build the deterministic PokerKit CDC-envelope simulator and prove the
-  commit-after-ack behavior through isolated Confluent topics and SPCS.
+- [x] Build a deterministic PokerKit writer backed by a real local PostgreSQL
+  logical-WAL source, transactional game-type-filtered outbox, and Debezium
+  connector.
+- [x] Define `poker-hand-protobuf-v1`, generate Python/Go bindings, remove
+  private truth before encoding, and verify one shared binary fixture in both
+  languages.
+- [x] Prove locally that 8 source rows become exactly 4 allowlisted CDC records,
+  4 acknowledged canonical records, 0 DLQ records, and 4 pre-Kafka exclusions.
+- [ ] Add malformed/checksum/replay/commit-recovery scenario manifests and
+  repeat the proof through isolated Confluent topics and `POKER_ADAPTER_SIM`.
 
 The frozen mapping, ownership boundary, operation policy, connector settings,
 and remaining simulation gates are documented in
@@ -888,3 +899,4 @@ Add dated entries here as phases move:
 | 2026-07-21 | C2 readiness | Froze a proposed immutable hand-completed outbox, raw Debezium PostgreSQL envelope, base64/checksum boundary, exact codec registry, deterministic canonical mapping, source headers, and warehouse audit lineage. Added shared fixtures and matching Python/Go adapters; widened canonical v1 `generator` to accept `poker-server` without changing existing PokerKit records. | `make phase-c2-readiness-check`: 12 Python tests, 5 Go tests, and deterministic fixture report passed; direct and CDC event ID `f00d27af-a72b-58bd-8180-14d6e38d3040`, trace ID `e6dae691-09f7-523b-aece-0fa0a67d3609`, LSN `270113177`, tx `9001`; snapshot/replay, plugin codec, mutation, tombstone, checksum, schema drift, private truth, and DuckDB audit paths passed | Offline C2 contract readiness complete. No PostgreSQL, Debezium, connector, Kafka record, Docker image, SPCS service, model, threshold, or rule changed. Go service loop/DLQ is next; real codec and live deploy remain blocked on poker-platform inputs |
 | 2026-07-22 | C2 runtime | Added the Go hand-adapter polling command and processor, canonical plus lineage-header transport, deterministic hash-only DLQ contract, publish-or-DLQ-before-commit ordering, fail-closed codec startup, bounded execution, graceful shutdown, and Prometheus health/metrics. | `make phase-c2-runtime-check` passed: 12 Python contract/audit tests, 11 Go CDC mapping/runtime tests, Kafka header bridge tests, existing stream tests, command compilation, and deterministic parity report; canonical/DLQ publish failures never committed, and commit-failure replay was byte-identical | Offline C2 runtime readiness complete. No Kafka record, Docker image, SPCS service, model, threshold, or rule changed. Adapter image/spec packaging is next; the real decoder and live integration remain blocked on poker-platform inputs |
 | 2026-07-22 | C2 packaging | Scoped C2 to synthetic simulation, added strict production/simulation topic isolation, paired fixture-codec guards, a non-root digest-pinned `poker-adapter` image, private `POKER_ADAPTER_SIM` spec, dedicated Snowflake-secret injection, render/build/smoke/release targets, and a clean-commit deployment guard. | `make phase-c2-packaging-check` passed the contract/runtime gate plus 17 deployment tests; local image `poker-adapter:dev-eebb871d5c45` built as `linux/amd64`, image ID `sha256:79f95e55cfe5ce0525e70fae2186debfe74c900709a3e9e057dca116e91218b1`, user `65532:65532`, and its embedded command passed smoke testing. Simulation requires exact `poker.sim.*` topics and a `sim-*` dataset before Kafka is opened. | Offline packaging complete. No image was pushed and no SPCS/Kafka/Snowflake service changed. The deterministic real-time simulator and isolated live replay are next; real poker-server ingestion is outside current scope. |
+| 2026-07-22 | C2 local CDC simulation | Added a real local PostgreSQL 17.5 logical-WAL source, transactional outbox trigger with a database-owned game-type allowlist, Debezium 3.6 connector, deterministic PokerKit writer, `poker-hand-protobuf-v1` Python/Go codecs, run-scoped verifier, explicit topic creation, and reusable `make cdc-sim-*` operations. Filtering uses trusted columns before Kafka; checksum verification and binary parsing stay in the Go adapter after Kafka. | `make cdc-sim-e2e` passed twice without deleting prior data. Accepted run: 8 source rows across 4 game types, 4 outbox/CDC rows (`NLH_CASH_6MAX` and `NLH_TOURNAMENT_6MAX`), 4 filtered rows, 4 canonical outputs, 0 DLQ; Go metrics reported `InputRecords=4`, `CanonicalPublished=4`, `CommittedRecords=4`. Focused 33 Python tests, all Go packages, Compose validation, shared Protobuf SHA-256 `bc2eef1b6c3571e178c8c50e13663a82e1687de7c40b0ddbeb54b28c3be7b7a4`, and C2 package/render gates passed. | Local C2 simulation complete. Containers remain local; no Confluent record, Snowflake object, image push, SPCS deployment, model, threshold, rule, or production topic changed. Fault manifests and isolated Confluent/SPCS shadow replay are next; the real poker-server codec remains deferred. |
