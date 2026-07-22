@@ -17,7 +17,24 @@ import (
 
 	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/cdc"
 	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/kafkaio"
+	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/stream"
 )
+
+type failFirstCommitter struct {
+	delegate stream.Committer
+	failed   bool
+}
+
+func (committer *failFirstCommitter) Commit(
+	ctx context.Context,
+	records []stream.RecordRef,
+) error {
+	if !committer.failed {
+		committer.failed = true
+		return fmt.Errorf("simulation injected first commit failure")
+	}
+	return committer.delegate.Commit(ctx, records)
+}
 
 func main() {
 	loadDotEnv("../../.env")
@@ -41,10 +58,14 @@ func main() {
 	checkKafkaOnly := flag.Bool("check-kafka-only", false, "verify Kafka authentication without consuming")
 	simulationMode := flag.Bool("simulation-mode", envBool("CDC_SIMULATION_MODE", false), "run only on isolated poker.sim.* topics and sim-* datasets")
 	allowSimulationCodecs := flag.Bool("allow-simulation-codecs", envBool("CDC_ALLOW_SIMULATION_CODECS", false), "enable repository-owned simulation codecs")
+	simulationFailFirstCommit := flag.Bool("simulation-fail-first-commit", false, "simulation only: publish the first output, then fail before committing its source offset")
 	maxPollRecords := flag.Int("max-poll-records", 100, "maximum records returned from one poll")
 	maxRecords := flag.Int("max-records", 0, "stop after committing this many inputs; zero runs continuously")
 	requestTimeout := flag.Duration("request-timeout", 10*time.Second, "Kafka startup and HTTP shutdown timeout")
 	flag.Parse()
+	if err := validateSimulationFailureInjection(*simulationMode, *simulationFailFirstCommit); err != nil {
+		log.Fatal(err)
+	}
 	if !*checkKafkaOnly && strings.TrimSpace(*datasetID) == "" {
 		log.Fatal("CDC_DATASET_ID or --dataset-id is required")
 	}
@@ -98,17 +119,22 @@ func main() {
 		log.Printf("hand-adapter Kafka readiness passed input=%s output=%s", *inputTopic, *outputTopic)
 		return
 	}
+	var committer stream.Committer = kafkaClient
+	if *simulationFailFirstCommit {
+		committer = &failFirstCommitter{delegate: kafkaClient}
+	}
 	processor, err := cdc.NewRuntimeProcessor(
-		runtimeConfig, decoders, kafkaClient, kafkaClient,
+		runtimeConfig, decoders, kafkaClient, committer,
 	)
 	if err != nil {
 		log.Fatalf("configure CDC processor: %v", err)
 	}
 	metricsServer := startMetricsServer(*metricsListen, *buildVersion, processor)
 	log.Printf(
-		"hand-adapter build=%s input=%s output=%s dlq=%s dataset=%s split=%s simulation=%t simulation_codecs=%t",
+		"hand-adapter build=%s input=%s output=%s dlq=%s dataset=%s split=%s simulation=%t simulation_codecs=%t commit_failure_injection=%t",
 		*buildVersion, *inputTopic, *outputTopic, *deadLetterTopic,
 		*datasetID, *datasetSplit, *simulationMode, *allowSimulationCodecs,
+		*simulationFailFirstCommit,
 	)
 	processed, runErr := kafkaClient.RunAdapter(ctx, processor, *maxRecords)
 	if metricsServer != nil {
@@ -122,6 +148,13 @@ func main() {
 		log.Fatalf("adapter stopped: %v", runErr)
 	}
 	log.Printf("hand-adapter stopped cleanly processed=%d metrics=%+v", processed, processor.Metrics())
+}
+
+func validateSimulationFailureInjection(simulationMode, failFirstCommit bool) error {
+	if failFirstCommit && !simulationMode {
+		return fmt.Errorf("--simulation-fail-first-commit requires --simulation-mode")
+	}
+	return nil
 }
 
 func configuredDecoders(simulationMode, allowSimulationCodecs bool) (map[string]cdc.Decoder, error) {

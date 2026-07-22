@@ -118,18 +118,21 @@ Run the complete local path with:
 
 ```bash
 make cdc-sim-e2e
+make cdc-sim-fault-replay-e2e
 ```
 
 The accepted run wrote eight source rows across four game types. The database
 trigger wrote four eligible outbox rows, Debezium published four CDC records,
 and the Go adapter published four canonical hands with zero dead letters.
+The fault suite additionally proves four exact sanitized DLQ reasons and a
+real publish-success/commit-failure/restart replay with byte-identical output.
 See [`postgres-debezium-simulation.md`](postgres-debezium-simulation.md) for
 the exact topology and runbook.
 
 The next remote phase is to create isolated Confluent topics, release the
-clean-commit image, and deploy the private SPCS adapter. It must also add:
+clean-commit image, and deploy the private SPCS adapter. It must repeat:
 
-- valid, duplicate, malformed, checksum-failure, and out-of-order scenarios;
+- valid, filtered, malformed, checksum, codec, and replay scenarios;
 - expected-output manifests for canonical and DLQ counts; and
 - an end-to-end Confluent/SPCS verification that confirms output before source
   offset commit and byte-identical replay after a forced commit failure.

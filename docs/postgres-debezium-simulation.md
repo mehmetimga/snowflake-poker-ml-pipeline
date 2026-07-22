@@ -193,6 +193,46 @@ make cdc-sim-stop
 The stop target intentionally leaves Kafka alone because other local project
 flows share it. It also does not delete the PostgreSQL volume.
 
+## Fault and recovery suite
+
+Run the deterministic poison and commit-recovery proof with:
+
+```bash
+make cdc-sim-fault-replay-e2e
+```
+
+The fault manifest writes six source hands:
+
+| Scenario | Expected result |
+|---|---|
+| `valid_cash` | One canonical event |
+| `filtered_play_money` | Retained in `hand_history`; absent from outbox/Kafka |
+| `checksum_mismatch` | Sanitized DLQ with `checksum_mismatch` |
+| `malformed_protobuf` | Sanitized DLQ with `invalid_binary_payload` |
+| `game_type_mismatch` | Sanitized DLQ with `game_type_mismatch` |
+| `unknown_codec_version` | Sanitized DLQ with `unknown_codec_version` |
+
+The verifier joins DLQs back to their source Kafka partition/offset, checks
+the exact error code and deterministic event bytes, and confirms that neither
+the raw CDC value nor hand identity appears in the DLQ.
+
+Commit recovery uses a simulation-only flag that production mode rejects. A
+baseline record first establishes the consumer group's committed position.
+The test then:
+
+1. publishes one valid recovery hand;
+2. acknowledges its canonical output;
+3. injects a failure before the source offset commit;
+4. proves the committed offset did not advance;
+5. restarts the same group without injection;
+6. proves the source record is replayed and committed; and
+7. requires both canonical records to have identical key, value, headers, and
+   one stable event ID.
+
+All bounded live targets wait for a stable Kafka group assignment before
+inserting PostgreSQL rows. This removes the race where a new `latest` consumer
+could establish its starting offset after the test records arrived.
+
 ## Production transition
 
 The local topology proves the ownership and failure boundaries, not the real

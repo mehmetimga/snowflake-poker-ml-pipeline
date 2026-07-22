@@ -1,10 +1,24 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/cdc"
+	"github.com/ai-campions/snowflake-poker-ml-pipeline/services/go/internal/stream"
 )
+
+type commandCommitter struct {
+	calls int
+}
+
+func (committer *commandCommitter) Commit(
+	_ context.Context,
+	_ []stream.RecordRef,
+) error {
+	committer.calls++
+	return nil
+}
 
 func TestConfiguredDecodersRequiresExplicitIsolatedSimulation(t *testing.T) {
 	for _, test := range []struct {
@@ -33,5 +47,29 @@ func TestConfiguredDecodersRequiresExplicitIsolatedSimulation(t *testing.T) {
 	}
 	if _, ok := decoders[cdc.SimulationProtobufCodec]; !ok {
 		t.Fatal("simulation Protobuf decoder is not registered")
+	}
+}
+
+func TestCommitFailureInjectionIsSimulationOnlyAndFailsExactlyOnce(t *testing.T) {
+	if err := validateSimulationFailureInjection(false, true); err == nil {
+		t.Fatal("production mode accepted commit failure injection")
+	}
+	if err := validateSimulationFailureInjection(true, true); err != nil {
+		t.Fatal(err)
+	}
+	delegate := &commandCommitter{}
+	committer := &failFirstCommitter{delegate: delegate}
+	records := []stream.RecordRef{{Topic: cdc.SimulationSourceTopic, Offset: 7}}
+	if err := committer.Commit(context.Background(), records); err == nil {
+		t.Fatal("first commit was not rejected")
+	}
+	if delegate.calls != 0 {
+		t.Fatal("injected failure reached the real committer")
+	}
+	if err := committer.Commit(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	if delegate.calls != 1 {
+		t.Fatalf("second commit was not delegated: %d", delegate.calls)
 	}
 }

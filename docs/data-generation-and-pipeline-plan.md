@@ -782,7 +782,9 @@ but remained below CatBoost on both benchmarks, so it is not a serving input.
   simulation ingress topic.
 - [x] Run the versioned Go hand adapter locally and validate canonical output,
   lineage, topic keys, and zero-DLQ acceptance.
-- [ ] Add fault/replay manifests and run the same adapter image in
+- [x] Prove exact checksum, malformed-binary, game-mismatch, unknown-codec,
+  sanitized-DLQ, and post-publish commit-recovery behavior locally.
+- [ ] Run the same adapter image and accepted fault/replay manifest in
   `POKER_ADAPTER_SIM` against isolated Confluent topics.
 - Feed simulated user/account context directly to separate Kafka topics.
 
@@ -804,6 +806,6 @@ The next build slice is deliberately small:
 
 The offline contract, local PostgreSQL/Debezium simulation, Protobuf codec, Go
 publish-or-DLQ-before-commit runtime, Docker image, and private simulation SPCS
-specification are now implemented. The next slice is fault/replay coverage and
-an isolated Confluent/SPCS replay. The external poker-server database and real
-binary codec remain outside current project scope.
+specification are now implemented. Local fault/replay coverage is accepted;
+the next slice is the isolated Confluent/SPCS replay. The external poker-server
+database and real binary codec remain outside current project scope.

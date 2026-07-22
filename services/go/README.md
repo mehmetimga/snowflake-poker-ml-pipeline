@@ -125,6 +125,7 @@ topics, and a `sim-*` dataset ID. Run the adapter or full local CDC path with:
 make go-hand-adapter-sim
 make phase-c2-packaging-check
 make cdc-sim-e2e
+make cdc-sim-fault-replay-e2e
 ```
 
 The adapter is packaged by `Dockerfile.adapter`; its private simulation SPCS

@@ -19,6 +19,10 @@ from pipeline.cdc.simulation_codec import (
     encode_simulation_hand,
     public_hand_payload,
 )
+from pipeline.cdc.simulation_scenarios import (
+    FAULT_SCENARIOS,
+    build_fault_scenario_records,
+)
 from pipeline.events import HandCompletedPayload
 from pipeline.generator import GeneratorConfig, HandGenerator
 
@@ -27,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROTOBUF_FIXTURE = ROOT / "schemas/examples/poker-hand-protobuf-v1.base64"
 DEBEZIUM_FIXTURE = ROOT / "schemas/examples/debezium.hand-completed-outbox.v1.json"
 SQL = ROOT / "infra/simulation/postgres/init/001_cdc_simulation.sql"
+SCENARIO_MIGRATION = ROOT / "infra/simulation/postgres/init/002_simulation_scenario.sql"
 CONNECTOR = ROOT / "infra/simulation/debezium/poker-hand-outbox-connector.json"
 
 
@@ -152,9 +157,114 @@ def test_postgres_writer_inserts_only_source_row_and_leaves_filter_to_trigger() 
     assert "INSERT INTO public.hand_history" in query
     assert "hand_completed_outbox" not in query
     assert parameters[2] == "sim-cdc-v1"
-    assert parameters[6] == "PLAY_MONEY_NLH_6MAX"
-    assert parameters[8] == SIMULATION_PROTOBUF_CODEC_VERSION
-    assert parameters[10] == record.payload
+    assert parameters[3] == "acceptance"
+    assert parameters[7] == "PLAY_MONEY_NLH_6MAX"
+    assert parameters[9] == SIMULATION_PROTOBUF_CODEC_VERSION
+    assert parameters[11] == record.payload
+
+
+def test_fault_scenarios_are_deterministic_and_have_expected_poison_boundaries() -> (
+    None
+):
+    generator = HandGenerator(
+        GeneratorConfig(
+            n_hands=len(FAULT_SCENARIOS),
+            n_players=18,
+            n_tables=3,
+            n_colluding_pairs=3,
+            seed=8801,
+            dataset_split="live",
+            dataset_id="sim-cdc-fault-test",
+        ),
+        start_at=datetime(2026, 7, 22, 13, tzinfo=timezone.utc),
+    )
+    first = build_fault_scenario_records(
+        list(generator.iter_hands()), dataset_id="sim-cdc-fault-test"
+    )
+    generator = HandGenerator(
+        GeneratorConfig(
+            n_hands=len(FAULT_SCENARIOS),
+            n_players=18,
+            n_tables=3,
+            n_colluding_pairs=3,
+            seed=8801,
+            dataset_split="live",
+            dataset_id="sim-cdc-fault-test",
+        ),
+        start_at=datetime(2026, 7, 22, 13, tzinfo=timezone.utc),
+    )
+    second = build_fault_scenario_records(
+        list(generator.iter_hands()), dataset_id="sim-cdc-fault-test"
+    )
+
+    assert first == second
+    by_name = {item.definition.name: item for item in first}
+    assert by_name["checksum_mismatch"].record.payload_sha256 == "0" * 64
+    malformed = by_name["malformed_protobuf"].record
+    assert malformed.payload == b"\x80"
+    assert malformed.payload_sha256 == hashlib.sha256(b"\x80").hexdigest()
+    mismatch = by_name["game_type_mismatch"].record
+    with pytest.raises(CdcRecordRejected, match="game_type_mismatch"):
+        SimulationProtobufV1Decoder().decode(
+            mismatch.payload,
+            row=type("Row", (), {"game_type": mismatch.game_type})(),
+            config=CdcAdapterConfig(dataset_id="sim-cdc-v1"),
+        )
+    assert by_name["unknown_codec_version"].record.codec_version.endswith("v999")
+    assert {
+        item.definition.expected_error_code
+        for item in first
+        if item.definition.expected_outcome == "dead_letter"
+    } == {
+        "checksum_mismatch",
+        "invalid_binary_payload",
+        "game_type_mismatch",
+        "unknown_codec_version",
+    }
+
+    for scenario in first:
+        if scenario.definition.expected_outcome == "filtered":
+            continue
+        record = scenario.record
+        envelope = json.loads(DEBEZIUM_FIXTURE.read_text())
+        envelope["after"].update(
+            {
+                "id": str(record.outbox_id),
+                "aggregate_id": record.hand_id,
+                "tenant_id": record.tenant_id,
+                "product_id": record.product_id,
+                "game_type": record.game_type,
+                "occurred_at": record.occurred_at.isoformat(),
+                "emitted_at": record.emitted_at.isoformat(),
+                "codec_version": record.codec_version,
+                "payload_sha256": record.payload_sha256,
+                "payload": base64.b64encode(record.payload).decode(),
+            }
+        )
+        config = CdcAdapterConfig(
+            dataset_id="sim-cdc-v1",
+            expected_database="poker",
+            allowed_game_types=("NLH_CASH_6MAX", "NLH_TOURNAMENT_6MAX"),
+        )
+        if scenario.definition.expected_outcome == "canonical":
+            adapted = adapt_debezium_hand_change(
+                envelope,
+                config=config,
+                decoders={
+                    SIMULATION_PROTOBUF_CODEC_VERSION: SimulationProtobufV1Decoder()
+                },
+            )
+            assert adapted.event.payload["hand_id"] == record.hand_id
+            continue
+        with pytest.raises(CdcRecordRejected) as rejected:
+            adapt_debezium_hand_change(
+                envelope,
+                config=config,
+                decoders={
+                    SIMULATION_PROTOBUF_CODEC_VERSION: SimulationProtobufV1Decoder()
+                },
+            )
+        assert rejected.value.code == scenario.definition.expected_error_code
 
 
 def test_database_and_debezium_contract_filter_before_kafka_without_parsing() -> None:
@@ -167,6 +277,9 @@ def test_database_and_debezium_contract_filter_before_kafka_without_parsing() ->
     assert "NEW.payload" in sql
     assert "BEFORE UPDATE OR DELETE ON public.hand_completed_outbox" in sql
     assert "WITH (publish = 'insert')" in sql
+    migration = SCENARIO_MIGRATION.read_text()
+    assert "ADD COLUMN IF NOT EXISTS simulation_scenario" in migration
+    assert "WHERE simulation_scenario IS NULL" in migration
 
     assert connector["table.include.list"] == "public.hand_completed_outbox"
     assert connector["publication.autocreate.mode"] == "disabled"

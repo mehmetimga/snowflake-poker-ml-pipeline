@@ -4,7 +4,7 @@
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
 .PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
 .PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim phase-c2-packaging-check
-.PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-stop phase-c2-cdc-simulation-check
+.PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -101,6 +101,11 @@ CDC_SIM_SOURCE_DATASET_ID := sim-cdc-smoke-$(shell date -u +%Y%m%d%H%M%S)
 CDC_SIM_START_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 CDC_SIM_GROUP_ID := poker-go-hand-adapter-cdc-sim-$(shell date +%s)
 CDC_SIM_POSTGRES_DSN ?= postgresql://poker_sim:poker_sim@localhost:5433/poker_sim
+CDC_SIM_FAULT_SOURCE_DATASET_ID := sim-cdc-fault-$(shell date -u +%Y%m%d%H%M%S)
+CDC_SIM_FAULT_GROUP_ID := poker-go-hand-adapter-fault-$(shell date +%s)
+CDC_SIM_RECOVERY_BASELINE_DATASET_ID := sim-cdc-recovery-baseline-$(shell date -u +%Y%m%d%H%M%S)
+CDC_SIM_RECOVERY_SOURCE_DATASET_ID := sim-cdc-recovery-$(shell date -u +%Y%m%d%H%M%S)
+CDC_SIM_RECOVERY_GROUP_ID := poker-go-hand-adapter-recovery-$(shell date +%s)
 RISK_SCORE_CHECK_FLAGS ?=
 WORLD_REPLAY_MODE ?= accelerated
 WORLD_REPLAY_RATE ?= 100
@@ -198,7 +203,9 @@ help:
 	@echo "  phase-c2-runtime-check Run the complete offline C2 runtime gate"
 	@echo "  phase-c2-packaging-check Verify the isolated simulation adapter image/spec"
 	@echo "  cdc-sim-up   Start local PostgreSQL, Kafka, and Debezium containers"
+	@echo "  cdc-sim-migrate Apply idempotent schema updates to a retained local volume"
 	@echo "  cdc-sim-e2e  Run the PostgreSQL -> Debezium -> Kafka -> Go smoke test"
+	@echo "  cdc-sim-fault-replay-e2e Verify poison DLQs and live commit recovery"
 	@echo "  cdc-sim-stop Stop Debezium and PostgreSQL while retaining their volume"
 	@echo "  c2-adapter-build Build the linux/amd64 simulation adapter image"
 	@echo "  c2-adapter-image-smoke Check the locally built adapter executable"
@@ -978,14 +985,21 @@ cdc-sim-config-check:
 	$(PY) scripts/simulate_postgres_cdc.py --dry-run --hands $(CDC_SIM_HANDS) \
 		--rate 0 --dataset-id $(CDC_SIM_SOURCE_DATASET_ID) \
 		--start-at $(CDC_SIM_START_AT)
+	$(PY) scripts/simulate_postgres_cdc_faults.py --dry-run \
+		--dataset-id $(CDC_SIM_FAULT_SOURCE_DATASET_ID) \
+		--start-at $(CDC_SIM_START_AT)
 
 cdc-sim-up:
 	docker compose --profile cdc-sim up -d kafka postgres-cdc debezium-connect
 
+cdc-sim-migrate: cdc-sim-up
+	docker compose exec -T postgres-cdc psql -U poker_sim -d poker_sim \
+		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/002_simulation_scenario.sql
+
 cdc-sim-topics:
 	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
 		--bootstrap-server kafka:9094 --create --if-not-exists \
-		--topic poker.sim.cdc-hand-outbox.v1 --partitions 3 --replication-factor 1
+		--topic poker.sim.cdc-hand-outbox.v1 --partitions 1 --replication-factor 1
 	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
 		--bootstrap-server kafka:9094 --create --if-not-exists \
 		--topic poker.sim.hands.raw.v1 --partitions 3 --replication-factor 1
@@ -1012,13 +1026,53 @@ cdc-sim-verify:
 		--expected-source-rows $(CDC_SIM_HANDS) \
 		--expected-canonical-records $(CDC_SIM_EXPECTED_CANONICAL)
 
-cdc-sim-e2e: cdc-sim-up cdc-sim-topics cdc-sim-register
+cdc-sim-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register
 	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records $(CDC_SIM_EXPECTED_CANONICAL) --group-id $(CDC_SIM_GROUP_ID) --metrics-listen=" & \
 	adapter_pid=$$!; \
-	sleep 3; \
+	$(PY) scripts/wait_kafka_consumer_group.py --group-id $(CDC_SIM_GROUP_ID) --topic poker.sim.cdc-hand-outbox.v1; \
 	$(MAKE) cdc-sim-generate CDC_SIM_SOURCE_DATASET_ID=$(CDC_SIM_SOURCE_DATASET_ID) CDC_SIM_START_AT=$(CDC_SIM_START_AT); \
 	wait $$adapter_pid
 	$(MAKE) cdc-sim-verify CDC_SIM_SOURCE_DATASET_ID=$(CDC_SIM_SOURCE_DATASET_ID)
+
+cdc-sim-fault-generate:
+	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) $(PY) scripts/simulate_postgres_cdc_faults.py \
+		--dataset-id $(CDC_SIM_FAULT_SOURCE_DATASET_ID) --start-at $(CDC_SIM_START_AT)
+
+cdc-sim-fault-verify:
+	$(PY) scripts/check_postgres_cdc_faults.py \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--source-dataset-id $(CDC_SIM_FAULT_SOURCE_DATASET_ID)
+
+cdc-sim-fault-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register
+	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records 5 --group-id $(CDC_SIM_FAULT_GROUP_ID) --metrics-listen=" & \
+	adapter_pid=$$!; \
+	$(PY) scripts/wait_kafka_consumer_group.py --group-id $(CDC_SIM_FAULT_GROUP_ID) --topic poker.sim.cdc-hand-outbox.v1; \
+	$(MAKE) cdc-sim-fault-generate CDC_SIM_FAULT_SOURCE_DATASET_ID=$(CDC_SIM_FAULT_SOURCE_DATASET_ID) CDC_SIM_START_AT=$(CDC_SIM_START_AT); \
+	wait $$adapter_pid
+	$(MAKE) cdc-sim-fault-verify CDC_SIM_FAULT_SOURCE_DATASET_ID=$(CDC_SIM_FAULT_SOURCE_DATASET_ID)
+
+cdc-sim-recovery-e2e: cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register
+	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records 1 --group-id $(CDC_SIM_RECOVERY_GROUP_ID) --metrics-listen=" & \
+	adapter_pid=$$!; \
+	$(PY) scripts/wait_kafka_consumer_group.py --group-id $(CDC_SIM_RECOVERY_GROUP_ID) --topic poker.sim.cdc-hand-outbox.v1; \
+	$(PY) scripts/simulate_postgres_cdc.py --hands 1 --rate 0 --game-types NLH_CASH_6MAX --allowed-game-types NLH_CASH_6MAX --dataset-id $(CDC_SIM_RECOVERY_BASELINE_DATASET_ID) --start-at $(CDC_SIM_START_AT); \
+	wait $$adapter_pid
+	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records 1 --group-id $(CDC_SIM_RECOVERY_GROUP_ID) --metrics-listen= --simulation-fail-first-commit" & \
+	adapter_pid=$$!; \
+	$(PY) scripts/wait_kafka_consumer_group.py --group-id $(CDC_SIM_RECOVERY_GROUP_ID) --topic poker.sim.cdc-hand-outbox.v1; \
+	$(PY) scripts/simulate_postgres_cdc.py --hands 1 --rate 0 --game-types NLH_CASH_6MAX --allowed-game-types NLH_CASH_6MAX --dataset-id $(CDC_SIM_RECOVERY_SOURCE_DATASET_ID) --start-at $(CDC_SIM_START_AT); \
+	if wait $$adapter_pid; then echo "expected injected commit failure" >&2; exit 1; fi
+	$(PY) scripts/check_postgres_cdc_recovery.py \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--source-dataset-id $(CDC_SIM_RECOVERY_SOURCE_DATASET_ID) \
+		--group-id $(CDC_SIM_RECOVERY_GROUP_ID) --phase after-failure
+	$(MAKE) go-hand-adapter-sim GO_HAND_ADAPTER_FLAGS="--bootstrap-servers localhost:9092 --security-protocol PLAINTEXT --expected-database poker_sim --max-records 1 --group-id $(CDC_SIM_RECOVERY_GROUP_ID) --metrics-listen="
+	$(PY) scripts/check_postgres_cdc_recovery.py \
+		--postgres-dsn $(CDC_SIM_POSTGRES_DSN) \
+		--source-dataset-id $(CDC_SIM_RECOVERY_SOURCE_DATASET_ID) \
+		--group-id $(CDC_SIM_RECOVERY_GROUP_ID) --phase complete
+
+cdc-sim-fault-replay-e2e: cdc-sim-fault-e2e cdc-sim-recovery-e2e
 
 cdc-sim-stop:
 	docker compose --profile cdc-sim stop debezium-connect postgres-cdc

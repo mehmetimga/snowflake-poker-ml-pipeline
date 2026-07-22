@@ -9,12 +9,12 @@ operations.
 
 | Field | Value |
 |---|---|
-| Plan version | 18 |
+| Plan version | 19 |
 | Created | 2026-07-20 |
 | Current production champion | `pair-catboost-v1`, run `pair_7a1c58c1046b` |
 | Current feature definition | `pair-features-v1` |
 | Automatic model promotion | Disabled |
-| Immediate next phase | Add CDC failure/replay scenarios, then repeat the isolated simulation through Confluent and `POKER_ADAPTER_SIM` |
+| Immediate next phase | Release the clean adapter image and repeat the accepted CDC simulation through isolated Confluent topics and `POKER_ADAPTER_SIM` |
 
 Update each phase's status and evidence links as work progresses. A checked
 task means the code and tests exist; it does not by itself mean that a model is
@@ -475,8 +475,10 @@ new checkpoints, and passed a collision-aware post-restore replay.
   languages.
 - [x] Prove locally that 8 source rows become exactly 4 allowlisted CDC records,
   4 acknowledged canonical records, 0 DLQ records, and 4 pre-Kafka exclusions.
-- [ ] Add malformed/checksum/replay/commit-recovery scenario manifests and
-  repeat the proof through isolated Confluent topics and `POKER_ADAPTER_SIM`.
+- [x] Add exact checksum, malformed-Protobuf, game-mismatch, unknown-codec,
+  pre-Kafka filter, sanitized-DLQ, and live commit-recovery scenarios locally.
+- [ ] Repeat the accepted manifest through isolated Confluent topics and
+  `POKER_ADAPTER_SIM`.
 
 The frozen mapping, ownership boundary, operation policy, connector settings,
 and remaining simulation gates are documented in
@@ -900,3 +902,4 @@ Add dated entries here as phases move:
 | 2026-07-22 | C2 runtime | Added the Go hand-adapter polling command and processor, canonical plus lineage-header transport, deterministic hash-only DLQ contract, publish-or-DLQ-before-commit ordering, fail-closed codec startup, bounded execution, graceful shutdown, and Prometheus health/metrics. | `make phase-c2-runtime-check` passed: 12 Python contract/audit tests, 11 Go CDC mapping/runtime tests, Kafka header bridge tests, existing stream tests, command compilation, and deterministic parity report; canonical/DLQ publish failures never committed, and commit-failure replay was byte-identical | Offline C2 runtime readiness complete. No Kafka record, Docker image, SPCS service, model, threshold, or rule changed. Adapter image/spec packaging is next; the real decoder and live integration remain blocked on poker-platform inputs |
 | 2026-07-22 | C2 packaging | Scoped C2 to synthetic simulation, added strict production/simulation topic isolation, paired fixture-codec guards, a non-root digest-pinned `poker-adapter` image, private `POKER_ADAPTER_SIM` spec, dedicated Snowflake-secret injection, render/build/smoke/release targets, and a clean-commit deployment guard. | `make phase-c2-packaging-check` passed the contract/runtime gate plus 17 deployment tests; local image `poker-adapter:dev-eebb871d5c45` built as `linux/amd64`, image ID `sha256:79f95e55cfe5ce0525e70fae2186debfe74c900709a3e9e057dca116e91218b1`, user `65532:65532`, and its embedded command passed smoke testing. Simulation requires exact `poker.sim.*` topics and a `sim-*` dataset before Kafka is opened. | Offline packaging complete. No image was pushed and no SPCS/Kafka/Snowflake service changed. The deterministic real-time simulator and isolated live replay are next; real poker-server ingestion is outside current scope. |
 | 2026-07-22 | C2 local CDC simulation | Added a real local PostgreSQL 17.5 logical-WAL source, transactional outbox trigger with a database-owned game-type allowlist, Debezium 3.6 connector, deterministic PokerKit writer, `poker-hand-protobuf-v1` Python/Go codecs, run-scoped verifier, explicit topic creation, and reusable `make cdc-sim-*` operations. Filtering uses trusted columns before Kafka; checksum verification and binary parsing stay in the Go adapter after Kafka. | `make cdc-sim-e2e` passed twice without deleting prior data. Accepted run: 8 source rows across 4 game types, 4 outbox/CDC rows (`NLH_CASH_6MAX` and `NLH_TOURNAMENT_6MAX`), 4 filtered rows, 4 canonical outputs, 0 DLQ; Go metrics reported `InputRecords=4`, `CanonicalPublished=4`, `CommittedRecords=4`. All 223 Python tests, all Go packages, Compose validation, shared Protobuf SHA-256 `bc2eef1b6c3571e178c8c50e13663a82e1687de7c40b0ddbeb54b28c3be7b7a4`, and C2 package/render gates passed. Rebuilt image `poker-adapter:cce0f33294ec` is `linux/amd64`, non-root `65532:65532`, and image ID `sha256:41d006c7973d721858785dea364b5fa682303e24b6ed26366c6e10d16b5b98eb`; entrypoint smoke passed. | Local C2 simulation complete. Containers remain local; no Confluent record, Snowflake object, image push, SPCS deployment, model, threshold, rule, or production topic changed. Fault manifests and isolated Confluent/SPCS shadow replay are next; the real poker-server codec remains deferred. |
+| 2026-07-22 | C2 fault and recovery | Added a six-row deterministic fault manifest, run-scoped canonical/DLQ verifier, retained-volume schema migration, stable-consumer readiness barrier, and a simulation-only fail-first-commit wrapper that production mode rejects. One scenario is canonical, one is filtered before Kafka, and four poison records exercise checksum, malformed Protobuf, row/binary game mismatch, and unknown codec. | Live fault run: 6 source, 1 filtered, 5 CDC inputs, 1 canonical, 4 committed sanitized DLQs with the four exact codes, 0 raw-value/hand-ID leaks; adapter metrics were `InputRecords=5`, `CanonicalPublished=1`, `DeadLetters=4`, `CommittedRecords=5`. Recovery run published once, failed before committing source offset `19`, proved committed offset remained `19`, restarted the same group, published a byte-identical retry with one stable event ID, and committed offset `20`. The initial sleep-based consumer race was reproduced and removed with an explicit stable-assignment barrier. All 224 Python tests, all Go packages, Compose/config validation, and the complete C2 gate passed. Local image `poker-adapter:dev-653be3a18da1` is `linux/amd64`, non-root `65532:65532`, image ID `sha256:4e5b089d42d5ab98ccd4404cb900d92eafd23bee9f60aea8d212a264362ba8a7`, and passed entrypoint smoke. | Local fault/replay gate complete. Failure injection is impossible outside explicit simulation mode. The development image is not releaseable from a dirty tree. No image was pushed and no Confluent, Snowflake, SPCS, model, threshold, rule, or production topic changed. Isolated Confluent/SPCS replay is next. |

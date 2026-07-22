@@ -174,12 +174,9 @@ def main() -> None:
     source_topic_records = topic_size(args.bootstrap_servers, SOURCE_TOPIC)
     canonical_topic_records = topic_size(args.bootstrap_servers, CANONICAL_TOPIC)
     dead_letters = topic_size(args.bootstrap_servers, DEAD_LETTER_TOPIC)
-    if dead_letters:
-        raise ValueError(
-            f"simulation dead-letter topic contains {dead_letters} records"
-        )
 
     source_matched_hand_ids: set[str] = set()
+    source_positions: set[tuple[int, int]] = set()
     for message in read_topic_records(
         args.bootstrap_servers,
         SOURCE_TOPIC,
@@ -190,8 +187,25 @@ def main() -> None:
         aggregate_id = after.get("aggregate_id") if isinstance(after, dict) else None
         if aggregate_id in eligible_hand_ids:
             source_matched_hand_ids.add(aggregate_id)
+            source_positions.add((message.partition, message.offset))
     if source_matched_hand_ids != eligible_hand_ids:
         raise ValueError("CDC source topic does not match the run's eligible hands")
+
+    dead_letters_for_run = 0
+    for message in read_topic_records(
+        args.bootstrap_servers,
+        DEAD_LETTER_TOPIC,
+        timeout_seconds=args.timeout_seconds,
+    ):
+        value = json.loads(message.value)
+        payload = value.get("payload", {}) if isinstance(value, dict) else {}
+        position = (payload.get("source_partition"), payload.get("source_offset"))
+        if position in source_positions:
+            dead_letters_for_run += 1
+    if dead_letters_for_run:
+        raise ValueError(
+            f"accepted simulation run produced {dead_letters_for_run} dead letters"
+        )
 
     seen_event_ids: set[str] = set()
     canonical_matched_hand_ids: set[str] = set()
@@ -249,7 +263,8 @@ def main() -> None:
                 "cdc_source_records_for_run": len(source_matched_hand_ids),
                 "canonical_topic_records": canonical_topic_records,
                 "canonical_records_for_run": len(canonical_matched_hand_ids),
-                "dead_letters": dead_letters,
+                "dead_letter_topic_records": dead_letters,
+                "dead_letters_for_run": dead_letters_for_run,
                 "canonical_game_types": dict(sorted(game_types.items())),
                 "database_game_types": {
                     key: {"source_rows": value[0], "outbox_rows": value[1]}

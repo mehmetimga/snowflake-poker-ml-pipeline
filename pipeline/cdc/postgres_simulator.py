@@ -29,6 +29,7 @@ DEFAULT_ALLOWED_GAME_TYPES = (
     "NLH_TOURNAMENT_6MAX",
 )
 _GAME_TYPE = re.compile(r"^[A-Z0-9_]+$")
+_SIMULATION_SCENARIO = re.compile(r"^[a-z0-9_]+$")
 
 
 class _Transaction(Protocol):
@@ -48,6 +49,7 @@ class SimulationHandInsert:
     history_id: uuid.UUID
     outbox_id: uuid.UUID
     simulation_dataset_id: str
+    simulation_scenario: str
     hand_id: str
     tenant_id: str
     product_id: str
@@ -78,11 +80,14 @@ def build_simulation_insert(
     dataset_id: str,
     tenant_id: str = "demo",
     product_id: str = "poker",
+    simulation_scenario: str = "acceptance",
     emitted_at: datetime | None = None,
 ) -> SimulationHandInsert:
     validate_game_types((game_type,))
     if not dataset_id.startswith("sim-"):
         raise ValueError("simulation dataset ID must start with sim-")
+    if not _SIMULATION_SCENARIO.fullmatch(simulation_scenario):
+        raise ValueError("simulation scenario must match ^[a-z0-9_]+$")
     canonical = public_hand_payload(hand)
     occurred_at = canonical.played_at.astimezone(timezone.utc)
     if emitted_at is None:
@@ -98,6 +103,7 @@ def build_simulation_insert(
         history_id=uuid.uuid5(uuid.NAMESPACE_URL, f"sim-hand-history:{identity}"),
         outbox_id=uuid.uuid5(uuid.NAMESPACE_URL, f"sim-hand-outbox:{identity}"),
         simulation_dataset_id=dataset_id,
+        simulation_scenario=simulation_scenario,
         hand_id=canonical.hand_id,
         tenant_id=tenant_id,
         product_id=product_id,
@@ -123,12 +129,13 @@ class PostgresSimulationSink:
             cursor = self.connection.execute(
                 """
                 INSERT INTO public.hand_history (
-                    id, outbox_id, simulation_dataset_id, hand_id, tenant_id,
-                    product_id, game_type, payload_schema_version, codec_version,
-                    payload_sha256, payload, occurred_at, emitted_at
+                    id, outbox_id, simulation_dataset_id, simulation_scenario,
+                    hand_id, tenant_id, product_id, game_type,
+                    payload_schema_version, codec_version, payload_sha256,
+                    payload, occurred_at, emitted_at
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (tenant_id, product_id, hand_id) DO NOTHING
                 """,
@@ -136,6 +143,7 @@ class PostgresSimulationSink:
                     record.history_id,
                     record.outbox_id,
                     record.simulation_dataset_id,
+                    record.simulation_scenario,
                     record.hand_id,
                     record.tenant_id,
                     record.product_id,

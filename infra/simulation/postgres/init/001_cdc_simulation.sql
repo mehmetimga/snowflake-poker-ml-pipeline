@@ -15,6 +15,9 @@ CREATE TABLE public.hand_history (
     id UUID PRIMARY KEY,
     outbox_id UUID NOT NULL UNIQUE,
     simulation_dataset_id TEXT NOT NULL CHECK (simulation_dataset_id LIKE 'sim-%'),
+    simulation_scenario TEXT NOT NULL
+        CONSTRAINT hand_history_simulation_scenario_check
+        CHECK (simulation_scenario ~ '^[a-z0-9_]+$'),
     hand_id TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     product_id TEXT NOT NULL,

@@ -315,6 +315,7 @@ The complete local PostgreSQL/Debezium path is one bounded command:
 
 ```bash
 make cdc-sim-e2e
+make cdc-sim-fault-replay-e2e
 ```
 
 Its architecture, filter/parse boundary, runbook, and production transition
@@ -331,7 +332,8 @@ C2 is proven locally. Remote shadow simulation is not complete until:
 1. Create the three isolated `poker.sim.*` Confluent topics.
 2. Give the adapter a least-privilege simulation service account.
 3. Release the clean-commit image and deploy `POKER_ADAPTER_SIM` privately.
-4. Repeat canonical/DLQ, lineage, replay, lag, and commit-recovery checks.
+4. Repeat the locally accepted canonical/DLQ, lineage, replay, lag, and
+   commit-recovery checks in the remote environment.
 5. Configure a separate simulation Flink input before exercising downstream
    scoring; never redirect the deployed production-shaped Flink service.
 

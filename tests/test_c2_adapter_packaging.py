@@ -36,6 +36,7 @@ def test_simulation_adapter_spec_is_private_and_topic_isolated(
         "--simulation-mode",
         "--allow-simulation-codecs",
     ]
+    assert "--simulation-fail-first-commit" not in container["args"]
     assert container["env"]["CDC_DATASET_ID"] == "sim-cdc-v1"
     assert container["env"]["CDC_ALLOWED_TENANTS"] == "tenant-a,tenant-b"
     assert container["env"]["KAFKA_CDC_HAND_OUTBOX_TOPIC"] == (
