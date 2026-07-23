@@ -1,31 +1,29 @@
-# Event-time user-context enrichment
+# Active-player user-context enrichment
 
-This Flink 1.19.1 / Java 17 job consumes canonical hand and user-context
-envelopes, expands each hand to one record per player, and joins each row to
-the latest context version whose `effective_at <= played_at`. It never queries
-Snowflake or PostgreSQL in the hot path.
+This Flink 1.19.1 / Java 17 job consumes canonical hands, expands each hand to
+one record per player, and lazily looks up only active players in PostgreSQL.
+The result is retained in Flink keyed state with a sliding inactivity TTL.
+
+The previous Kafka context-stream join remains available temporarily through
+`FLINK_CONTEXT_SOURCE=kafka` for rollback. The canonical target is
+`FLINK_CONTEXT_SOURCE=jdbc`.
 
 For a beginner-oriented explanation of streams, keyed state, event time,
 watermarks, timers, both Java jobs, and the downstream model vector, read
 [How the Flink real-time feature pipeline works](../../../docs/flink-realtime-feature-pipeline.md).
 
-## Join policy
+## JDBC lookup policy
 
-- Kafka streams are repartitioned by `player_id` / `user_id` into keyed state.
-- A hand waits 30 seconds of event time by default.
-- The initial status is `matched`, `matched_late`, or `missing`.
-- A newly arriving effective context can emit `corrected` with a higher
-  revision for five minutes after the initial deadline.
-- Duplicate hand and context event IDs are ignored.
-- A conflicting context version is sent to `poker.pipeline.dead-letter.v1`.
-- Context state has a configurable processing-time safety TTL (30 days by
-  default); event-time timers remove completed hand state earlier.
-- On cold start/recovery, live mode holds initial hand timers for 30 seconds so
-  the compacted context topic can bootstrap before an idle input is ignored.
-  A processing-time fallback releases only hands seen during that bootstrap
-  interval; steady-state records remain event-time driven.
-- Stable operator UIDs and UUIDv5 output IDs make checkpoint recovery and
-  downstream upserts safe.
+- No full user table or daily batch is loaded.
+- The first hand for A–F produces lookups only for A–F.
+- State is keyed by `player_id`; reads and writes extend its 36-hour TTL.
+- A separate 60-minute freshness interval forces periodic refresh for active
+  players.
+- The SQL lookup selects the latest version whose
+  `effective_at <= played_at`.
+- Missing rows and database failures go to
+  `poker.pipeline.dead-letter.v1`; incomplete context is never fabricated.
+- Stable operator UIDs and UUIDv5 output IDs keep downstream upserts safe.
 
 The output contract is `poker.hand-player-context.enriched` schema v1 on
 `poker.hand-player-context.v1`, keyed by player ID.
@@ -66,6 +64,11 @@ Important options:
 
 | Option | Default |
 |---|---:|
+| `--context-source` | `kafka` during migration; target `jdbc` |
+| `--context-jdbc-table` | `public.poker_user_context` |
+| `--context-jdbc-query-timeout-seconds` | `1` |
+| `--context-cache-ttl-hours` | `36` |
+| `--context-refresh-minutes` | `60` |
 | `--allowed-lateness-ms` | `30000` |
 | `--correction-window-ms` | `300000` |
 | `--idle-source-timeout-ms` | `60000` |
@@ -73,6 +76,10 @@ Important options:
 | `--context-bootstrap-wait-ms` | `30000` live, `0` bounded |
 | `--checkpoint-interval-ms` | `30000` |
 | `--parallelism` | `1` |
+
+JDBC mode also requires `USER_CONTEXT_JDBC_URL`,
+`USER_CONTEXT_DB_USER`, and `USER_CONTEXT_DB_PASSWORD`. These values must come
+from runtime secrets and are excluded from the safe configuration summary.
 
 For production, configure durable checkpoint storage in the Flink cluster and
 start from a savepoint when upgrading stateful operator code.

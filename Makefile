@@ -5,7 +5,7 @@
 .PHONY: go-hand-adapter-test go-hand-adapter go-hand-adapter-sim go-hand-adapter-kafka-check phase-c2-runtime-check
 .PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim c2-adapter-configure-kafka c2-adapter-sim-topics c2-adapter-remote-replay c2-adapter-remote-verify c2-adapter-remote-e2e phase-c2-packaging-check
 .PHONY: shadow-sim-package-test shadow-sim-java-test shadow-sim-topics shadow-sim-render shadow-sim-deploy-flink shadow-sim-deploy-risk shadow-sim-deploy shadow-sim-generate shadow-sim-replay shadow-sim-verify shadow-sim-e2e phase-c2-shadow-packaging-check
-.PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
+.PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-seed-user-context cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -1008,6 +1008,13 @@ cdc-sim-up:
 cdc-sim-migrate: cdc-sim-up
 	docker compose exec -T postgres-cdc psql -U poker_sim -d poker_sim \
 		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/002_simulation_scenario.sql
+	docker compose exec -T postgres-cdc psql -U poker_sim -d poker_sim \
+		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003_user_context_lookup.sql
+
+cdc-sim-seed-user-context: cdc-sim-migrate
+	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) \
+		$(PY) scripts/seed_postgres_user_context.py \
+		--source-dataset-id $(CDC_SIM_SOURCE_DATASET_ID)
 
 cdc-sim-topics:
 	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \

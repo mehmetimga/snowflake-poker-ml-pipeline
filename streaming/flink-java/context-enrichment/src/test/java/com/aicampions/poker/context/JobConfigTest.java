@@ -40,6 +40,34 @@ final class JobConfigTest {
     }
 
     @Test
+    void parsesJdbcActiveUserCacheWithoutExposingCredentials() {
+        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+                new String[] {
+                    "--context-source", "jdbc",
+                    "--context-cache-ttl-hours", "36",
+                    "--context-refresh-minutes", "60"
+                },
+                Map.of(
+                        "USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db.example/poker",
+                        "USER_CONTEXT_DB_USER", "context_reader",
+                        "USER_CONTEXT_DB_PASSWORD", "context-secret"));
+
+        assertEquals("jdbc", config.contextSource());
+        assertEquals(36L, config.contextCacheTtlHours());
+        assertEquals(60L, config.contextRefreshMinutes());
+        assertFalse(config.safeSummary().contains("context-secret"));
+        assertFalse(config.safeSummary().contains("db.example"));
+    }
+
+    @Test
+    void jdbcSourceRequiresConnectionConfiguration() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextEnrichmentJob.JobConfig.parse(
+                        new String[] {"--context-source", "jdbc"}, Map.of()));
+    }
+
+    @Test
     void simulationModeRequiresExactIsolatedBoundary() {
         ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
                 new String[] {"--simulation-mode"},

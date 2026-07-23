@@ -17,6 +17,8 @@
     <!-- Align with Flink 1.19's dependency management to avoid classpath skew. -->
     <jackson.version>2.15.3</jackson.version>
     <junit.version>5.10.3</junit.version>
+    <postgresql.version>42.7.7</postgresql.version>
+    <h2.version>2.3.232</h2.version>
   </properties>
 
   <dependencies>
@@ -47,6 +49,17 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
       <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>${postgresql.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <version>${h2.version}</version>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
