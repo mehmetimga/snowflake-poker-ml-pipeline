@@ -1,7 +1,6 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1–F4 complete locally; F5 internal-Snowflake sidecar deployed,
-live verification in progress
+Status: F1–F5 complete; F6 live smoke passed, load/chaos work pending
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -635,9 +634,7 @@ existing state name at an incompatible serializer.
 
 ### F5 — Internal Snowflake context and declarative deployment
 
-Status: implementation and local gates complete on 2026-07-23; live table
-seed, immutable image release, service update, and post-deploy inspection are
-the remaining release operations.
+Status: complete and live-verified on 2026-07-23.
 
 1. [x] Replace the external PostgreSQL runtime lookup with the internal
    Snowflake history table.
@@ -674,12 +671,26 @@ Local evidence:
 - the Flink spec has a hands-only Kafka boundary, one dedicated Kafka EAI, and
   no external context credential or endpoint.
 
-Exit gate: a dry run shows exact resources; the rendered spec contains no
-credential value; a read-only service inspection matches the catalog.
+Live evidence:
+
+- 60 versioned context rows and 60 current-player rows exist for
+  `spcs-snowflake-context-v1`;
+- immutable image `poker-flink:c58b05dd3c4c` is running in all four
+  `POKER_FLINK` containers with zero restarts;
+- the live spec digest is
+  `e91f5007c86fa050c448a46d7ccd75162de08d0e5c1b16196158054e4effd77d`;
+- one later-timestamped hand emitted six matched player contexts and fifteen
+  unique pair features; and
+- a second hand advanced the 30-second event-time watermark, while the DLQ
+  count remained unchanged.
+
+Exit gate passed: the rendered spec contains no credential value, live
+configuration matches the catalog, and the hands-only end-to-end smoke test
+passes.
 
 ### F6 — Shadow, load, and chaos validation
 
-Status: pending live F5 verification.
+Status: live smoke passed; shadow/load/chaos matrix remains pending.
 
 Run the canonical Snowflake-context job with a new consumer group and output
 topic. Keep the legacy path only as a temporary comparison/rollback job.

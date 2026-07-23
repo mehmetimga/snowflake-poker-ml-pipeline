@@ -94,7 +94,9 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
   Python sidecar, Java localhost adapter, history table seeder, and
   Secret-free rendered spec exist. JDBC was removed from this boundary because
   SPCS service-token SQL does not support the JDBC driver.
-- [ ] Canonical SPCS service cutover is complete.
+- [x] Canonical `POKER_FLINK` SPCS cutover is live on immutable image
+  `c58b05dd3c4c`; all four containers are ready and the six-context/fifteen-pair
+  smoke test passes.
 
 ## 3. Current baseline and target decision
 
