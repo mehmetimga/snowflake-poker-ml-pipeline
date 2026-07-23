@@ -23,6 +23,15 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
   players.
 - The SQL lookup selects the latest version whose
   `effective_at <= played_at`.
+- Every cache-miss lookup validates its subtask-local connection. A closed or
+  invalid connection is replaced before the prepared query executes.
+- PostgreSQL connect, socket, prepared-query, and validation timeouts are
+  bounded. A transient SQLSTATE receives exactly one retry with at most
+  100 ms jitter by default; authentication, schema, and data errors never
+  retry.
+- If the retry fails, the operator throws a sanitized exception. The
+  canonical job uses a failure-rate restart policy instead of advancing Kafka
+  work or converting an infrastructure outage into a data-quality DLQ.
 - Missing rows produce a minimized data-quality diagnostic. Transient,
   authentication, schema, and other JDBC failures fail the operator with a
   sanitized category so Flink can restart from its checkpoint rather than
@@ -37,6 +46,24 @@ v2 on `poker.hand-player-context.v2`, keyed by player ID. Its
 the policy version, context record ID, context version, and effective time.
 Cache hit/miss and lookup latency are runtime metrics rather than event
 fields, so replaying the same source data produces the same event bytes.
+
+## Code boundaries
+
+The canonical path is separated by responsibility:
+
+| Package | Responsibility |
+|---|---|
+| `app` | Canonical and rollback-only process entrypoints |
+| `config` | Argument/environment parsing and validation |
+| `domain` | Flink-independent context identity and projection records |
+| `port` | Point-in-time context repository interface |
+| `adapter.jdbc` | PostgreSQL, credentials, and sanitized failure mapping |
+| `contract` | Versioned cache and enriched-event JSON contracts |
+| `flink` | Active-player keyed process operator and metrics |
+
+The root package contains shared Kafka/topology plumbing and the temporary
+legacy temporal-join implementation. Domain and port code does not depend on
+Flink or PostgreSQL.
 
 ## Build and test
 
@@ -78,6 +105,9 @@ Important options:
 | `--context-source` | required `jdbc` for the canonical entrypoint |
 | `--context-jdbc-table` | `public.poker_user_context` |
 | `--context-jdbc-query-timeout-seconds` | `1` |
+| `--context-jdbc-connect-timeout-seconds` | `3` |
+| `--context-jdbc-validation-timeout-seconds` | `1` |
+| `--context-jdbc-retry-max-jitter-ms` | `100`, maximum `5000` |
 | `--context-cache-ttl-hours` | `36` |
 | `--context-refresh-minutes` | `60` |
 | `--allowed-lateness-ms` | `30000` |
@@ -86,6 +116,9 @@ Important options:
 | `--state-ttl-hours` | `720` |
 | `--context-bootstrap-wait-ms` | `30000` live, `0` bounded |
 | `--checkpoint-interval-ms` | `30000` |
+| `--restart-max-failures-per-interval` | `3` |
+| `--restart-failure-rate-interval-ms` | `600000` |
+| `--restart-delay-ms` | `10000` |
 | `--parallelism` | `1` |
 
 JDBC mode requires `USER_CONTEXT_JDBC_URL` in job configuration. The
@@ -93,6 +126,34 @@ TaskManager also requires `USER_CONTEXT_DB_USER` and
 `USER_CONTEXT_DB_PASSWORD` from its runtime Secret. Username/password command
 line arguments are rejected, and neither credential is stored in the
 serializable job configuration or process-function fields.
+
+## Connections and metrics
+
+Each active-context operator subtask owns one PostgreSQL connection; the pair
+feature job owns none. Therefore:
+
+```text
+steady JDBC connections =
+  active-context parallelism × concurrently running context jobs
+```
+
+A reconnect closes the old resource before opening its replacement, so it
+does not intentionally double the steady connection count. During a
+blue/green or shadow comparison, include every concurrently running context
+job in the budget. Reserve separate PostgreSQL headroom for administration,
+migrations, monitoring, and brief TCP cleanup; do not size the database
+exactly to the Flink formula.
+
+For example, parallelism 4 uses four steady connections. Running old and new
+context jobs together uses eight. A practical POC allocation is those eight
+connections plus at least five non-Flink connections of operational
+headroom. Production must use the actual database connection limit and other
+application workloads.
+
+The TaskManager exports cache hit/miss/refresh, lookup found/not-found,
+retry, reconnect, final failure category, and latest lookup-latency metrics.
+Flink's standard busy-time, backpressure, checkpoint, restart, and Kafka-lag
+metrics complete the operational view.
 
 The rollback-only temporal join must be submitted explicitly:
 

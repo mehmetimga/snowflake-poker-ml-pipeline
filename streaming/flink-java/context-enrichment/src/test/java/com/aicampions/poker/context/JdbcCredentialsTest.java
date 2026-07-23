@@ -3,6 +3,7 @@ package com.aicampions.poker.context;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.aicampions.poker.context.adapter.jdbc.JdbcCredentials;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 

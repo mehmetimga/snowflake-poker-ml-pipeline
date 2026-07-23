@@ -67,12 +67,21 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
 - [x] Context refactoring F1 completed locally: tenant/product/player
   isolation, TaskManager-only JDBC credentials, classified failures,
   minimized diagnostics, and bounded shaded-JAR validation.
-- [x] Context refactoring F2 contract slice completed locally: explicit
+- [x] Context refactoring F2 completed locally: explicit
   PostgreSQL lineage in `poker.hand-player-context.v2`, isolated canonical and
-  legacy entrypoints, and a schema-v2 pair-feature compatibility adapter.
+  legacy entrypoints, schema-v2 pair-feature compatibility, and explicit
+  config/domain/port/JDBC/contract/Flink package boundaries.
 - [x] A bounded v2 run emitted six context rows and fifteen pair snapshots,
   passed offline/online parity, and produced zero F2 DLQ records.
-- [ ] F2 package/config extraction remains before F3 starts.
+- [x] The post-extraction bounded replay again produced six context rows and
+  fifteen parity-checked pair snapshots with an empty DLQ.
+- [x] Context refactoring F3 completed locally: connection validation,
+  reconnect, bounded transient retry, strict timeouts, lookup metrics, and
+  Flink failure-rate restart/backoff.
+- [x] The F3 success replay produced six context rows and fifteen
+  parity-checked pair snapshots with an empty DLQ. A controlled PostgreSQL
+  outage stopped after the configured restart limit without advancing Kafka
+  or writing an enriched/DLQ record.
 - [ ] A multi-hand running-job test proves cache-hit metrics, refresh, and TTL
   expiry.
 - [ ] SPCS PostgreSQL network rule, EAI, Secret, and rendered spec exist.

@@ -1,6 +1,6 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1 complete; F2 in progress
+Status: F1–F3 complete locally; F4 next
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -59,6 +59,11 @@ The current JDBC slice is a successful proof:
 
 It is not ready for a production deployment yet. The following issues should
 be fixed before package-level cleanup or SPCS cutover.
+
+This section preserves the original review baseline. F1–F3 have resolved the
+keying, secret, failure, contract, package, and synchronous-JDBC findings;
+the phase checklists and validation evidence below are authoritative for
+current status. Typed-state recovery and deployment work remain.
 
 ### 3.1 Critical correctness and security findings
 
@@ -291,34 +296,29 @@ com.aicampions.poker.context
     LegacyKafkaTemporalContextJob
   config/
     ContextJobConfig
-    JdbcLookupConfig
-    KafkaConfig
-    TopicBoundary
+    JdbcTableName
   domain/
     ContextKey
-    UserContext
-    ActiveContextCacheEntry
-    ContextResolution
-    LookupFailure
-  ports/
+    UserContextRecord
+  port/
     UserContextRepository
-    CredentialProvider
-    TimeProvider
-  infra/jdbc/
-    PostgresUserContextRepository
-    JdbcConnectionManager
-    SqlStateClassifier
+  adapter/jdbc/
+    JdbcConnectionFactory
+    DriverManagerConnectionFactory
+    JdbcCredentials
+    JdbcFailureClassifier
+    JdbcRepositoryObserver
+    JdbcRetryDelay
+    JdbcUserContextRepository
+    UserContextLookupException
+  contract/
+    CachedUserContext
+    JdbcEnrichedEventV2
   flink/
-    HandPlayerExpander
-    ActiveUserContextFunction
-    ContextStateDescriptor
-  contracts/
-    HandEventReader
-    EnrichedPlayerHandV2
-    DiagnosticEnvelope
-  legacy/
-    LegacyTemporalJoinFunction
-    LegacyTemporalJoinLogic
+    JdbcContextEnrichmentFunction
+  root package/
+    shared Kafka topology plumbing
+    rollback-only temporal join
 ```
 
 Rules:
@@ -336,8 +336,8 @@ Rules:
 
 Use a small reconnecting connection manager per operator subtask:
 
-- one active connection, with a maximum of two only if validation/reconnect
-  requires it;
+- one active connection; reconnect closes the old JDBC resources before
+  opening their replacement;
 - TLS required;
 - connection timeout and statement timeout;
 - read-only database role;
@@ -482,12 +482,12 @@ evidence is on `poker.synthetic.hand-player-context.f1.v1`; its paired
 
 ### F2 — Contract and package separation
 
-Status: in progress locally on 2026-07-23.
+Status: complete locally on 2026-07-23.
 
 - [x] Define enriched player-context v2 and its compatibility policy.
 - [x] Replace synthetic Kafka context envelopes with explicit JDBC lineage.
-- [ ] Create the remaining target domain/port/adapter package boundaries.
-- [ ] Extract configuration parsing from topology construction.
+- [x] Create the target domain/port/adapter package boundaries.
+- [x] Extract configuration parsing from topology construction.
 - [x] Create `ActiveContextEnrichmentJob`.
 - [x] Move the Kafka temporal join behind `LegacyKafkaTemporalContextJob`.
 - [x] Give canonical and legacy operators separate UIDs, groups, and outputs.
@@ -510,28 +510,59 @@ Validation evidence:
 - `poker.synthetic.pipeline.dead-letter.f2.v1` remained at zero offsets on
   all three partitions.
 
-The isolated accepted evidence topics are
-`poker.synthetic.hand-player-context.v2` and
-`poker.synthetic.pair-features.context-v2.v1`. They were retained for audit.
-No SPCS service was changed.
+The final structural replay loaded the shaded JAR through the explicit
+`app`, `config`, `domain`, `port`, `adapter.jdbc`, `contract`, and `flink`
+packages. It again emitted six matched rows and fifteen parity-checked pair
+snapshots. Its accepted evidence topics are
+`poker.synthetic.hand-player-context.f2-structure.v2`,
+`poker.synthetic.pair-features.f2-structure.context-v2.v1`, and
+`poker.synthetic.pipeline.dead-letter.f2-structure.v1`; the DLQ has zero
+offsets on all three partitions. The topics were retained for audit, the
+temporary Flink containers were stopped, and no SPCS service was changed.
 
 ### F3 — Robust synchronous repository
 
-Status: blocked on F2.
+Status: complete locally on 2026-07-23.
 
-1. Add connection validation/reconnect and strict timeouts.
-2. Add prepared-query and SQLSTATE tests.
-3. Add one jittered transient retry.
-4. Configure Flink failure-rate restart/backoff.
-5. Add lookup latency, result, retry, reconnect, and failure metrics.
-6. Document the connection budget per parallelism.
+- [x] Add connection validation/reconnect and strict timeouts.
+- [x] Add prepared-query and SQLSTATE tests.
+- [x] Add one bounded jittered transient retry.
+- [x] Configure Flink failure-rate restart/backoff.
+- [x] Add lookup latency, result, retry, reconnect, and failure metrics.
+- [x] Document the connection budget per parallelism.
 
 Exit gate: connection reset, slow query, database outage, bad credentials, and
 missing-context scenarios produce the declared behavior.
 
+Validation evidence:
+
+- adapter tests inject connection reset `08006`, PostgreSQL query cancellation
+  `57014`, persistent startup outage `08001`, authentication `28000`, and
+  configuration `42P01`;
+- connection-class and timeout failures reconnect and retry exactly once;
+  persistent failure stops after the second attempt;
+- authentication, configuration, and data failures do not retry;
+- prepared-query and connection-validation timeouts are asserted at the JDBC
+  interface;
+- the read-only real PostgreSQL lookup and a deliberately invalid PostgreSQL
+  password test both pass against the local simulation instance;
+- the canonical Flink job uses a failure-rate strategy of three restarts per
+  ten minutes with ten-second backoff by default;
+- a successful bounded replay emitted six enriched rows and fifteen
+  parity-checked pair features on the retained `poker.synthetic.*.f3.*`
+  evidence topics with zero DLQ offsets; and
+- a controlled unreachable-port audit attempted one configured restart,
+  stopped at the failure-rate limit, surfaced only
+  `jdbc-transient-sqlstate-08`, created no consumer-group offset, and emitted
+  zero enriched and zero DLQ records.
+
+The one-connection-per-active-context-subtask formula, concurrent shadow-job
+budget, and operational headroom are documented in the
+context-enrichment README. No SPCS service was changed.
+
 ### F4 — Typed Flink state and recovery
 
-Status: blocked on F2.
+Status: next.
 
 1. Replace JSON state with `ActiveContextCacheEntry`.
 2. Declare state schema and serializer versions.
@@ -546,7 +577,7 @@ savepoint is accepted by the canonical topology.
 
 ### F5 — SPCS network, secrets, and declarative deployment
 
-Status: blocked on F1 and F3.
+Status: blocked on F4.
 
 1. Add the PostgreSQL network rule, EAI, and Secret creation templates.
 2. Mount the context Secret in the TaskManager spec.
@@ -633,14 +664,16 @@ Repeat recovery, ordering, timeout, load, and chaos tests before enabling it.
 
 Expose at least:
 
-- `context_cache_hit_total`;
-- `context_cache_miss_total`;
-- `context_cache_refresh_total`;
-- `context_lookup_not_found_total`;
-- `context_lookup_retry_total`;
-- `context_lookup_failure_total`;
+- `context_cache_hits`;
+- `context_cache_misses`;
+- `context_cache_refreshes`;
+- `context_lookup_found`;
+- `context_lookup_not_found`;
+- `context_lookup_retries`;
+- `context_lookup_reconnects`;
+- `context_lookup_failures`;
+- `context_lookup_failure_<category>`;
 - `context_lookup_latency_ms`;
-- `context_connection_reconnect_total`;
 - enriched and quarantined row counts;
 - Flink checkpoint duration/failure;
 - operator busy/backpressured time; and
@@ -672,11 +705,15 @@ Do not include these in the current refactor:
 
 ## 15. Immediate implementation slice
 
-Finish F2 by moving configuration, domain records, repository ports, JDBC
-adapters, Flink operators, and event-contract builders into explicit packages.
-Keep the compatibility dispatcher only until deployment and runbook callers
-use the two explicit entrypoints. Re-run the same bounded v2 evidence after
-the move, then begin F3 repository reconnect/retry work.
+Start F4 by replacing JSON `ValueState` with a versioned typed cache entry
+without changing the v2 Kafka contract:
+
+1. define `ActiveContextCacheEntry` and its serializer version;
+2. use typed `ValueState<ActiveContextCacheEntry>`;
+3. add fake-clock tests for 36-hour inactivity TTL and 60-minute freshness;
+4. test a late hand against current and prior context versions;
+5. prove checkpoint/savepoint restore with the same build; and
+6. document and test the first state-schema upgrade path.
 
 Do not start SPCS mutation until F1–F5 local and rendered-spec gates pass.
 

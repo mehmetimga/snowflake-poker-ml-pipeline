@@ -1,11 +1,14 @@
-package com.aicampions.poker.context;
+package com.aicampions.poker.context.domain;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.UUID;
 
 /** Narrow context projection returned by the PostgreSQL lookup table. */
-record UserContextRecord(
+public record UserContextRecord(
         String tenantId,
         String productId,
         String userId,
@@ -25,7 +28,7 @@ record UserContextRecord(
     private static final UUID URL_NAMESPACE =
             UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
 
-    UserContextRecord {
+    public UserContextRecord {
         new ContextKey(tenantId, productId, userId);
         if (contextVersion < 1) {
             throw new IllegalArgumentException("contextVersion must be positive");
@@ -35,7 +38,7 @@ record UserContextRecord(
         }
     }
 
-    UUID contextRecordId() {
+    public UUID contextRecordId() {
         String eventName = String.join(
                 ":",
                 "postgres-user-context-v1",
@@ -44,25 +47,23 @@ record UserContextRecord(
                 userId,
                 Integer.toString(contextVersion),
                 effectiveAt.toString());
-        return TemporalJoinLogic.uuid5(URL_NAMESPACE, eventName);
+        return uuid5(URL_NAMESPACE, eventName);
     }
 
-    ObjectNode toPayload() {
-        ObjectNode payload = EventJson.MAPPER.createObjectNode();
-        payload.put("user_id", userId);
-        payload.put("context_version", contextVersion);
-        payload.put("effective_at", effectiveAt.toString());
-        payload.put("account_created_at", accountCreatedAt.toString());
-        payload.put("country_bucket", countryBucket);
-        payload.put("timezone", timezone);
-        payload.put("acquisition_channel", acquisitionChannel);
-        payload.put("kyc_level", kycLevel);
-        payload.put("account_status", accountStatus);
-        payload.put("bankroll_bucket", bankrollBucket);
-        payload.put("preferred_stake_bucket", preferredStakeBucket);
-        payload.put("skill_rating", skillRating);
-        payload.put("device_id", deviceId);
-        payload.put("network_cluster_id", networkClusterId);
-        return payload;
+    private static UUID uuid5(UUID namespace, String name) {
+        try {
+            MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
+            ByteBuffer namespaceBytes = ByteBuffer.allocate(16);
+            namespaceBytes.putLong(namespace.getMostSignificantBits());
+            namespaceBytes.putLong(namespace.getLeastSignificantBits());
+            sha1.update(namespaceBytes.array());
+            byte[] digest = sha1.digest(name.getBytes(StandardCharsets.UTF_8));
+            digest[6] = (byte) ((digest[6] & 0x0f) | 0x50);
+            digest[8] = (byte) ((digest[8] & 0x3f) | 0x80);
+            ByteBuffer uuidBytes = ByteBuffer.wrap(digest, 0, 16);
+            return new UUID(uuidBytes.getLong(), uuidBytes.getLong());
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-1 is unavailable", error);
+        }
     }
 }

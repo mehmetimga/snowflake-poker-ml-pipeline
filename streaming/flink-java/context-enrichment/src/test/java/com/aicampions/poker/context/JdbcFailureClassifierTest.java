@@ -3,6 +3,8 @@ package com.aicampions.poker.context;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
+import com.aicampions.poker.context.adapter.jdbc.UserContextLookupException;
 import java.sql.SQLException;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +24,16 @@ final class JdbcFailureClassifierTest {
 
     @Test
     void distinguishesAuthorizationConfigurationAndDataFailures() {
+        assertEquals(
+                JdbcFailureClassifier.Kind.TRANSIENT,
+                JdbcFailureClassifier.classify(
+                        new SQLException("serialization retry", "40001"))
+                        .kind());
+        assertEquals(
+                JdbcFailureClassifier.Kind.TRANSIENT,
+                JdbcFailureClassifier.classify(
+                        new SQLException("query canceled", "57014"))
+                        .kind());
         assertEquals(
                 JdbcFailureClassifier.Kind.AUTHENTICATION_OR_AUTHORIZATION,
                 JdbcFailureClassifier.classify(new SQLException("denied", "28000")).kind());

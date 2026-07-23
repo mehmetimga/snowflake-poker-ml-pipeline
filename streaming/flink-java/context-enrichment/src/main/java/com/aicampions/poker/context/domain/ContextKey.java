@@ -1,4 +1,4 @@
-package com.aicampions.poker.context;
+package com.aicampions.poker.context.domain;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -46,7 +46,7 @@ public final class ContextKey implements Serializable {
         this.playerId = playerId;
     }
 
-    void validate() {
+    public void validate() {
         requireValue(tenantId, "tenantId");
         requireValue(productId, "productId");
         requireValue(playerId, "playerId");

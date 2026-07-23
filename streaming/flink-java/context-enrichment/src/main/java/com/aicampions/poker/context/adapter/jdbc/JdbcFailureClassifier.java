@@ -1,10 +1,10 @@
-package com.aicampions.poker.context;
+package com.aicampions.poker.context.adapter.jdbc;
 
 import java.sql.SQLException;
 
 /** Maps JDBC failures to bounded, non-sensitive operational categories. */
-final class JdbcFailureClassifier {
-    enum Kind {
+public final class JdbcFailureClassifier {
+    public enum Kind {
         TRANSIENT("transient"),
         AUTHENTICATION_OR_AUTHORIZATION("authentication-or-authorization"),
         CONFIGURATION("configuration"),
@@ -17,20 +17,20 @@ final class JdbcFailureClassifier {
             this.code = code;
         }
 
-        String code() {
+        public String code() {
             return code;
         }
     }
 
-    record Failure(Kind kind, String sqlStateClass) {
-        String safeCode() {
+    public record Failure(Kind kind, String sqlStateClass) {
+        public String safeCode() {
             return "jdbc-" + kind.code() + "-sqlstate-" + sqlStateClass;
         }
     }
 
     private JdbcFailureClassifier() {}
 
-    static Failure classify(Throwable error) {
+    public static Failure classify(Throwable error) {
         SQLException sqlError = findSqlException(error);
         if (sqlError == null) {
             return new Failure(Kind.UNKNOWN, "none");

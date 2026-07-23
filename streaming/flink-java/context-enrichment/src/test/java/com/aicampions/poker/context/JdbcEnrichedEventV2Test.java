@@ -3,6 +3,9 @@ package com.aicampions.poker.context;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.aicampions.poker.context.contract.CachedUserContext;
+import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
+import com.aicampions.poker.context.domain.UserContextRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;

@@ -1,7 +1,21 @@
-package com.aicampions.poker.context;
+package com.aicampions.poker.context.flink;
 
+import com.aicampions.poker.context.DeadLetters;
+import com.aicampions.poker.context.EventJson;
+import com.aicampions.poker.context.adapter.jdbc.JdbcCredentials;
+import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
+import com.aicampions.poker.context.adapter.jdbc.JdbcRepositoryObserver;
+import com.aicampions.poker.context.adapter.jdbc.JdbcUserContextRepository;
+import com.aicampions.poker.context.adapter.jdbc.UserContextLookupException;
+import com.aicampions.poker.context.contract.CachedUserContext;
+import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
+import com.aicampions.poker.context.domain.ContextKey;
+import com.aicampions.poker.context.domain.UserContextRecord;
+import com.aicampions.poker.context.port.UserContextRepository;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
@@ -12,11 +26,14 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 
 /** Lazy synchronous JDBC enrichment with one TTL-managed cache entry per active player. */
-final class JdbcContextEnrichmentFunction
+public final class JdbcContextEnrichmentFunction
         extends KeyedProcessFunction<ContextKey, String, String> {
     private final String jdbcUrl;
     private final String tableName;
     private final int queryTimeoutSeconds;
+    private final int connectTimeoutSeconds;
+    private final int validationTimeoutSeconds;
+    private final long retryMaximumJitterMs;
     private final long cacheTtlHours;
     private final long refreshAfterMs;
     private final String handTopic;
@@ -27,23 +44,33 @@ final class JdbcContextEnrichmentFunction
     private transient Counter cacheMisses;
     private transient Counter cacheRefreshes;
     private transient Counter lookupFailures;
+    private transient Counter lookupFound;
     private transient Counter contextNotFound;
+    private transient Counter lookupRetries;
+    private transient Counter lookupReconnects;
     private transient Counter transientFailures;
     private transient Counter authorizationFailures;
     private transient Counter configurationFailures;
     private transient Counter dataFailures;
     private transient Counter unknownFailures;
+    private transient AtomicLong latestLookupLatencyMs;
 
-    JdbcContextEnrichmentFunction(
+    public JdbcContextEnrichmentFunction(
             String jdbcUrl,
             String tableName,
             int queryTimeoutSeconds,
+            int connectTimeoutSeconds,
+            int validationTimeoutSeconds,
+            long retryMaximumJitterMs,
             long cacheTtlHours,
             long refreshMinutes,
             String handTopic) {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
+        this.connectTimeoutSeconds = connectTimeoutSeconds;
+        this.validationTimeoutSeconds = validationTimeoutSeconds;
+        this.retryMaximumJitterMs = retryMaximumJitterMs;
         this.cacheTtlHours = cacheTtlHours;
         this.refreshAfterMs = Duration.ofMinutes(refreshMinutes).toMillis();
         this.handTopic = handTopic;
@@ -64,13 +91,22 @@ final class JdbcContextEnrichmentFunction
         cacheMisses = counter("context_cache_misses");
         cacheRefreshes = counter("context_cache_refreshes");
         lookupFailures = counter("context_lookup_failures");
-        contextNotFound = counter("context_not_found");
+        lookupFound = counter("context_lookup_found");
+        contextNotFound = counter("context_lookup_not_found");
+        lookupRetries = counter("context_lookup_retries");
+        lookupReconnects = counter("context_lookup_reconnects");
         transientFailures = counter("context_lookup_failure_transient");
         authorizationFailures =
                 counter("context_lookup_failure_authentication_or_authorization");
         configurationFailures = counter("context_lookup_failure_configuration");
         dataFailures = counter("context_lookup_failure_data");
         unknownFailures = counter("context_lookup_failure_unknown");
+        latestLookupLatencyMs = new AtomicLong();
+        getRuntimeContext()
+                .getMetricGroup()
+                .gauge(
+                        "context_lookup_latency_ms",
+                        latestLookupLatencyMs::get);
         try {
             JdbcCredentials credentials = JdbcCredentials.fromEnvironment(System.getenv());
             repository = new JdbcUserContextRepository(
@@ -78,7 +114,22 @@ final class JdbcContextEnrichmentFunction
                     credentials.username(),
                     credentials.password(),
                     tableName,
-                    queryTimeoutSeconds);
+                    queryTimeoutSeconds,
+                    connectTimeoutSeconds,
+                    validationTimeoutSeconds,
+                    retryMaximumJitterMs,
+                    new JdbcRepositoryObserver() {
+                        @Override
+                        public void retry(
+                                JdbcFailureClassifier.Failure failure) {
+                            lookupRetries.inc();
+                        }
+
+                        @Override
+                        public void reconnect() {
+                            lookupReconnects.inc();
+                        }
+                    });
         } catch (Exception error) {
             lookupFailures.inc();
             JdbcFailureClassifier.Failure failure = JdbcFailureClassifier.classify(error);
@@ -109,6 +160,7 @@ final class JdbcContextEnrichmentFunction
                 cacheRefreshes.inc();
             }
             Optional<UserContextRecord> loaded;
+            long lookupStartedNs = System.nanoTime();
             try {
                 loaded = repository.findEffective(contextKey, playedAtMs);
             } catch (Exception error) {
@@ -117,6 +169,11 @@ final class JdbcContextEnrichmentFunction
                         JdbcFailureClassifier.classify(error);
                 incrementFailureCounter(failure.kind());
                 throw new UserContextLookupException(failure);
+            } finally {
+                latestLookupLatencyMs.set(Math.max(
+                        0L,
+                        TimeUnit.NANOSECONDS.toMillis(
+                                System.nanoTime() - lookupStartedNs)));
             }
             if (loaded.isEmpty()) {
                 contextNotFound.inc();
@@ -129,6 +186,7 @@ final class JdbcContextEnrichmentFunction
                                 expandedHand));
                 return;
             }
+            lookupFound.inc();
             UserContextRecord record = loaded.orElseThrow();
             ContextKey loadedKey =
                     new ContextKey(record.tenantId(), record.productId(), record.userId());

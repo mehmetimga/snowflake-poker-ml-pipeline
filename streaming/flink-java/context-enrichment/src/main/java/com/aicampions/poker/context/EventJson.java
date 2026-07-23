@@ -1,5 +1,6 @@
 package com.aicampions.poker.context;
 
+import com.aicampions.poker.context.domain.ContextKey;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,12 +15,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-final class EventJson {
-    static final ObjectMapper MAPPER = new ObjectMapper();
-    static final String HAND_COMPLETED = "poker.hand.completed";
-    static final String USER_CONTEXT_UPDATED = "poker.user-context.updated";
-    static final String ENRICHED = "poker.hand-player-context.enriched";
-    static final String JOIN_POLICY = "event-time-user-context-v1";
+public final class EventJson {
+    public static final ObjectMapper MAPPER = new ObjectMapper();
+    public static final String HAND_COMPLETED = "poker.hand.completed";
+    public static final String USER_CONTEXT_UPDATED = "poker.user-context.updated";
+    public static final String ENRICHED = "poker.hand-player-context.enriched";
+    public static final String JOIN_POLICY = "event-time-user-context-v1";
     private static final Set<String> FORBIDDEN_INFERENCE_FIELDS = Set.of(
             "collusion_group_id",
             "collusion_pair_id",
@@ -32,7 +33,7 @@ final class EventJson {
 
     private EventJson() {}
 
-    static JsonNode parse(String value) {
+    public static JsonNode parse(String value) {
         try {
             return MAPPER.readTree(value);
         } catch (JsonProcessingException error) {
@@ -40,7 +41,7 @@ final class EventJson {
         }
     }
 
-    static String compact(JsonNode value) {
+    public static String compact(JsonNode value) {
         try {
             return MAPPER.writeValueAsString(value);
         } catch (JsonProcessingException error) {
@@ -48,7 +49,7 @@ final class EventJson {
         }
     }
 
-    static void validateEnvelope(String value, String requiredEventType) {
+    public static void validateEnvelope(String value, String requiredEventType) {
         JsonNode root = parse(value);
         parseUuid(requireText(root, "event_id"));
         String eventType = requireText(root, "event_type");
@@ -114,7 +115,7 @@ final class EventJson {
         requireText(payload, "network_cluster_id");
     }
 
-    static String requireText(JsonNode node, String field) {
+    public static String requireText(JsonNode node, String field) {
         JsonNode value = node.path(field);
         if (!value.isTextual() || value.textValue().isBlank()) {
             throw new IllegalArgumentException(field + " must be a non-empty string");
@@ -122,7 +123,7 @@ final class EventJson {
         return value.textValue();
     }
 
-    static long parseInstant(String value) {
+    public static long parseInstant(String value) {
         try {
             return Instant.parse(value).toEpochMilli();
         } catch (RuntimeException error) {
@@ -154,15 +155,15 @@ final class EventJson {
         }
     }
 
-    static long occurredAtMs(String value) {
+    public static long occurredAtMs(String value) {
         return parseInstant(requireText(parse(value), "occurred_at"));
     }
 
-    static String contextUserId(String value) {
+    public static String contextUserId(String value) {
         return requireText(parse(value).path("payload"), "user_id");
     }
 
-    static ContextKey contextKeyFromContextEvent(String value) {
+    public static ContextKey contextKeyFromContextEvent(String value) {
         JsonNode event = parse(value);
         return new ContextKey(
                 requireText(event, "tenant_id"),
@@ -170,7 +171,7 @@ final class EventJson {
                 requireText(event.path("payload"), "user_id"));
     }
 
-    static ContextKey contextKeyFromExpandedHand(String value) {
+    public static ContextKey contextKeyFromExpandedHand(String value) {
         JsonNode expanded = parse(value);
         JsonNode hand = expanded.path("hand");
         return new ContextKey(
@@ -179,22 +180,23 @@ final class EventJson {
                 requireText(expanded, "player_id"));
     }
 
-    static String playerIdFromExpandedHand(String value) {
+    public static String playerIdFromExpandedHand(String value) {
         return requireText(parse(value), "player_id");
     }
 
-    static String playerIdFromEnriched(String value) {
+    public static String playerIdFromEnriched(String value) {
         return requireText(parse(value).path("payload").path("player"), "player_id");
     }
 
-    static String expandPlayer(JsonNode hand, JsonNode player) {
+    public static String expandPlayer(JsonNode hand, JsonNode player) {
         ObjectNode expanded = MAPPER.createObjectNode();
         expanded.set("hand", hand.deepCopy());
         expanded.put("player_id", requireText(player, "player_id"));
         return compact(expanded);
     }
 
-    static String deadLetter(String sourceTopic, String stage, String reason, String rawValue) {
+    public static String deadLetter(
+            String sourceTopic, String stage, String reason, String rawValue) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("event_type", "poker.pipeline.dead-letter");
         root.put("schema_version", 1);
@@ -208,7 +210,7 @@ final class EventJson {
         return compact(root);
     }
 
-    static byte[] utf8(String value) {
+    public static byte[] utf8(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 

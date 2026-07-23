@@ -3,6 +3,8 @@ package com.aicampions.poker.context;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.aicampions.poker.context.contract.CachedUserContext;
+import com.aicampions.poker.context.domain.UserContextRecord;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 

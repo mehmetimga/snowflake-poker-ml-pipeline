@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.aicampions.poker.context.config.ContextJobConfig;
 import java.util.Arrays;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -11,7 +12,7 @@ import org.junit.jupiter.api.Test;
 final class JobConfigTest {
     @Test
     void parsesOperationalOptionsWithoutPrintingSecrets() {
-        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+        ContextJobConfig config = ContextJobConfig.parse(
                 new String[] {
                     "--from-beginning",
                     "--bounded",
@@ -36,13 +37,13 @@ final class JobConfigTest {
     void rejectsNegativeTimingPolicy() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ContextEnrichmentJob.JobConfig.parse(
+                () -> ContextJobConfig.parse(
                         new String[] {"--allowed-lateness-ms", "-1"}, Map.of()));
     }
 
     @Test
     void parsesJdbcActiveUserCacheWithoutSerializingCredentials() {
-        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+        ContextJobConfig config = ContextJobConfig.parse(
                 new String[] {
                     "--context-source", "jdbc",
                     "--context-cache-ttl-hours", "36",
@@ -67,15 +68,82 @@ final class JobConfigTest {
     void jdbcSourceRequiresConnectionConfiguration() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ContextEnrichmentJob.JobConfig.parse(
+                () -> ContextJobConfig.parse(
                         new String[] {"--context-source", "jdbc"}, Map.of()));
+    }
+
+    @Test
+    void parsesJdbcReliabilityAndFailureRateRestartLimits() {
+        ContextJobConfig config = ContextJobConfig.parse(
+                new String[] {
+                    "--context-source", "jdbc",
+                    "--context-jdbc-connect-timeout-seconds", "4",
+                    "--context-jdbc-query-timeout-seconds", "2",
+                    "--context-jdbc-validation-timeout-seconds", "3",
+                    "--context-jdbc-retry-max-jitter-ms", "75",
+                    "--restart-max-failures-per-interval", "5",
+                    "--restart-failure-rate-interval-ms", "900000",
+                    "--restart-delay-ms", "15000"
+                },
+                Map.of(
+                        "USER_CONTEXT_JDBC_URL",
+                        "jdbc:postgresql://db.example/poker"));
+
+        assertEquals(4, config.contextJdbcConnectTimeoutSeconds());
+        assertEquals(2, config.contextJdbcQueryTimeoutSeconds());
+        assertEquals(3, config.contextJdbcValidationTimeoutSeconds());
+        assertEquals(75L, config.contextJdbcRetryMaximumJitterMs());
+        assertEquals(5, config.restartMaxFailuresPerInterval());
+        assertEquals(900_000L, config.restartFailureRateIntervalMs());
+        assertEquals(15_000L, config.restartDelayMs());
+        assertFalse(config.safeSummary().contains("db.example"));
+    }
+
+    @Test
+    void rejectsUnsafeJdbcReliabilityLimits() {
+        Map<String, String> environment = Map.of(
+                "USER_CONTEXT_JDBC_URL",
+                "jdbc:postgresql://db.example/poker");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextJobConfig.parse(
+                        new String[] {
+                            "--context-source", "jdbc",
+                            "--context-jdbc-connect-timeout-seconds", "0"
+                        },
+                        environment));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextJobConfig.parse(
+                        new String[] {
+                            "--context-source", "jdbc",
+                            "--context-jdbc-retry-max-jitter-ms", "5001"
+                        },
+                        environment));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextJobConfig.parse(
+                        new String[] {
+                            "--context-source", "jdbc",
+                            "--context-jdbc-retry-max-jitter-ms", "-1"
+                        },
+                        environment));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextJobConfig.parse(
+                        new String[] {
+                            "--context-source", "jdbc",
+                            "--restart-max-failures-per-interval", "0"
+                        },
+                        environment));
     }
 
     @Test
     void rejectsJdbcCredentialsInCommandLineArguments() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ContextEnrichmentJob.JobConfig.parse(
+                () -> ContextJobConfig.parse(
                         new String[] {
                             "--context-source", "jdbc",
                             "--context-jdbc-password", "must-not-enter-job-graph"
@@ -85,7 +153,7 @@ final class JobConfigTest {
 
     @Test
     void simulationModeRequiresExactIsolatedBoundary() {
-        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+        ContextJobConfig config = ContextJobConfig.parse(
                 new String[] {"--simulation-mode"},
                 Map.of(
                         "KAFKA_WORLD_HANDS_TOPIC", "poker.sim.hands.raw.v1",
@@ -99,19 +167,19 @@ final class JobConfigTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ContextEnrichmentJob.JobConfig.parse(
+                () -> ContextJobConfig.parse(
                         new String[] {"--simulation-mode"},
                         Map.of("KAFKA_WORLD_HANDS_TOPIC", "poker.hands.raw.v1")));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ContextEnrichmentJob.JobConfig.parse(
+                () -> ContextJobConfig.parse(
                         new String[0],
                         Map.of("KAFKA_WORLD_HANDS_TOPIC", "poker.sim.hands.raw.v1")));
     }
 
     @Test
     void jdbcSimulationUsesItsOwnV2TopicAndGroup() {
-        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+        ContextJobConfig config = ContextJobConfig.parse(
                 new String[] {"--simulation-mode"},
                 Map.of(
                         "FLINK_CONTEXT_SOURCE", "jdbc",

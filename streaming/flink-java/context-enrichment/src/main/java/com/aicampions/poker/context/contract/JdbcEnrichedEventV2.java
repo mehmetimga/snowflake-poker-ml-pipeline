@@ -1,5 +1,6 @@
-package com.aicampions.poker.context;
+package com.aicampions.poker.context.contract;
 
+import com.aicampions.poker.context.EventJson;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.ByteBuffer;
@@ -9,17 +10,17 @@ import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 
 /** Deterministic schema-v2 player-hand event with explicit PostgreSQL lineage. */
-final class JdbcEnrichedEventV2 {
-    static final String EVENT_TYPE = "poker.hand-player-context.enriched";
-    static final String RESOLUTION_MODE = "postgresql_point_in_time";
-    static final String RESOLUTION_POLICY = "jdbc-effective-at-v1";
-    static final String RESOLUTION_SOURCE = "postgresql";
+public final class JdbcEnrichedEventV2 {
+    public static final String EVENT_TYPE = "poker.hand-player-context.enriched";
+    public static final String RESOLUTION_MODE = "postgresql_point_in_time";
+    public static final String RESOLUTION_POLICY = "jdbc-effective-at-v1";
+    public static final String RESOLUTION_SOURCE = "postgresql";
     private static final UUID URL_NAMESPACE =
             UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
 
     private JdbcEnrichedEventV2() {}
 
-    static String create(String expandedHand, String cachedContext) {
+    public static String create(String expandedHand, String cachedContext) {
         JsonNode expanded = EventJson.parse(expandedHand);
         JsonNode hand = expanded.path("hand");
         JsonNode handPayload = hand.path("payload");
