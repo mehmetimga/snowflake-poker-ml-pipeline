@@ -113,13 +113,33 @@
         "context_effective_at"
       ],
       "properties": {
-        "mode": {"const": "postgresql_point_in_time"},
-        "policy_version": {"const": "jdbc-effective-at-v1"},
-        "source": {"const": "postgresql"},
+        "mode": {
+          "enum": ["postgresql_point_in_time", "snowflake_point_in_time"]
+        },
+        "policy_version": {
+          "enum": ["jdbc-effective-at-v1", "snowflake-effective-at-v1"]
+        },
+        "source": {"enum": ["postgresql", "snowflake"]},
         "context_record_id": {"type": "string", "format": "uuid"},
         "context_version": {"type": "integer", "minimum": 1},
         "context_effective_at": {"type": "string", "format": "date-time"}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {"const": "postgresql_point_in_time"},
+            "policy_version": {"const": "jdbc-effective-at-v1"},
+            "source": {"const": "postgresql"}
+          }
+        },
+        {
+          "properties": {
+            "mode": {"const": "snowflake_point_in_time"},
+            "policy_version": {"const": "snowflake-effective-at-v1"},
+            "source": {"const": "snowflake"}
+          }
+        }
+      ]
     },
     "payload": {
       "type": "object",

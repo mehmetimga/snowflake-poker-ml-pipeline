@@ -48,3 +48,24 @@ def test_v2_resolution_must_match_context_snapshot() -> None:
 
     with pytest.raises(ValidationError, match="context_version"):
         PlayerHandContextEventV2.model_validate(value)
+
+
+def test_v2_accepts_snowflake_lineage_as_one_consistent_tuple() -> None:
+    value = copy.deepcopy(_example())
+    resolution = value["payload"]["context_resolution"]
+    resolution.update(
+        mode="snowflake_point_in_time",
+        policy_version="snowflake-effective-at-v1",
+        source="snowflake",
+    )
+
+    event = PlayerHandContextEventV2.model_validate(value)
+    Draft202012Validator(
+        json.loads(SCHEMA.read_text()),
+        format_checker=FormatChecker(),
+    ).validate(value)
+    assert event.payload.context_resolution.source == "snowflake"
+
+    resolution["policy_version"] = "jdbc-effective-at-v1"
+    with pytest.raises(ValidationError, match="supported point-in-time policy"):
+        PlayerHandContextEventV2.model_validate(value)

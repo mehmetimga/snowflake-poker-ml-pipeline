@@ -2,6 +2,7 @@ package com.aicampions.poker.features;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -112,6 +113,21 @@ class PairFeatureMathTest {
                 output.path("payload").path("feature_definition_version").asText());
     }
 
+    @Test
+    void schemaTwoAcceptsSnowflakeLineageAndRejectsMixedPolicies() {
+        ObjectNode snowflake = snowflakeV2(
+                enriched("p1", "BTN", 30.0, 0.6, "device-a", 365));
+        PairEventJson.validateEnriched(PairEventJson.compact(snowflake), 2);
+
+        snowflake
+                .withObject("/payload/context_resolution")
+                .put("policy_version", "jdbc-effective-at-v1");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PairEventJson.validateEnriched(
+                        PairEventJson.compact(snowflake), 2));
+    }
+
     private static ObjectNode enriched(
             String playerId,
             String position,
@@ -189,6 +205,15 @@ class PairFeatureMathTest {
     }
 
     private static ObjectNode jdbcV2(ObjectNode root) {
+        return pointInTimeV2(root, "postgresql");
+    }
+
+    private static ObjectNode snowflakeV2(ObjectNode root) {
+        return pointInTimeV2(root, "snowflake");
+    }
+
+    private static ObjectNode pointInTimeV2(
+            ObjectNode root, String source) {
         root.put("schema_version", 2);
         ObjectNode payload = (ObjectNode) root.path("payload");
         payload.remove("context_version");
@@ -198,9 +223,18 @@ class PairFeatureMathTest {
         payload.remove("correction_window_ms");
         payload.remove("join_policy_version");
         ObjectNode resolution = payload.putObject("context_resolution");
-        resolution.put("mode", "postgresql_point_in_time");
-        resolution.put("policy_version", "jdbc-effective-at-v1");
-        resolution.put("source", "postgresql");
+        boolean snowflake = source.equals("snowflake");
+        resolution.put(
+                "mode",
+                snowflake
+                        ? "snowflake_point_in_time"
+                        : "postgresql_point_in_time");
+        resolution.put(
+                "policy_version",
+                snowflake
+                        ? "snowflake-effective-at-v1"
+                        : "jdbc-effective-at-v1");
+        resolution.put("source", source);
         resolution.put(
                 "context_record_id",
                 UUID.nameUUIDFromBytes(

@@ -102,9 +102,22 @@ final class PairEventJson {
             throw new IllegalArgumentException("invalid JDBC context version or effective time");
         }
         JsonNode resolution = payload.path("context_resolution");
-        if (!"postgresql_point_in_time".equals(requireText(resolution, "mode"))
-                || !"jdbc-effective-at-v1".equals(requireText(resolution, "policy_version"))
-                || !"postgresql".equals(requireText(resolution, "source"))) {
+        String source = requireText(resolution, "source");
+        String expectedMode;
+        String expectedPolicy;
+        if ("postgresql".equals(source)) {
+            expectedMode = "postgresql_point_in_time";
+            expectedPolicy = "jdbc-effective-at-v1";
+        } else if ("snowflake".equals(source)) {
+            expectedMode = "snowflake_point_in_time";
+            expectedPolicy = "snowflake-effective-at-v1";
+        } else {
+            throw new IllegalArgumentException(
+                    "invalid point-in-time context source");
+        }
+        if (!expectedMode.equals(requireText(resolution, "mode"))
+                || !expectedPolicy.equals(
+                        requireText(resolution, "policy_version"))) {
             throw new IllegalArgumentException("invalid JDBC context resolution policy");
         }
         parseUuid(requireText(resolution, "context_record_id"));

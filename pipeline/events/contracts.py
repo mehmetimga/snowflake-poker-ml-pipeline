@@ -302,18 +302,41 @@ class PlayerHandContextEvent(_ContractModel):
 
 
 class ContextResolutionV2(_ContractModel):
-    """Stable PostgreSQL lineage; cache/latency details remain runtime metrics."""
+    """Stable point-in-time lineage; cache/latency details remain runtime metrics."""
 
-    mode: Literal["postgresql_point_in_time"] = "postgresql_point_in_time"
-    policy_version: Literal["jdbc-effective-at-v1"] = "jdbc-effective-at-v1"
-    source: Literal["postgresql"] = "postgresql"
+    mode: Literal[
+        "postgresql_point_in_time", "snowflake_point_in_time"
+    ]
+    policy_version: Literal[
+        "jdbc-effective-at-v1", "snowflake-effective-at-v1"
+    ]
+    source: Literal["postgresql", "snowflake"]
     context_record_id: uuid.UUID
     context_version: int = Field(ge=1)
     context_effective_at: datetime
 
+    @model_validator(mode="after")
+    def validate_lineage_tuple(self) -> "ContextResolutionV2":
+        expected = {
+            "postgresql": (
+                "postgresql_point_in_time",
+                "jdbc-effective-at-v1",
+            ),
+            "snowflake": (
+                "snowflake_point_in_time",
+                "snowflake-effective-at-v1",
+            ),
+        }[self.source]
+        if (self.mode, self.policy_version) != expected:
+            raise ValueError(
+                "context resolution mode, policy_version, and source "
+                "must identify one supported point-in-time policy"
+            )
+        return self
+
 
 class PlayerHandContextPayloadV2(_ContractModel):
-    """One deterministic player-hand row resolved from PostgreSQL."""
+    """One deterministic player-hand row resolved from versioned context."""
 
     hand_id: str = Field(min_length=1)
     table_id: str = Field(min_length=1)
