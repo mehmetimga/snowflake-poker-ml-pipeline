@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pipeline.events import (
     PairFeatureEvent,
     PairHandLabel,
+    PlayerHandContextEvent,
     assert_inference_safe,
     validate_event,
 )
@@ -77,6 +78,7 @@ def test_alert_acceptance_pack_is_deterministic_and_verifiable(
     )
     assert result["status"] == "passed"
     assert result["hands"] == 16
+    assert result["player_context"] == 96
     assert result["pair_features"] == 240
     assert result["expected_model_alerts"] == 14
     assert result["selected_demo_alerts"] == 10
@@ -131,13 +133,20 @@ def test_alert_acceptance_contracts_and_public_boundary(
     hands = [
         validate_event(row) for row in iter_jsonl(output / "events" / "hands.jsonl")
     ]
+    player_context = [
+        PlayerHandContextEvent.model_validate(row)
+        for row in iter_jsonl(output / "expected" / "player_context.jsonl")
+    ]
     features = [
         PairFeatureEvent.model_validate(row)
         for row in iter_jsonl(output / "expected" / "pair_features.jsonl")
     ]
-    for value in (*hands, *features):
+    for value in (*hands, *player_context, *features):
         assert_inference_safe(value.model_dump(mode="json"))
     assert {int(hand.payload["num_players"]) for hand in hands} == {6}
+    assert set(Counter(event.payload.hand_id for event in player_context).values()) == {
+        6
+    }
     assert set(Counter(event.payload.hand_id for event in features).values()) == {15}
     public_text = (output / "events" / "hands.jsonl").read_text() + (
         output / "snapshots" / "users.jsonl"

@@ -7,6 +7,7 @@
 .PHONY: shadow-sim-package-test shadow-sim-java-test shadow-sim-topics shadow-sim-render shadow-sim-deploy-flink shadow-sim-deploy-risk shadow-sim-deploy shadow-sim-generate shadow-sim-replay shadow-sim-verify shadow-sim-e2e phase-c2-shadow-packaging-check
 .PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-seed-user-context cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 .PHONY: f5-package-test phase-f5-check
+.PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -41,6 +42,8 @@ MULTITABLE_BENCHMARK_DIR ?= data/datasets/multitable-benchmarks-v1
 ALERT_ACCEPTANCE_CONFIG ?= config/generator/multitable-alert-acceptance-v1.json
 ALERT_ACCEPTANCE_DIR ?= data/datasets/multitable-alert-acceptance-v1
 ALERT_ACCEPTANCE_MODEL_DIR ?= models/pair-catboost-full-v2
+ALERT_ACCEPTANCE_RUNTIME_DIR ?= data/runs/alert-acceptance-$(shell date -u +%Y%m%dT%H%M%SZ)
+ALERT_ACCEPTANCE_TRITON_URL ?= http://127.0.0.1:18000
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -171,6 +174,8 @@ help:
 	@echo "  multitable-alert-acceptance Build D6 training-excluded replay pack"
 	@echo "  multitable-alert-acceptance-check Verify D6 hashes, oracles, and isolation"
 	@echo "  multitable-alert-acceptance-test Test D6 rules, scores, and training guard"
+	@echo "  multitable-alert-replay-java Replay D6 through Java/Flink shared logic"
+	@echo "  multitable-alert-replay-local Run Java parity and Go scoring via Triton"
 	@echo "  pair-dataset Build frozen pair benchmarks and DGX Parquet exports"
 	@echo "  pair-dataset-check Audit pair dataset hashes and leakage boundaries"
 	@echo "  pair-labels Load restricted pair-label sidecars into the warehouse"
@@ -403,7 +408,28 @@ multitable-alert-acceptance-check:
 multitable-alert-acceptance-test:
 	$(PY) -m pytest -q tests/test_alert_acceptance.py
 	cd $(GO_RISK_DIR) && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache \
-		$(GO) test ./internal/risk
+		$(GO) test ./...
+
+multitable-alert-replay-java-build:
+	docker run --rm -v $(CURDIR):/workspace -v $(MAVEN_REPO):/root/.m2 \
+		-w /workspace/$(FLINK_PAIR_FEATURES_DIR) \
+		maven:3.9.9-eclipse-temurin-17 mvn -q test package
+
+multitable-alert-replay-java: multitable-alert-acceptance-check multitable-alert-replay-java-build
+	$(PY) scripts/run_alert_acceptance_runtime.py \
+		--dataset $(ALERT_ACCEPTANCE_DIR) \
+		--model-dir $(ALERT_ACCEPTANCE_MODEL_DIR) \
+		--benchmark-dir $(MULTITABLE_BENCHMARK_DIR) \
+		--output-dir $(ALERT_ACCEPTANCE_RUNTIME_DIR) \
+		--skip-go
+
+multitable-alert-replay-local: multitable-alert-acceptance-check multitable-alert-replay-java-build
+	$(PY) scripts/run_alert_acceptance_runtime.py \
+		--dataset $(ALERT_ACCEPTANCE_DIR) \
+		--model-dir $(ALERT_ACCEPTANCE_MODEL_DIR) \
+		--benchmark-dir $(MULTITABLE_BENCHMARK_DIR) \
+		--triton-url $(ALERT_ACCEPTANCE_TRITON_URL) \
+		--output-dir $(ALERT_ACCEPTANCE_RUNTIME_DIR)
 
 pair-dataset:
 	$(PY) scripts/build_pair_dataset.py --source-dir $(WORLD_DATASET_DIR) \

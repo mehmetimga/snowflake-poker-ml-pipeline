@@ -1,5 +1,6 @@
 package com.aicampions.poker.features;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,6 +15,13 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class PairFeatureMathTest {
+    @Test
+    void acceptanceParityTreatsEquivalentJsonNumberWidthsAsEqual() {
+        assertDoesNotThrow(() -> AlertAcceptanceReplay.assertParity(
+                List.of(PairEventJson.parse("{\"event_id\":\"same\",\"value\":24}")),
+                List.of(PairEventJson.parse("{\"event_id\":\"same\",\"value\":24.0}"))));
+    }
+
     @Test
     void sixPlayersExpandToFifteenCanonicalPairs() {
         List<String> pairs = PairEventJson.canonicalPairs(

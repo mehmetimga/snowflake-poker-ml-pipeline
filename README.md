@@ -134,12 +134,16 @@ boundaries, protected relationship isolation, train-only preprocessing policy,
 validation-only threshold policy, hashes, and challenge isolation. The builder
 intentionally does not open the source challenge label directory.
 
-Build the first D6 slice after D5:
+Build the D6 pack and run bounded runtime parity:
 
 ```bash
 make multitable-alert-acceptance-test
 make multitable-alert-acceptance
 make multitable-alert-acceptance-check
+make multitable-alert-replay-java
+
+# With the DGX tunnel running on localhost:18000:
+make multitable-alert-replay-local
 ```
 
 This creates a separate 16-hand PokerKit replay pack with 240 complete
@@ -148,8 +152,13 @@ frozen model/policy hashes, 14 expected model alerts, and exactly ten selected
 demo alerts. Score, decision, alert, sink, and admin identities are sealed in a
 private post-score oracle. The dataset manifest sets `training_allowed=false`,
 and both the pair-dataset builder and CatBoost trainer reject it before writing
-output. Java/Flink and Go runtime replay remain the next D6 step; the manifest
-reports those statuses as `not_run` until measured.
+output. The pack also contains 96 inference-safe player-context rows for
+bounded Java replay. `multitable-alert-replay-java` executes the feature and
+stateful-rule business logic shared with the Flink operators and compares all
+240 rows. `multitable-alert-replay-local` additionally scores all 16 hands
+through the Go service and a real Triton V2 endpoint, opening the private
+oracle only after scoring. Its run report keeps Kafka/SPCS, Snowflake sinks,
+and admin status as `not_run`; those deployment checks belong to D7.
 
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:

@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1–D5 complete; D6 pack/oracle implemented, runtime replay next
+Status: D1–D6 core acceptance complete; D7 SPCS/Kafka/Snowflake replay next
 
 Last reviewed: 2026-07-23
 
@@ -46,8 +46,9 @@ Implementation evidence:
   testing, calibration, threshold selection, and promotion use. Both the pair
   builder and CatBoost trainer reject it before creating output.
 - Python and Go share a golden identity fixture for score, risk-score event,
-  review-decision, and alert IDs. Java/Flink, Go runtime, Snowflake sink, and
-  admin replay statuses remain explicitly `not_run`.
+  review-decision, and alert IDs. The bounded Java/Flink shared-core replay
+  matched 240/240 features, and Go plus DGX Triton matched 16/16 hand outputs.
+  Kafka/SPCS, Snowflake sink, and admin replay remain explicitly `not_run`.
 
 ## 1. Outcome
 
@@ -589,8 +590,8 @@ Implementation:
 ### D6 — Alert-acceptance pack
 
 - [x] Generate deterministic rule-positive and rule-negative cases.
-- [ ] Replay features through the Java/Flink rule path.
-- [ ] Score through the frozen Go/CatBoost path.
+- [x] Replay features through the Java/Flink shared rule path.
+- [x] Score through the frozen Go/CatBoost path using real Triton V2.
 - [x] Select and seal at least ten model-threshold-positive demo rows.
 - [x] Record exact evidence, decision, alert, sink, and admin-row expectations.
 - [x] Prove that this dataset is rejected by training commands.
@@ -615,9 +616,18 @@ Implemented offline pack/oracle slice:
   pack.
 - The pack binds D5, model artifact, scoring contract, decision policy, review
   policy, static-rule, and stateful-rule hashes.
-- Current offline status: Python feature oracle passed, frozen ONNX score oracle
-  passed, 14 expected alerts, ten selected demo alerts. Java/Flink and Go
-  runtime replay are deliberately not claimed yet.
+- `expected/player_context.jsonl` supplies 96 inference-safe, six-per-hand
+  records to the bounded Java runner without exposing private labels.
+- `AlertAcceptanceReplay` executes the feature math and stateful rule engine
+  shared by the Flink operators. The measured run matched all 240 pair
+  snapshots, including both repeated-fold rule firings.
+- `services/go/cmd/alert-acceptance` scores all complete 15-pair hand batches
+  through a real Triton V2 endpoint and only then opens the private oracle. The
+  measured DGX run matched all 16 probabilities, evidence lists, score IDs,
+  review-decision IDs, and alert IDs; it produced 14 model alerts and the ten
+  selected demo alerts.
+- `scripts/run_alert_acceptance_runtime.py` writes a hash-bound report and
+  explicitly leaves Kafka/SPCS, Snowflake sinks, and admin as `not_run`.
 
 ### D7 — Snowflake, Confluent, and SPCS smoke
 
@@ -711,7 +721,7 @@ independent.
 
 ## 14. Stable entry points
 
-D1–D5 currently expose:
+D1–D6 currently expose:
 
 ```bash
 make multitable-data-test
@@ -722,13 +732,13 @@ make multitable-benchmarks-check
 make multitable-alert-acceptance-test
 make multitable-alert-acceptance
 make multitable-alert-acceptance-check
+make multitable-alert-replay-java
+make multitable-alert-replay-local
 ```
 
-D6 runtime replay and D7–D8 should add:
+D7–D8 should add:
 
 ```bash
-make multitable-alert-acceptance
-make multitable-alert-replay-local
 make multitable-alert-replay-spcs
 make multitable-model-benchmark
 ```
@@ -743,7 +753,8 @@ hands, the deterministic 100-table scheduler, point-in-time context, scheduled
 positive and difficult-negative cases, group truth, benchmark assignments, and
 machine-readable leakage gates are implemented.
 
-The D6 pack and offline oracle are now implemented. The next slice is D6 runtime
-parity: replay only its hands through Java/Flink, compare all 240 pair snapshots
-and stateful evidence with the oracle, score complete hands through Go/Triton,
-and reconcile the resulting evidence, decisions, alerts, sinks, and admin rows.
+The D6 pack, Java/Flink shared-core parity, and real Go/Triton scoring are now
+implemented. The next slice is D7 deployed replay: publish only the acceptance
+hands to the isolated Confluent path, measure the SPCS Java/Flink and Go
+containers, then reconcile evidence, decisions, alerts, Snowflake sink rows,
+and admin visibility against the sealed oracle.

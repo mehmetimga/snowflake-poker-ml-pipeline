@@ -23,6 +23,7 @@ from pipeline.events import (
     HandCompletedPayload,
     PairFeatureEvent,
     PairHandLabel,
+    PlayerHandContextEvent,
     RuleEvidenceEvent,
     UserContextPayload,
     assert_inference_safe,
@@ -568,9 +569,14 @@ def _context_events(
 def _pair_features_and_evidence(
     hands: Iterable[Any],
     context_events: Mapping[str, Any],
-) -> tuple[list[PairFeatureEvent], list[RuleEvidenceEvent]]:
+) -> tuple[
+    list[PlayerHandContextEvent],
+    list[PairFeatureEvent],
+    list[RuleEvidenceEvent],
+]:
     core = PairFeatureCore()
     stateful: dict[str, RepeatedFoldWindowRule] = {}
+    player_context_events: list[PlayerHandContextEvent] = []
     feature_events: list[PairFeatureEvent] = []
     evidence_events: list[RuleEvidenceEvent] = []
     for hand in hands:
@@ -586,6 +592,7 @@ def _pair_features_and_evidence(
                 key=lambda value: str(value["player_id"]),
             )
         ]
+        player_context_events.extend(enriched)
         for event in core.process_many(enriched):
             stateful_rule = stateful.setdefault(
                 event.payload.pair_key,
@@ -610,7 +617,7 @@ def _pair_features_and_evidence(
                     emitted_at=transport_event.emitted_at,
                 )
             )
-    return feature_events, evidence_events
+    return player_context_events, feature_events, evidence_events
 
 
 def _evidence_expectations(
@@ -908,9 +915,11 @@ def build_alert_acceptance_pack(
     scorer = PairOnnxScorer(config.model_dir)
     hands, cases, contexts = _generate_hands_and_cases(profile, start_at)
     context_events = _context_events(profile, contexts)
-    feature_events, evidence_events = _pair_features_and_evidence(
-        hands,
-        context_events,
+    player_context_events, feature_events, evidence_events = (
+        _pair_features_and_evidence(
+            hands,
+            context_events,
+        )
     )
     evidence_expectations = _evidence_expectations(cases, evidence_events)
     score_expectations = _score_expectations(
@@ -959,6 +968,7 @@ def build_alert_acceptance_pack(
         "config": output_dir / "config.json",
         "hands": output_dir / "events" / "hands.jsonl",
         "contexts": output_dir / "snapshots" / "users.jsonl",
+        "player_context": output_dir / "expected" / "player_context.jsonl",
         "pair_features": output_dir / "expected" / "pair_features.jsonl",
         "cases": output_dir / "private_labels" / "cases.jsonl",
         "pair_labels": output_dir / "private_labels" / "pair_labels.jsonl",
@@ -979,6 +989,7 @@ def build_alert_acceptance_pack(
         paths["contexts"],
         (contexts[player_id] for player_id in sorted(contexts)),
     )
+    _write_jsonl(paths["player_context"], player_context_events)
     _write_jsonl(paths["pair_features"], feature_events)
     _write_jsonl(
         paths["cases"],
@@ -1032,6 +1043,7 @@ def build_alert_acceptance_pack(
         "counts": {
             "hands": len(hands),
             "players": len(contexts),
+            "player_context": len(player_context_events),
             "pair_features": len(feature_events),
             "cases": len(cases),
             "target_pair_labels": len(labels),
@@ -1127,6 +1139,17 @@ def verify_alert_acceptance_pack(
     feature_counts = Counter(event.payload.hand_id for event in features)
     if set(feature_counts) != acceptance_ids or set(feature_counts.values()) != {15}:
         raise ValueError("alert-acceptance features are not complete 15-pair hands")
+    player_context = [
+        PlayerHandContextEvent.model_validate(row)
+        for row in _iter_jsonl(root / "expected" / "player_context.jsonl")
+    ]
+    for event in player_context:
+        assert_inference_safe(event.model_dump(mode="json"))
+    context_counts = Counter(event.payload.hand_id for event in player_context)
+    if set(context_counts) != acceptance_ids or set(context_counts.values()) != {6}:
+        raise ValueError(
+            "alert-acceptance player-context input is not complete six-player hands"
+        )
 
     profile = AlertAcceptanceProfile.from_json(root / "config.json")
     recomputed_scores = _score_expectations(
@@ -1182,6 +1205,7 @@ def verify_alert_acceptance_pack(
     expected_counts = {
         "hands": len(hands),
         "players": sum(1 for _ in _iter_jsonl(root / "snapshots" / "users.jsonl")),
+        "player_context": len(player_context),
         "pair_features": len(features),
         "cases": len(cases),
         "target_pair_labels": sum(
