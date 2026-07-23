@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.multitable-leakage-audit.v1",
+  "title": "Multi-table benchmark leakage audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "source_integrity",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["passed", "failed"]},
+    "source_integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_artifacts",
+        "skipped_challenge_private_artifacts"
+      ],
+      "properties": {
+        "verified_artifacts": {"type": "integer", "minimum": 0},
+        "skipped_challenge_private_artifacts": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["check_id", "status"],
+        "properties": {
+          "check_id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "failed"]}
+        }
+      }
+    }
+  }
+}

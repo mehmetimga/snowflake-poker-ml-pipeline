@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.multitable-benchmark-assignment.v1",
+  "title": "Label-free multi-table benchmark hand assignment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "benchmark",
+    "benchmark_split",
+    "source_dataset_split",
+    "hand_id",
+    "played_at",
+    "player_ids"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "benchmark": {
+      "enum": [
+        "cold_start",
+        "temporal",
+        "new_relationship",
+        "challenge"
+      ]
+    },
+    "benchmark_split": {
+      "enum": ["train", "validation", "test", "challenge"]
+    },
+    "source_dataset_split": {
+      "enum": ["train", "validation", "test", "challenge"]
+    },
+    "hand_id": {"type": "string", "minLength": 1},
+    "played_at": {"type": "string", "format": "date-time"},
+    "player_ids": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

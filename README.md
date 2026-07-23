@@ -116,6 +116,24 @@ make multitable-data-smoke
 The default smoke writes 3,000 train hands plus 1,000 hands in each of
 validation, test, and challenge under `data/datasets/multitable-cold-v1/`.
 
+Build the D5 benchmark assignment layer only after that immutable source world
+exists:
+
+```bash
+make multitable-benchmarks-test
+make multitable-benchmarks
+make multitable-benchmarks-check
+```
+
+The output under `data/datasets/multitable-benchmarks-v1/` contains four
+label-free hand-assignment products: source-population cold start, chronological
+70/15/15 temporal, protected new relationship, and sealed challenge. It does
+not copy events, features, labels, or private labels. Its machine-readable
+audit checks complete hand coverage, player/pair/group separation, strict time
+boundaries, protected relationship isolation, train-only preprocessing policy,
+validation-only threshold policy, hashes, and challenge isolation. The builder
+intentionally does not open the source challenge label directory.
+
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:
 

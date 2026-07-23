@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1–D4 implemented; D5 split benchmarks next
+Status: D1–D5 implemented; D6 alert-acceptance pack next
 
 Last reviewed: 2026-07-23
 
@@ -20,9 +20,19 @@ Implementation evidence:
   labels, and 40,000 inference-safe context rows in approximately 88 MB.
 - Household negatives share a device and network. Shared-network negatives
   retain different devices. Their case identity remains private.
-- All 29 focused generator, contract, frozen-world, and pair-dataset tests
-  passed after the refactor.
-- The complete 262-test Python suite also passed; its only output was existing
+- D5 produced four independently manifested, label-free assignment products:
+  cold start, chronological temporal, protected new relationship, and sealed
+  challenge.
+- The full smoke assigned 6,000 cold-start hands, 3,000 temporal hands at
+  2,100/450/450, 3,000 new-relationship hands at 2,100/450/450, and 1,000
+  isolated challenge hands.
+- The leakage audit reported zero cross-split cold-start players, pairs, and
+  public groups; zero protected-pair or case crossings in the
+  new-relationship product; strict temporal ordering; complete hand coverage;
+  and no challenge-label read or copy.
+- All 34 focused generator, contract, frozen-world, pair-dataset, and D5
+  benchmark tests passed after the refactor.
+- The complete 267-test Python suite also passed; its only output was existing
   third-party SciPy deprecation warnings.
 
 ## 1. Outcome
@@ -192,7 +202,11 @@ multitable-temporal-v1
 This benchmark answers whether the model predicts future behavior for known
 users. The start of validation, test, and challenge may consume approved
 prior-history warm-up rows, but warm-up rows cannot be scored as examples in
-the later split.
+the later split. A real multi-hand investigation case may continue across a
+time boundary; that is expected temporal behavior, not split leakage. Its
+features at each scored hand may use only strictly earlier events. Forcing
+complete cases into one temporal split would move time boundaries and distort
+the intended 70/15/15 evaluation.
 
 ### 4.3 New-relationship benchmark
 
@@ -536,13 +550,27 @@ manifest, with no private field in public schemas.
 
 ### D5 — Split builders and leakage audit
 
-- [ ] Build cold-start, temporal, and new-relationship products.
-- [ ] Keep complete hands grouped.
-- [ ] Add player, pair, group, and time-overlap audits.
-- [ ] Add train-only preprocessing and validation-only threshold checks.
-- [ ] Preserve the sealed challenge workflow.
+- [x] Build cold-start, temporal, and new-relationship products.
+- [x] Keep complete hands grouped.
+- [x] Add player, pair, group, and time-overlap audits.
+- [x] Add train-only preprocessing and validation-only threshold checks.
+- [x] Preserve the sealed challenge workflow.
 
 Exit gate: a machine-readable leakage report passes all rules in section 8.
+
+Implementation:
+
+- `pipeline/generator/multitable_benchmarks.py` builds deterministic,
+  source-level hand-assignment indexes over the immutable D4 world.
+- `scripts/build_multitable_benchmarks.py` and
+  `scripts/check_multitable_benchmarks.py` are the build and independent
+  verification entry points.
+- Assignment and audit contracts are versioned under `schemas/generator/`.
+- The assignment product contains no labels, features, or copied events.
+  Downstream feature builders must join by `hand_id` and preserve the recorded
+  preprocessing, threshold-selection, warm-up, and test-access policies.
+- Source integrity verification deliberately skips challenge private-label
+  artifacts, and a regression guard fails if code attempts to open them.
 
 ### D6 — Alert-acceptance pack
 
@@ -646,14 +674,21 @@ Use complete hands or complete scenario cases as bootstrap sampling units.
 Never bootstrap individual pair rows as though the rows from one hand were
 independent.
 
-## 14. Commands to add
+## 14. Stable entry points
 
-The implementation should end with stable entry points similar to:
+D1–D5 currently expose:
 
 ```bash
+make multitable-data-test
 make multitable-data-smoke
-make multitable-data-development
-make multitable-data-validate
+make multitable-benchmarks-test
+make multitable-benchmarks
+make multitable-benchmarks-check
+```
+
+D6–D8 should add:
+
+```bash
 make multitable-alert-acceptance
 make multitable-alert-replay-local
 make multitable-alert-replay-spcs
@@ -663,18 +698,14 @@ make multitable-model-benchmark
 Each command writes a run report with the resolved configuration, source commit,
 artifact hashes, counts, duration, and pass/fail gates.
 
-## 15. Recommended first implementation slice
+## 15. Recommended next implementation slice
 
-The first D1–D3 slice is complete:
+D1–D5 are complete: configuration and capacity checks, PokerKit 4–6 player
+hands, the deterministic 100-table scheduler, point-in-time context, scheduled
+positive and difficult-negative cases, group truth, benchmark assignments, and
+machine-readable leakage gates are implemented.
 
-1. the versioned configuration and capacity validation are implemented;
-2. PokerKit accepts explicit 4–6 player tables;
-3. 100 tables and multi-table users are scheduled deterministically;
-4. the manifest records occupancy, concurrency, time, and artifact hashes;
-5. variable pair-row counts and reproducibility are tested; and
-6. scenario behavior remains unchanged until D4.
-
-The next implementation slice is D5: produce independently manifested
-cold-start, temporal, and new-relationship benchmarks, add machine-readable
-player/pair/group/time leakage audits, and preserve the sealed challenge
-boundary.
+The next implementation slice is D6: build a training-excluded
+alert-acceptance pack, replay its deterministic rule cases through Flink, score
+it through the frozen Go/CatBoost path, and seal the exact evidence, decision,
+alert, sink, and admin expectations.

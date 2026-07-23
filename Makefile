@@ -1,4 +1,4 @@
-.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset multitable-data-smoke multitable-data-test pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics canonical-flink-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-seed-user-context snow-validate-catalog snow-inspect-flink snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
+.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset multitable-data-smoke multitable-data-test multitable-benchmarks multitable-benchmarks-check multitable-benchmarks-test pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics canonical-flink-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-seed-user-context snow-validate-catalog snow-inspect-flink snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 .PHONY: rule-monitoring-test rule-monitor-window rule-monitoring rule-monitoring-check phase-b6-check
 .PHONY: c1-package-test c1-risk-bundle c1-render c1-build-risk c1-build-flink c1-build c1-image-smoke c1-release-check c1-push c1-mirror-triton c1-upload-model c1-deploy-risk c1-deploy-flink c1-deploy phase-c1-check
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
@@ -37,6 +37,7 @@ WORLD_DATASET_ID ?= context-v1
 MULTITABLE_CONFIG ?= config/generator/multitable-smoke-v1.json
 MULTITABLE_SCENARIOS ?= config/generator/multitable-scenarios-v1.json
 MULTITABLE_DATASET_DIR ?= data/datasets/multitable-cold-v1
+MULTITABLE_BENCHMARK_DIR ?= data/datasets/multitable-benchmarks-v1
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -161,6 +162,9 @@ help:
 	@echo "  world-dataset Build context-rich, multi-topic PokerKit dataset files"
 	@echo "  multitable-data-smoke Build deterministic 100-table 4-6 player smoke data"
 	@echo "  multitable-data-test Test multi-table config, scheduling, and PokerKit hands"
+	@echo "  multitable-benchmarks Build label-free cold/temporal/new-pair assignments"
+	@echo "  multitable-benchmarks-check Recompute D5 hashes and leakage gates"
+	@echo "  multitable-benchmarks-test Test D5 assignment and challenge isolation"
 	@echo "  pair-dataset Build frozen pair benchmarks and DGX Parquet exports"
 	@echo "  pair-dataset-check Audit pair dataset hashes and leakage boundaries"
 	@echo "  pair-labels Load restricted pair-label sidecars into the warehouse"
@@ -363,6 +367,19 @@ multitable-data-smoke:
 
 multitable-data-test:
 	$(PY) -m pytest -q tests/test_multitable_generator.py
+
+multitable-benchmarks:
+	$(PY) scripts/build_multitable_benchmarks.py \
+		--source-dir $(MULTITABLE_DATASET_DIR) \
+		--output-dir $(MULTITABLE_BENCHMARK_DIR)
+
+multitable-benchmarks-check:
+	$(PY) scripts/check_multitable_benchmarks.py \
+		--dataset $(MULTITABLE_BENCHMARK_DIR) \
+		--source-dir $(MULTITABLE_DATASET_DIR)
+
+multitable-benchmarks-test:
+	$(PY) -m pytest -q tests/test_multitable_benchmarks.py
 
 pair-dataset:
 	$(PY) scripts/build_pair_dataset.py --source-dir $(WORLD_DATASET_DIR) \

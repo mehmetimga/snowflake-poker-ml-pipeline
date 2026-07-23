@@ -6,6 +6,11 @@ from .multitable import (
     MultiTableScheduler,
     build_multitable_dataset,
 )
+from .multitable_benchmarks import (
+    MultiTableBenchmarkConfig,
+    build_multitable_benchmarks,
+    verify_multitable_benchmarks,
+)
 from .scenario_planner import ScenarioPlan, ScenarioPlanner
 from .world import RealtimeWorldConfig, SyntheticPokerWorld, build_realtime_world_dataset
 
@@ -14,6 +19,7 @@ __all__ = [
     "GeneratorConfig",
     "HandGenerator",
     "MultiTablePokerWorld",
+    "MultiTableBenchmarkConfig",
     "MultiTableProfile",
     "MultiTableScheduler",
     "RealtimeWorldConfig",
@@ -22,6 +28,8 @@ __all__ = [
     "ScenarioPlanner",
     "build_frozen_dataset",
     "build_multitable_dataset",
+    "build_multitable_benchmarks",
     "build_realtime_world_dataset",
     "iter_labeled_hands",
+    "verify_multitable_benchmarks",
 ]
