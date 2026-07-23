@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1 configuration and D2–D3 structural scheduler implemented; D4 next
+Status: D1–D4 implemented; D5 split benchmarks next
 
 Last reviewed: 2026-07-23
 
@@ -8,19 +8,22 @@ Implementation evidence:
 
 - The versioned smoke profile is
   [`config/generator/multitable-smoke-v1.json`](../config/generator/multitable-smoke-v1.json).
+- The versioned scenario plan is
+  [`config/generator/multitable-scenarios-v1.json`](../config/generator/multitable-scenarios-v1.json).
 - The first full smoke generated 6,000 hands across 100 tables and four
   population-disjoint splits.
 - Every active roster contained exactly 20 four-player, 30 five-player, and 50
   six-player tables: 530 concurrent seats.
-- The run produced 31,794 player-hand labels and 70,171 variable-size pair
-  labels in approximately 69 MB.
-- All 27 focused generator, contract, frozen-world, and pair-dataset tests
+- The D4 smoke completed all 56 planned cases: 22 positive-pair cases, four
+  three-account rings, and 30 difficult-negative cases.
+- It produced 336 scenario hands, 336 positive player labels, 204 positive pair
+  labels, and 40,000 inference-safe context rows in approximately 88 MB.
+- Household negatives share a device and network. Shared-network negatives
+  retain different devices. Their case identity remains private.
+- All 29 focused generator, contract, frozen-world, and pair-dataset tests
   passed after the refactor.
-- The complete 260-test Python suite also passed; its only output was existing
+- The complete 262-test Python suite also passed; its only output was existing
   third-party SciPy deprecation warnings.
-- The smoke intentionally produced no positive pairs. D4 must schedule
-  colluding pairs together in explicit multi-hand cases; random co-seating in a
-  10,000-user population is not an acceptable prevalence mechanism.
 
 ## 1. Outcome
 
@@ -489,9 +492,9 @@ and hashed.
 - [x] Define a versioned multi-table profile schema.
 - [x] Separate registered users, daily active users, peak concurrent users,
   tables, and hands.
-- [ ] Define table-seat interval, scenario-case, group-label, and alert-oracle
-  private contracts. Table-seat and session interval artifacts are complete;
-  scenario, group, and oracle contracts remain for D4/D6.
+- [x] Define table-seat interval, scenario-case, group-label, and scenario-hand
+  private contracts. The model/rule alert oracle remains intentionally deferred
+  to D6.
 - [x] Add manifest fields for occupancy, concurrency, and event-time
   distributions.
 
@@ -522,11 +525,11 @@ seat, no user above the table limit, and reproducible schedules.
 
 ### D4 — Multi-hand scenario planner
 
-- [ ] Convert the existing four collusion strategies into scheduled cases.
-- [ ] Guarantee required co-seating and minimum supporting-hand counts.
-- [ ] Add difficult negatives and configurable positive prevalence.
-- [ ] Add group/ring labels for future graph evaluation.
-- [ ] Keep scenario metadata only in private sidecars.
+- [x] Convert the existing four collusion strategies into scheduled cases.
+- [x] Guarantee required co-seating and minimum supporting-hand counts.
+- [x] Add difficult negatives and configurable positive prevalence.
+- [x] Add group/ring labels for future graph evaluation.
+- [x] Keep scenario metadata only in private sidecars.
 
 Exit gate: requested scenario counts and constraints equal the generated
 manifest, with no private field in public schemas.
@@ -671,7 +674,7 @@ The first D1–D3 slice is complete:
 5. variable pair-row counts and reproducibility are tested; and
 6. scenario behavior remains unchanged until D4.
 
-The next implementation slice is D4: select case members from each day's
-active population, guarantee their co-seating across the required event-time
-windows, add difficult negatives, and write private case/group labels without
-changing the public hand contract.
+The next implementation slice is D5: produce independently manifested
+cold-start, temporal, and new-relationship benchmarks, add machine-readable
+player/pair/group/time leakage audits, and preserve the sealed challenge
+boundary.

@@ -103,9 +103,10 @@ future Debezium boundary and source-independent Go runtime are offline-verifiabl
 with `make phase-c2-runtime-check`; this does not deploy a connector or service.
 
 The new structural multi-table smoke schedules 100 concurrent tables, 530
-seats, and users playing up to five tables. It currently validates generation
-and split artifacts; deliberate alert scenarios are the next implementation
-phase.
+seats, and users playing up to five tables. It includes scheduled multi-hand
+positive cases, difficult negatives, three-account rings, and private scenario
+sidecars. Inference-safe context snapshots materialize household and
+shared-network negative cases without exposing scenario identity.
 
 ```bash
 make multitable-data-test

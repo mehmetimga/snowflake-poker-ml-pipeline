@@ -6,6 +6,7 @@ from .multitable import (
     MultiTableScheduler,
     build_multitable_dataset,
 )
+from .scenario_planner import ScenarioPlan, ScenarioPlanner
 from .world import RealtimeWorldConfig, SyntheticPokerWorld, build_realtime_world_dataset
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "MultiTableScheduler",
     "RealtimeWorldConfig",
     "SyntheticPokerWorld",
+    "ScenarioPlan",
+    "ScenarioPlanner",
     "build_frozen_dataset",
     "build_multitable_dataset",
     "build_realtime_world_dataset",

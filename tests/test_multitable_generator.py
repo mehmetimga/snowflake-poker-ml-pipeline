@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 from pipeline.events import HandCompletedPayload, validate_event
 from pipeline.generator import (
@@ -13,6 +14,7 @@ from pipeline.generator import (
     HandGenerator,
     MultiTablePokerWorld,
     MultiTableProfile,
+    ScenarioPlan,
     build_multitable_dataset,
 )
 from pipeline.generator.dataset import iter_jsonl, separate_hand_labels
@@ -47,6 +49,46 @@ def _small_profile() -> MultiTableProfile:
     )
 
 
+def _small_scenario_plan() -> ScenarioPlan:
+    return ScenarioPlan.from_dict(
+        {
+            "schema_version": 1,
+            "scenario_plan_id": "multitable-scenario-test-v1",
+            "positive_hand_rate": 0.04,
+            "hard_negative_hand_rate": 0.04,
+            "hands_per_case": 2,
+            "minimum_cases_per_positive_family": 1,
+            "minimum_cases_per_hard_negative_family": 1,
+            "positive_family_weights": {
+                "soft_play": 0.25,
+                "chip_dump": 0.25,
+                "squeeze_collude": 0.25,
+                "fold_benefit": 0.25,
+            },
+            "hard_negative_family_weights": {
+                "legitimate_multitabler": 0.25,
+                "innocent_household": 0.25,
+                "shared_network": 0.25,
+                "frequent_coplayer": 0.25,
+            },
+            "ring_cases_per_split": 1,
+            "ring_members": 3,
+            "seed_offset": 700_003,
+        }
+    )
+
+
+def _scenario_profile() -> MultiTableProfile:
+    raw = _small_profile().to_dict()
+    raw["split_hands"] = {
+        "train": 240,
+        "validation": 120,
+        "test": 120,
+        "challenge": 120,
+    }
+    return MultiTableProfile.from_dict(raw)
+
+
 def test_checked_in_smoke_profile_has_planned_capacity():
     profile = MultiTableProfile.from_json(
         Path("config/generator/multitable-smoke-v1.json")
@@ -64,6 +106,29 @@ def test_checked_in_smoke_profile_has_planned_capacity():
     assert profile.expected_tables_per_active_player == pytest.approx(1.345)
     assert profile.cohort_minutes == pytest.approx(96.0)
     assert sum(profile.split_hands.values()) == 6_000
+
+
+def test_checked_in_scenario_plan_has_all_case_families():
+    plan = ScenarioPlan.from_json(Path("config/generator/multitable-scenarios-v1.json"))
+    schema = json.loads(
+        Path("schemas/generator/poker.multitable-scenarios.v1.schema.json").read_text()
+    )
+
+    assert schema["$id"] == "poker.multitable-scenarios.v1"
+    assert set(plan.positive_family_weights) == {
+        "soft_play",
+        "chip_dump",
+        "squeeze_collude",
+        "fold_benefit",
+    }
+    assert set(plan.hard_negative_family_weights) == {
+        "legitimate_multitabler",
+        "innocent_household",
+        "shared_network",
+        "frequent_coplayer",
+    }
+    assert plan.hands_per_case == 6
+    assert plan.ring_cases_per_split == 1
 
 
 def test_profile_rejects_capacity_that_cannot_fill_tables():
@@ -247,3 +312,137 @@ def test_scheduler_rotates_sessions_and_seats_across_active_windows():
     assert interval_players[ordered_intervals[0]].isdisjoint(
         interval_players[ordered_intervals[1]]
     )
+
+
+def test_scenario_dataset_is_private_complete_and_deterministic(tmp_path: Path):
+    profile = _scenario_profile()
+    scenario_plan = _small_scenario_plan()
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first = build_multitable_dataset(
+        first_dir,
+        profile,
+        scenario_plan=scenario_plan,
+    )
+    second = build_multitable_dataset(
+        second_dir,
+        profile,
+        scenario_plan=scenario_plan,
+    )
+
+    assert first == second
+    assert first["artifacts"] == second["artifacts"]
+    assert first["scenario_plan_id"] == scenario_plan.scenario_plan_id
+    case_validator = Draft202012Validator(
+        json.loads(
+            Path(
+                "schemas/generator/" "poker.synthetic-scenario-case.v1.schema.json"
+            ).read_text()
+        ),
+        format_checker=FormatChecker(),
+    )
+    group_validator = Draft202012Validator(
+        json.loads(
+            Path(
+                "schemas/generator/" "poker.synthetic-group-label.v1.schema.json"
+            ).read_text()
+        ),
+        format_checker=FormatChecker(),
+    )
+    hand_validator = Draft202012Validator(
+        json.loads(
+            Path(
+                "schemas/generator/"
+                "poker.synthetic-scenario-hand-label.v1.schema.json"
+            ).read_text()
+        ),
+        format_checker=FormatChecker(),
+    )
+    for split in ("train", "validation", "test", "challenge"):
+        labels_dir = (
+            first_dir / split / ("private_labels" if split == "challenge" else "labels")
+        )
+        cases = list(iter_jsonl(labels_dir / "scenario_cases.jsonl"))
+        groups = list(iter_jsonl(labels_dir / "group_labels.jsonl"))
+        scenario_hands = list(iter_jsonl(labels_dir / "scenario_hand_labels.jsonl"))
+        for row in cases:
+            case_validator.validate(row)
+        for row in groups:
+            group_validator.validate(row)
+        for row in scenario_hands:
+            hand_validator.validate(row)
+        summary = first["splits"][split]["scenarios"]
+
+        assert len(cases) == summary["completed_cases"]
+        assert len(groups) == len(cases)
+        assert len(scenario_hands) == len(cases) * scenario_plan.hands_per_case
+        assert all(
+            case["actual_hands"]
+            == case["planned_hands"]
+            == scenario_plan.hands_per_case
+            for case in cases
+        )
+        assert {case["scenario_family"] for case in cases} >= {
+            "soft_play",
+            "chip_dump",
+            "squeeze_collude",
+            "fold_benefit",
+            "multi_account_ring",
+            "legitimate_multitabler",
+            "innocent_household",
+            "shared_network",
+            "frequent_coplayer",
+        }
+        assert any(
+            len(group["members"]) == 3 and group["is_collusive"] for group in groups
+        )
+        assert any(not group["is_collusive"] for group in groups)
+        assert (
+            first["splits"][split]["positive_pair_label_rows"]
+            == summary["positive_pair_label_rows_expected"]
+        )
+
+        contexts = {
+            row["user_id"]: row
+            for row in iter_jsonl(first_dir / split / "snapshots" / "users.jsonl")
+        }
+        assert len(contexts) == profile.registered_players
+        assert first["splits"][split]["user_context"]["context_rows"] == len(contexts)
+        for case in cases:
+            left = contexts[case["members"][0]]
+            right = contexts[case["members"][1]]
+            if case["scenario_family"] == "innocent_household":
+                assert left["device_id"] == right["device_id"]
+                assert left["network_cluster_id"] == right["network_cluster_id"]
+            elif case["scenario_family"] == "shared_network":
+                assert left["network_cluster_id"] == right["network_cluster_id"]
+                assert left["device_id"] != right["device_id"]
+        assert all(
+            "case_id" not in row
+            and "group_id" not in row
+            and "is_collusive" not in row
+            and "scenario_family" not in row
+            for row in contexts.values()
+        )
+
+        events = {
+            event["payload"]["hand_id"]: event
+            for event in iter_jsonl(first_dir / split / "events" / "hands.jsonl")
+        }
+        pair_labels = list(iter_jsonl(labels_dir / "pair_labels.jsonl"))
+        positive_pair_labels = [label for label in pair_labels if label["is_collusive"]]
+        assert len(positive_pair_labels) == summary["positive_pair_label_rows_expected"]
+        for case in cases:
+            assert len(set(case["hand_ids"])) == scenario_plan.hands_per_case
+            for hand_id in case["hand_ids"]:
+                payload = events[hand_id]["payload"]
+                assert payload["table_id"] == case["table_id"]
+                assert set(case["members"]) <= {
+                    player["player_id"] for player in payload["players"]
+                }
+        for event in events.values():
+            serialized = json.dumps(event)
+            assert "scenario_family" not in serialized
+            assert "case_id" not in serialized
+            assert "group_id" not in serialized
+            validate_event(event)

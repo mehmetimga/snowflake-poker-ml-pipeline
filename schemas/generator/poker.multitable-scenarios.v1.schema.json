@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.multitable-scenarios.v1",
+  "title": "Deterministic multi-table scenario prevalence plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_plan_id",
+    "positive_hand_rate",
+    "hard_negative_hand_rate",
+    "hands_per_case",
+    "minimum_cases_per_positive_family",
+    "minimum_cases_per_hard_negative_family",
+    "positive_family_weights",
+    "hard_negative_family_weights",
+    "ring_cases_per_split",
+    "ring_members",
+    "seed_offset"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scenario_plan_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "positive_hand_rate": {
+      "type": "number",
+      "minimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "hard_negative_hand_rate": {
+      "type": "number",
+      "minimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "hands_per_case": {"type": "integer", "minimum": 1},
+    "minimum_cases_per_positive_family": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "minimum_cases_per_hard_negative_family": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positive_family_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "soft_play",
+        "chip_dump",
+        "squeeze_collude",
+        "fold_benefit"
+      ],
+      "properties": {
+        "soft_play": {"type": "number", "minimum": 0, "maximum": 1},
+        "chip_dump": {"type": "number", "minimum": 0, "maximum": 1},
+        "squeeze_collude": {"type": "number", "minimum": 0, "maximum": 1},
+        "fold_benefit": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "hard_negative_family_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "legitimate_multitabler",
+        "innocent_household",
+        "shared_network",
+        "frequent_coplayer"
+      ],
+      "properties": {
+        "legitimate_multitabler": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "innocent_household": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "shared_network": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "frequent_coplayer": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ring_cases_per_split": {"type": "integer", "minimum": 0},
+    "ring_members": {"type": "integer", "minimum": 3, "maximum": 6},
+    "seed_offset": {"type": "integer"}
+  }
+}

@@ -239,6 +239,8 @@ class HandGenerator:
         table_id: str | None = None,
         seat_player_ids: Iterable[str] | None = None,
         played_at: datetime | None = None,
+        planned_collusion_pair: CollusionPair | None = None,
+        allow_random_collusion: bool = True,
     ) -> dict:
         """Generate one hand, optionally using an explicit schedule.
 
@@ -277,11 +279,21 @@ class HandGenerator:
         else:
             played_at = played_at.astimezone(timezone.utc)
 
+        if planned_collusion_pair is not None:
+            seated_ids = {player.player_id for player in seats}
+            if {
+                planned_collusion_pair.player_a,
+                planned_collusion_pair.player_b,
+            } - seated_ids:
+                raise ValueError("planned_collusion_pair members must both be seated")
+
         return self._generate_hand(
             index,
             table_id=table_id,
             seats=seats,
             played_at=played_at,
+            planned_collusion_pair=planned_collusion_pair,
+            allow_random_collusion=allow_random_collusion,
         )
 
     def _generate_hand(
@@ -291,6 +303,8 @@ class HandGenerator:
         table_id: str,
         seats: list[_Player],
         played_at: datetime,
+        planned_collusion_pair: CollusionPair | None,
+        allow_random_collusion: bool,
     ) -> dict:
         player_count = len(seats)
         positions = _POSITIONS_BY_PLAYER_COUNT[player_count]
@@ -299,7 +313,9 @@ class HandGenerator:
         big_blind_chips = int(round(big_blind * 100))
         stack_chips = big_blind_chips * 100
 
-        active_pair = self._active_pair(seats)
+        active_pair = planned_collusion_pair
+        if active_pair is None and allow_random_collusion:
+            active_pair = self._active_pair(seats)
         state = NoLimitTexasHoldem.create_state(
             _AUTOMATIONS,
             True,

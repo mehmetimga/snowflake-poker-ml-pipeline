@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.synthetic-scenario-hand-label.v1",
+  "title": "Private synthetic hand-to-scenario label",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_split",
+    "case_id",
+    "group_id",
+    "case_kind",
+    "scenario_family",
+    "hand_id",
+    "hand_index",
+    "members",
+    "behavior_pair",
+    "is_collusive",
+    "required_context_relationship",
+    "label_available_at",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {
+      "enum": ["train", "validation", "test", "challenge"]
+    },
+    "case_id": {"type": "string", "format": "uuid"},
+    "group_id": {"type": "string", "format": "uuid"},
+    "case_kind": {
+      "enum": ["positive_pair", "positive_ring", "hard_negative"]
+    },
+    "scenario_family": {"type": "string", "minLength": 1},
+    "hand_id": {"type": "string", "minLength": 1},
+    "hand_index": {"type": "integer", "minimum": 0},
+    "members": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "behavior_pair": {
+      "oneOf": [
+        {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        {"type": "null"}
+      ]
+    },
+    "is_collusive": {"type": "boolean"},
+    "required_context_relationship": {
+      "type": ["string", "null"]
+    },
+    "label_available_at": {"type": "string", "format": "date-time"},
+    "provenance": {"const": "synthetic"}
+  }
+}

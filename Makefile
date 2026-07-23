@@ -35,6 +35,7 @@ DATASET_DIR ?= data/datasets/cpu-v1
 WORLD_DATASET_DIR ?= data/datasets/context-v1
 WORLD_DATASET_ID ?= context-v1
 MULTITABLE_CONFIG ?= config/generator/multitable-smoke-v1.json
+MULTITABLE_SCENARIOS ?= config/generator/multitable-scenarios-v1.json
 MULTITABLE_DATASET_DIR ?= data/datasets/multitable-cold-v1
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
@@ -357,6 +358,7 @@ world-dataset:
 
 multitable-data-smoke:
 	$(PY) scripts/generate_multitable_dataset.py --config $(MULTITABLE_CONFIG) \
+		--scenario-config $(MULTITABLE_SCENARIOS) \
 		--output-dir $(MULTITABLE_DATASET_DIR)
 
 multitable-data-test:

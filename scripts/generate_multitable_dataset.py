@@ -6,7 +6,11 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pipeline.generator import MultiTableProfile, build_multitable_dataset
+from pipeline.generator import (
+    MultiTableProfile,
+    ScenarioPlan,
+    build_multitable_dataset,
+)
 
 
 def _timestamp(value: str) -> datetime:
@@ -29,6 +33,11 @@ def main() -> None:
         default=Path("data/datasets/multitable-cold-v1"),
     )
     parser.add_argument(
+        "--scenario-config",
+        type=Path,
+        default=Path("config/generator/multitable-scenarios-v1.json"),
+    )
+    parser.add_argument(
         "--start-at",
         type=_timestamp,
         default=None,
@@ -37,9 +46,11 @@ def main() -> None:
     args = parser.parse_args()
 
     profile = MultiTableProfile.from_json(args.config)
+    scenario_plan = ScenarioPlan.from_json(args.scenario_config)
     manifest = build_multitable_dataset(
         args.output_dir,
         profile,
+        scenario_plan=scenario_plan,
         start_at=args.start_at,
     )
     counts = {split: values["hands"] for split, values in manifest["splits"].items()}
@@ -48,6 +59,7 @@ def main() -> None:
         f"wrote={args.output_dir / 'manifest.json'} "
         f"tables={manifest['requested']['tables']} "
         f"seats={manifest['requested']['concurrent_seats']} "
+        f"scenarios={manifest['scenario_plan_id']} "
         f"splits={counts}"
     )
 

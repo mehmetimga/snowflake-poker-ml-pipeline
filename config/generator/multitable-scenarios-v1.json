@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "scenario_plan_id": "multitable-scenarios-v1",
+  "positive_hand_rate": 0.02,
+  "hard_negative_hand_rate": 0.03,
+  "hands_per_case": 6,
+  "minimum_cases_per_positive_family": 1,
+  "minimum_cases_per_hard_negative_family": 1,
+  "positive_family_weights": {
+    "soft_play": 0.25,
+    "chip_dump": 0.25,
+    "squeeze_collude": 0.25,
+    "fold_benefit": 0.25
+  },
+  "hard_negative_family_weights": {
+    "legitimate_multitabler": 0.4,
+    "innocent_household": 0.2,
+    "shared_network": 0.2,
+    "frequent_coplayer": 0.2
+  },
+  "ring_cases_per_split": 1,
+  "ring_members": 3,
+  "seed_offset": 700003
+}

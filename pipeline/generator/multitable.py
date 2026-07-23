@@ -34,6 +34,8 @@ from pipeline.events import (
 
 from .dataset import SPLIT_NAMES, separate_hand_labels
 from .hand_generator import GeneratorConfig, HandGenerator
+from .multitable_context import build_multitable_user_contexts
+from .scenario_planner import ScenarioAssignment, ScenarioPlan, ScenarioPlanner
 
 
 _SEED_OFFSETS = {
@@ -367,6 +369,9 @@ class ScheduledHand:
     table_hand_sequence_no: int
     played_at: datetime
     seat_player_ids: tuple[str, ...]
+    seat_simultaneous_tables: tuple[int, ...]
+    seat_effective_from: datetime
+    seat_effective_to: datetime
 
 
 @dataclass
@@ -433,12 +438,25 @@ class MultiTableScheduler:
             roster = list(self._roster_at(played_at)[table_id])
             rotation = table_sequence % len(roster)
             ordered_seats = tuple(roster[rotation:] + roster[:rotation])
+            (
+                day_index,
+                cohort_index,
+                _,
+                effective_from,
+                effective_to,
+            ) = self._time_coordinates(played_at)
+            quotas = self._daily_schedule(day_index).quotas[cohort_index]
             yield ScheduledHand(
                 global_index=global_index,
                 table_id=table_id,
                 table_hand_sequence_no=table_sequence,
                 played_at=played_at,
                 seat_player_ids=ordered_seats,
+                seat_simultaneous_tables=tuple(
+                    quotas[player_id] for player_id in ordered_seats
+                ),
+                seat_effective_from=effective_from,
+                seat_effective_to=effective_to,
             )
 
             interval = mean_interval * self._clock_rng.uniform(0.80, 1.20)
@@ -717,6 +735,7 @@ class MultiTablePokerWorld:
         hand_count: int,
         seed: int,
         start_at: datetime,
+        scenario_plan: ScenarioPlan | None = None,
         tenant_id: str = "demo",
         product_id: str = "poker",
     ) -> None:
@@ -746,6 +765,20 @@ class MultiTablePokerWorld:
             seed=seed,
         )
         self.hand_count = hand_count
+        self.scenario_planner = (
+            ScenarioPlanner(
+                scenario_plan,
+                dataset_id=profile.dataset_id,
+                split=split,
+                hand_count=hand_count,
+                table_count=profile.table_count,
+                hands_per_table_hour=profile.hands_per_table_hour,
+                seed=seed,
+            )
+            if scenario_plan is not None
+            else None
+        )
+        self.scenario_summary: dict[str, Any] | None = None
 
     @property
     def player_ids(self) -> tuple[str, ...]:
@@ -762,11 +795,20 @@ class MultiTablePokerWorld:
         ]
     ]:
         for scheduled in self.scheduler.iter_hands(self.hand_count):
+            scenario = (
+                self.scenario_planner.assignment_for(scheduled)
+                if self.scenario_planner is not None
+                else None
+            )
             raw_hand = self.generator.generate_hand(
                 scheduled.global_index,
                 table_id=scheduled.table_id,
                 seat_player_ids=scheduled.seat_player_ids,
                 played_at=scheduled.played_at,
+                planned_collusion_pair=(
+                    scenario.planned_pair() if scenario is not None else None
+                ),
+                allow_random_collusion=self.scenario_planner is None,
             )
             safe_hand, raw_player_labels = separate_hand_labels(raw_hand)
             payload = HandCompletedPayload.model_validate(safe_hand)
@@ -782,24 +824,36 @@ class MultiTablePokerWorld:
                 product_id=self.product_id,
             )
             available_at = payload.played_at + timedelta(days=7)
+            raw_labels_by_player = {
+                str(raw_label["player_id"]): raw_label
+                for raw_label in raw_player_labels
+            }
             player_labels = [
                 PlayerHandLabel(
                     example_id=_stable_uuid(
                         self.profile.dataset_id,
                         self.split,
                         "player-label",
-                        raw_label["hand_id"],
-                        raw_label["player_id"],
+                        payload.hand_id,
+                        player.player_id,
                     ),
                     dataset_id=self.profile.dataset_id,
                     dataset_split=self.split,
-                    hand_id=raw_label["hand_id"],
-                    player_id=raw_label["player_id"],
-                    is_suspicious=bool(raw_label["is_suspicious"]),
-                    collusion_pair_id=raw_label["collusion_pair_id"],
+                    hand_id=payload.hand_id,
+                    player_id=player.player_id,
+                    is_suspicious=self._is_suspicious_player(
+                        player.player_id,
+                        scenario,
+                        raw_labels_by_player,
+                    ),
+                    collusion_pair_id=self._collusion_group_for_player(
+                        player.player_id,
+                        scenario,
+                        raw_labels_by_player,
+                    ),
                     label_available_at=available_at,
                 )
-                for raw_label in raw_player_labels
+                for player in payload.players
             ]
             labels_by_player = {label.player_id: label for label in player_labels}
             pair_labels: list[PairHandLabel] = []
@@ -838,18 +892,52 @@ class MultiTablePokerWorld:
                         label_available_at=available_at,
                     )
                 )
+            if scenario is not None and self.scenario_planner is not None:
+                self.scenario_planner.record_hand(
+                    scenario,
+                    hand_id=payload.hand_id,
+                    played_at=payload.played_at,
+                )
             yield (
                 hand_event.model_dump(mode="json"),
                 player_labels,
                 pair_labels,
                 scheduled,
             )
+        if self.scenario_planner is not None:
+            self.scenario_summary = self.scenario_planner.finalize()
+
+    @staticmethod
+    def _is_suspicious_player(
+        player_id: str,
+        scenario: ScenarioAssignment | None,
+        raw_labels_by_player: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        if scenario is not None:
+            return scenario.is_collusive and player_id in scenario.members
+        return bool(raw_labels_by_player[player_id]["is_suspicious"])
+
+    @staticmethod
+    def _collusion_group_for_player(
+        player_id: str,
+        scenario: ScenarioAssignment | None,
+        raw_labels_by_player: Mapping[str, dict[str, Any]],
+    ) -> str | None:
+        if scenario is not None:
+            return (
+                scenario.group_id
+                if scenario.is_collusive and player_id in scenario.members
+                else None
+            )
+        value = raw_labels_by_player[player_id]["collusion_pair_id"]
+        return str(value) if value is not None else None
 
 
 def build_multitable_dataset(
     output_dir: Path,
     profile: MultiTableProfile,
     *,
+    scenario_plan: ScenarioPlan | None = None,
     start_at: datetime | None = None,
     tenant_id: str = "demo",
     product_id: str = "poker",
@@ -862,6 +950,10 @@ def build_multitable_dataset(
 
     config_path = output_dir / "config.json"
     config_path.write_text(_json_line(profile.to_dict()))
+    scenario_config_path: Path | None = None
+    if scenario_plan is not None:
+        scenario_config_path = output_dir / "scenario_config.json"
+        scenario_config_path.write_text(_json_line(scenario_plan.to_dict()))
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "dataset_id": profile.dataset_id,
@@ -885,9 +977,14 @@ def build_multitable_dataset(
                 profile.expected_tables_per_active_player
             ),
         },
+        "scenario_plan_id": (
+            scenario_plan.scenario_plan_id if scenario_plan is not None else None
+        ),
         "artifacts": {"config.json": _sha256(config_path)},
         "splits": {},
     }
+    if scenario_config_path is not None:
+        manifest["artifacts"]["scenario_config.json"] = _sha256(scenario_config_path)
     populations: dict[str, set[str]] = {}
 
     for split in SPLIT_NAMES:
@@ -898,6 +995,7 @@ def build_multitable_dataset(
             hand_count=profile.split_hands[split],
             seed=split_seed,
             start_at=start_at,
+            scenario_plan=scenario_plan,
             tenant_id=tenant_id,
             product_id=product_id,
         )
@@ -908,7 +1006,8 @@ def build_multitable_dataset(
             "private_labels" if split == "challenge" else "labels"
         )
         schedule_dir = split_dir / "schedule"
-        for directory in (events_dir, labels_dir, schedule_dir):
+        snapshots_dir = split_dir / "snapshots"
+        for directory in (events_dir, labels_dir, schedule_dir, snapshots_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
         hands_path = events_dir / "hands.jsonl"
@@ -988,6 +1087,39 @@ def build_multitable_dataset(
             for assignment in world.scheduler.seat_assignment_records:
                 stream.write(_json_line(assignment.to_dict()))
 
+        scenario_paths: tuple[Path, ...] = ()
+        if world.scenario_planner is not None:
+            cases_path = labels_dir / "scenario_cases.jsonl"
+            groups_path = labels_dir / "group_labels.jsonl"
+            scenario_hands_path = labels_dir / "scenario_hand_labels.jsonl"
+            with cases_path.open("w") as stream:
+                for row in world.scenario_planner.case_rows:
+                    stream.write(_json_line(row))
+            with groups_path.open("w") as stream:
+                for row in world.scenario_planner.group_rows:
+                    stream.write(_json_line(row))
+            with scenario_hands_path.open("w") as stream:
+                for row in world.scenario_planner.hand_rows:
+                    stream.write(_json_line(row))
+            scenario_paths = (cases_path, groups_path, scenario_hands_path)
+
+        context_rows, context_summary = build_multitable_user_contexts(
+            world.player_ids,
+            dataset_id=profile.dataset_id,
+            split=split,
+            seed=split_seed,
+            effective_anchor=start_at - timedelta(days=1),
+            group_rows=(
+                world.scenario_planner.case_rows
+                if world.scenario_planner is not None
+                else ()
+            ),
+        )
+        users_snapshot_path = snapshots_dir / "users.jsonl"
+        with users_snapshot_path.open("w") as stream:
+            for context in context_rows:
+                stream.write(_json_line(context))
+
         concurrency_histogram = Counter(
             assignment.simultaneous_tables
             for assignment in world.scheduler.seat_assignment_records
@@ -1002,6 +1134,8 @@ def build_multitable_dataset(
             hand_schedule_path,
             sessions_path,
             seats_path,
+            users_snapshot_path,
+            *scenario_paths,
         )
         split_hashes = {
             str(path.relative_to(output_dir)): _sha256(path) for path in files
@@ -1045,6 +1179,8 @@ def build_multitable_dataset(
             "last_played_at": (
                 _iso(last_played_at) if last_played_at is not None else None
             ),
+            "user_context": context_summary,
+            "scenarios": world.scenario_summary,
             "artifacts": split_hashes,
         }
 
