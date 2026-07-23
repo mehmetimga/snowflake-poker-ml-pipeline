@@ -83,6 +83,9 @@ final class JobConfigTest {
                 "POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY",
                 config.contextJdbcTable());
         assertEquals("", config.contextJdbcUrl());
+        assertEquals(
+                "http://127.0.0.1:8090",
+                config.contextSnowflakeProxyUrl());
         assertEquals(15, config.contextJdbcConnectTimeoutSeconds());
         assertEquals(20, config.contextJdbcQueryTimeoutSeconds());
         assertEquals(5, config.contextJdbcValidationTimeoutSeconds());

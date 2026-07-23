@@ -24,9 +24,13 @@ def test_canonical_flink_render_uses_internal_snowflake_context(
     spec = yaml.safe_load(text)["spec"]
     containers = {container["name"]: container for container in spec["containers"]}
     taskmanager = containers["taskmanager"]
+    context_proxy = containers["context-proxy"]
     submitter = containers["submitter"]
 
     assert submitter["env"]["FLINK_CONTEXT_SOURCE"] == "snowflake"
+    assert submitter["env"]["USER_CONTEXT_SNOWFLAKE_PROXY_URL"] == (
+        "http://127.0.0.1:8090"
+    )
     assert submitter["env"]["USER_CONTEXT_SNOWFLAKE_TABLE"] == (
         "POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY"
     )
@@ -45,6 +49,17 @@ def test_canonical_flink_render_uses_internal_snowflake_context(
     assert "USER_CONTEXT_DB_USER" not in text
     assert "USER_CONTEXT_DB_PASSWORD" not in text
     assert "CONTEXT_DB_CREDENTIALS" not in text
+    assert context_proxy["command"] == ["/usr/local/bin/python"]
+    assert context_proxy["args"] == ["/opt/context-proxy/server.py"]
+    assert context_proxy["env"]["SNOWFLAKE_WAREHOUSE"] == "DEMO_WH"
+    assert context_proxy["readinessProbe"] == {
+        "port": 8090,
+        "path": "/healthz",
+    }
+    assert all(
+        endpoint["port"] != 8090 for endpoint in spec["endpoints"]
+    )
+    assert "secrets" not in context_proxy
     assert "secrets" not in taskmanager
     assert "secrets" not in containers["jobmanager"]
     assert {

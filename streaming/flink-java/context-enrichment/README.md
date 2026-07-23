@@ -31,11 +31,11 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
   `effective_at <= played_at`.
 - A late hand may resolve an older effective row for that event, but it cannot
   replace a newer row already cached for subsequent hands.
-- Every cache-miss lookup validates its subtask-local connection. A closed or
-  invalid connection is replaced before the prepared query executes.
-- Snowflake connect, prepared-query, and validation timeouts are bounded. A
-  transient SQLSTATE receives exactly one retry with at most 100 ms jitter by
-  default; authentication, schema, and data errors never retry.
+- Every cache miss calls the private localhost context proxy. The proxy owns
+  one bounded Snowflake session and reconnects before its single retry.
+- Snowflake connect and query timeouts are bounded. A transient proxy failure
+  receives exactly one Java-side retry with at most 100 ms jitter by default;
+  invalid requests and data errors never retry.
 - If the retry fails, the operator throws a sanitized exception. The
   canonical job uses a failure-rate restart policy instead of advancing Kafka
   work or converting an infrastructure outage into a data-quality DLQ.
@@ -65,7 +65,7 @@ The canonical path is separated by responsibility:
 | `domain` | Flink-independent context identity, projection, and typed cache records |
 | `port` | Point-in-time context repository interface |
 | `adapter.jdbc` | Shared prepared-query, reconnect, retry, and sanitized failure mapping |
-| `adapter.snowflake` | SPCS service-token connection and Snowflake repository |
+| `adapter.snowflake` | Private localhost context-proxy client |
 | `contract` | Enriched-event JSON contract |
 | `flink` | Typed state declaration, active-player keyed operator, and metrics |
 
@@ -112,6 +112,7 @@ Important options:
 | Option | Default |
 |---|---:|
 | `--context-source` | required `snowflake` for the canonical entrypoint |
+| `--context-snowflake-proxy-url` | `http://127.0.0.1:8090` |
 | `--context-snowflake-table` | `POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY` |
 | `--context-jdbc-query-timeout-seconds` | `20` |
 | `--context-jdbc-connect-timeout-seconds` | `15` |
@@ -131,33 +132,28 @@ Important options:
 | `--parallelism` | `1` |
 
 SPCS supplies `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_HOST`, and a rotating OAuth
-service token at `/snowflake/session/token`. The TaskManager reads the token
-only when opening a connection; it is not stored in the serializable job
-configuration or process-function fields. The deployment sets
+service token at `/snowflake/session/token`. The co-located Python context
+proxy reads the token and owns the Snowflake session. The Java TaskManager
+never receives or serializes that token. The deployment sets
 `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, and
 `USER_CONTEXT_SNOWFLAKE_TABLE`. No Snowflake username/password Secret is
-mounted.
+mounted, and the proxy port is not declared as an SPCS endpoint.
 
 ## Connections and metrics
 
-Each active-context operator subtask owns one Snowflake connection; the pair
-feature job owns none. Therefore:
+Each `POKER_FLINK` service instance owns one proxy-managed Snowflake session;
+the Java context and pair-feature jobs own none. Therefore:
 
 ```text
-steady JDBC connections =
-  active-context parallelism × concurrently running context jobs
+steady Snowflake sessions =
+  running POKER_FLINK service instances
 ```
 
-A reconnect closes the old resource before opening its replacement, so it
-does not intentionally double the steady connection count. During a
-blue/green or shadow comparison, include every concurrently running context
-job in the budget. Size the Snowflake warehouse and Flink parallelism from
-observed cache-miss rate, query latency, Kafka lag, and backpressure.
-
-For example, parallelism 4 uses four steady connections. Running old and new
-context jobs together uses eight. The expected steady query rate is driven by
-first-seen and refresh misses, not by every hand, because active players remain
-in keyed state.
+A reconnect closes the old resource before opening its replacement. During a
+blue/green or shadow comparison, include every running service instance in the
+session budget. The expected steady query rate is driven by first-seen and
+refresh misses, not by every hand, because active players remain in keyed
+state.
 
 The TaskManager exports cache hit/miss/refresh, lookup found/not-found,
 retry, reconnect, final failure category, and latest lookup-latency metrics.

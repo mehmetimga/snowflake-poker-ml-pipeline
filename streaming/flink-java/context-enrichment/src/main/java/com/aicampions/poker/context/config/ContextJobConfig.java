@@ -14,6 +14,7 @@ public record ContextJobConfig(
         String groupId,
         String contextSource,
         String contextJdbcUrl,
+        String contextSnowflakeProxyUrl,
         String contextJdbcTable,
         int contextJdbcQueryTimeoutSeconds,
         int contextJdbcConnectTimeoutSeconds,
@@ -111,6 +112,12 @@ public record ContextJobConfig(
                 "context-jdbc-url",
                 "USER_CONTEXT_JDBC_URL",
                 "");
+        String contextSnowflakeProxyUrl = value(
+                args,
+                environment,
+                "context-snowflake-proxy-url",
+                "USER_CONTEXT_SNOWFLAKE_PROXY_URL",
+                "http://127.0.0.1:8090");
         String contextJdbcTable = contextSource.equals("snowflake")
                 ? value(
                         args,
@@ -234,6 +241,7 @@ public record ContextJobConfig(
                 group,
                 contextSource,
                 contextJdbcUrl,
+                contextSnowflakeProxyUrl,
                 contextJdbcTable,
                 contextJdbcQueryTimeoutSeconds,
                 contextJdbcConnectTimeoutSeconds,
@@ -263,7 +271,8 @@ public record ContextJobConfig(
     public String safeSummary() {
         String contextDescription =
                 switch (contextSource) {
-                    case "snowflake" -> "snowflake-service-identity-point-in-time";
+                    case "snowflake" ->
+                            "snowflake-private-sidecar-point-in-time";
                     case "jdbc" -> "postgresql-point-in-time";
                     default -> contextTopic;
                 };

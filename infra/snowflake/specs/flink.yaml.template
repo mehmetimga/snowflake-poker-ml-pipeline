@@ -61,6 +61,30 @@ spec:
       limits:
         cpu: 3
         memory: 7Gi
+  - name: context-proxy
+    image: __FLINK_IMAGE_PATH__
+    command:
+    - /usr/local/bin/python
+    args:
+    - /opt/context-proxy/server.py
+    env:
+      SNOWFLAKE_WAREHOUSE: DEMO_WH
+      SNOWFLAKE_DATABASE: POKER_ML_DEMO
+      SNOWFLAKE_SCHEMA: SPCS
+      USER_CONTEXT_SNOWFLAKE_TABLE: POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY
+      CONTEXT_PROXY_PORT: "8090"
+      CONTEXT_PROXY_CONNECT_TIMEOUT_SECONDS: "15"
+      CONTEXT_PROXY_QUERY_TIMEOUT_SECONDS: "20"
+    readinessProbe:
+      port: 8090
+      path: /healthz
+    resources:
+      requests:
+        cpu: 0.25
+        memory: 0.5Gi
+      limits:
+        cpu: 0.5
+        memory: 1Gi
   - name: submitter
     image: __FLINK_IMAGE_PATH__
     command:
@@ -77,6 +101,7 @@ spec:
       KAFKA_PAIR_FEATURES_V2_TOPIC: poker.synthetic.pair-features.context-v2.v1
       KAFKA_DEAD_LETTER_TOPIC: poker.synthetic.pipeline.dead-letter.v1
       FLINK_CONTEXT_SOURCE: snowflake
+      USER_CONTEXT_SNOWFLAKE_PROXY_URL: http://127.0.0.1:8090
       USER_CONTEXT_SNOWFLAKE_TABLE: POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY
       FLINK_CONTEXT_JDBC_CONNECT_TIMEOUT_SECONDS: "15"
       FLINK_CONTEXT_JDBC_QUERY_TIMEOUT_SECONDS: "20"

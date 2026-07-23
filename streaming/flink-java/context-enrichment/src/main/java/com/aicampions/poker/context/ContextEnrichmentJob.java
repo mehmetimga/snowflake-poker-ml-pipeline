@@ -107,6 +107,7 @@ public final class ContextEnrichmentJob {
                             new JdbcContextEnrichmentFunction(
                                     config.contextSource(),
                                     config.contextJdbcUrl(),
+                                    config.contextSnowflakeProxyUrl(),
                                     config.contextJdbcTable(),
                                     config.contextJdbcQueryTimeoutSeconds(),
                                     config.contextJdbcConnectTimeoutSeconds(),

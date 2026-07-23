@@ -7,8 +7,7 @@ import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
 import com.aicampions.poker.context.adapter.jdbc.JdbcRepositoryObserver;
 import com.aicampions.poker.context.adapter.jdbc.JdbcUserContextRepository;
 import com.aicampions.poker.context.adapter.jdbc.UserContextLookupException;
-import com.aicampions.poker.context.adapter.snowflake.SnowflakeServiceCredentials;
-import com.aicampions.poker.context.adapter.snowflake.SnowflakeUserContextRepository;
+import com.aicampions.poker.context.adapter.snowflake.SnowflakeContextProxyRepository;
 import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
 import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
 import com.aicampions.poker.context.domain.ContextKey;
@@ -29,6 +28,7 @@ public final class JdbcContextEnrichmentFunction
         extends KeyedProcessFunction<ContextKey, String, String> {
     private final String contextSource;
     private final String jdbcUrl;
+    private final String snowflakeProxyUrl;
     private final String tableName;
     private final int queryTimeoutSeconds;
     private final int connectTimeoutSeconds;
@@ -59,6 +59,7 @@ public final class JdbcContextEnrichmentFunction
     public JdbcContextEnrichmentFunction(
             String contextSource,
             String jdbcUrl,
+            String snowflakeProxyUrl,
             String tableName,
             int queryTimeoutSeconds,
             int connectTimeoutSeconds,
@@ -69,6 +70,7 @@ public final class JdbcContextEnrichmentFunction
             String handTopic) {
         this.contextSource = contextSource;
         this.jdbcUrl = jdbcUrl;
+        this.snowflakeProxyUrl = snowflakeProxyUrl;
         this.tableName = tableName;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
         this.connectTimeoutSeconds = connectTimeoutSeconds;
@@ -118,13 +120,10 @@ public final class JdbcContextEnrichmentFunction
                         }
                     };
             if (contextSource.equals("snowflake")) {
-                repository = new SnowflakeUserContextRepository(
-                        SnowflakeServiceCredentials.fromEnvironment(
-                                System.getenv()),
-                        tableName,
-                        queryTimeoutSeconds,
+                repository = new SnowflakeContextProxyRepository(
+                        snowflakeProxyUrl,
                         connectTimeoutSeconds,
-                        validationTimeoutSeconds,
+                        queryTimeoutSeconds,
                         retryMaximumJitterMs,
                         observer);
             } else {

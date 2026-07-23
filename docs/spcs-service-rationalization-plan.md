@@ -91,7 +91,9 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
 - [x] The clean F4 replay produced six deterministic context rows and fifteen
   parity-checked pair snapshots with an empty DLQ.
 - [x] Canonical context storage moved inside Snowflake; the SPCS service-token
-  adapter, history table seeder, and Secret-free rendered spec exist.
+  Python sidecar, Java localhost adapter, history table seeder, and
+  Secret-free rendered spec exist. JDBC was removed from this boundary because
+  SPCS service-token SQL does not support the JDBC driver.
 - [ ] Canonical SPCS service cutover is complete.
 
 ## 3. Current baseline and target decision

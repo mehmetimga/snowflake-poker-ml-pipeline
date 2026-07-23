@@ -77,6 +77,7 @@ def test_c1_specs_define_separate_private_services(monkeypatch, tmp_path: Path) 
     assert [value["name"] for value in flink["containers"]] == [
         "jobmanager",
         "taskmanager",
+        "context-proxy",
         "submitter",
     ]
     assert all(
@@ -114,13 +115,14 @@ def test_flink_supervisor_requires_both_jobs() -> None:
     assert "flink list -r" in script
 
 
-def test_flink_image_check_works_in_jre_and_requires_snowflake_adapter() -> None:
+def test_flink_image_check_requires_private_snowflake_proxy_adapter() -> None:
     script = (ROOT / "streaming/flink-java/docker/check-image.sh").read_text()
     assert "jar tf" not in script
     assert 'grep -aFq "${class_path}" "${jar_path}"' in script
-    assert "SnowflakeServiceConnectionFactory.class" in script
-    assert "SnowflakeUserContextRepository.class" in script
-    assert "net/snowflake/client/api/driver/SnowflakeDriver.class" in script
+    assert "SnowflakeContextProxyRepository.class" in script
+    assert "/opt/context-proxy/server.py" in script
+    assert "import snowflake.connector" in script
+    assert "SnowflakeDriver.class" not in script
 
 
 def test_release_guard_rejects_non_head_tag(monkeypatch) -> None:

@@ -145,10 +145,12 @@ The generated hand fixture is written to
 that fixture has a matching versioned context row effective before the hand.
 
 Inside SPCS, Snowflake automatically mounts a rotating service OAuth token at
-`/snowflake/session/token` and supplies the account host. The Flink
-TaskManager rereads that token whenever it creates a JDBC connection and
-executes SQL as the `POKER_FLINK` service owner. This is internal Snowflake
-traffic and does not require an External Access Integration.
+`/snowflake/session/token` and supplies the account host. A small Python
+`context-proxy` container in the same `POKER_FLINK` service uses the supported
+Snowflake Connector for Python to execute SQL as the service owner. The Java
+TaskManager reaches it only at `http://127.0.0.1:8090`; port 8090 is not an
+SPCS endpoint. This remains internal Snowflake traffic and requires neither an
+External Access Integration nor a user-managed Snowflake credential.
 
 Run the complete local/rendered deployment gate before a live service update:
 
@@ -180,7 +182,7 @@ catalog comparison:
 make snow-inspect-flink
 ```
 
-Snowflake rotates the mounted service token. The connection factory rereads
+Snowflake rotates the mounted service token. The private context proxy rereads
 the token file on reconnect, so no user-managed Snowflake credential rotation
 is needed in the container.
 

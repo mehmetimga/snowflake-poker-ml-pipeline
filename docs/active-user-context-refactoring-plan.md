@@ -1,7 +1,7 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1–F4 complete locally; F5 internal-Snowflake implementation complete,
-live apply in progress
+Status: F1–F4 complete locally; F5 internal-Snowflake sidecar deployed,
+live verification in progress
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -30,13 +30,13 @@ service, topic, savepoint, table, or artifact.
 |---|---|
 | Hand ingestion | PostgreSQL hand history -> Debezium -> Kafka -> `POKER_ADAPTER` |
 | Context ingestion | Lazy point-in-time internal Snowflake lookup inside `POKER_FLINK` |
-| Initial lookup method | Synchronous Snowflake JDBC with strict limits and Flink restart semantics |
+| Initial lookup method | Synchronous Java -> localhost Python proxy -> Snowflake SQL, with strict limits and Flink restart semantics |
 | Active-player cache | Typed Flink keyed `ValueState`, 36-hour inactivity TTL |
 | Context refresh | 60 minutes initially; tune using measured staleness and load |
 | Full-table bootstrap | Never on the online path |
 | Context Kafka topic | Legacy rollback path only; remove after cutover |
 | Redis | Not justified at the expected 10,000 daily active users |
-| New context microservice | Not justified; Snowflake is directly available inside SPCS |
+| New external context microservice | Not justified; one private co-located connector sidecar bridges Java to the supported SPCS token client |
 | Async I/O | Implement only when load and backpressure gates require it |
 | Permanent Flink service count | One `POKER_FLINK` SPCS service |
 | Production authorization | Not the ML cache's responsibility |
@@ -112,7 +112,7 @@ Confluent Kafka: cdc-hand-outbox.v1
                                           |
                               hands.raw.v1 |
                                           v
-Snowflake context <--- internal SQL --- POKER_FLINK (Java/Flink)
+Snowflake context <--- Python connector sidecar <--- POKER_FLINK (Java/Flink)
 versioned history table                 |
                                         +-- validate hand
                                         +-- expand six players
@@ -641,8 +641,8 @@ the remaining release operations.
 
 1. [x] Replace the external PostgreSQL runtime lookup with the internal
    Snowflake history table.
-2. [x] Use the SPCS rotating service OAuth token; remove the context EAI and
-   password Secret from the canonical service.
+2. [x] Use the SPCS rotating service OAuth token through a private Python
+   connector sidecar; remove the context EAI and password Secret.
 3. [x] Configure `FLINK_CONTEXT_SOURCE=snowflake` as canonical.
 4. [x] Remove the context topic from the canonical spec.
 5. [x] Refactor EAI deployment to accept and reconcile a full ordered list.
@@ -657,8 +657,9 @@ The declarative source of truth is
 `infra/snowflake/services.yaml`. `POKER_FLINK` declares exactly
 `POKER_FLINK_KAFKA_EAI`. Its rendered spec references
 `KAFKA_CREDENTIALS` only from `submitter`; it contains no context Secret.
-TaskManagers use the Snowflake-provided host and service token to query
-`POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY`.
+The `context-proxy` container uses the Snowflake-provided host and service
+token to query `POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY`. TaskManagers
+call it only over localhost; the proxy port is not an SPCS endpoint.
 
 `deploy_service` now replaces the complete EAI list, updates the spec, reads
 the effective configuration through `DESCRIBE SERVICE`, and fails on EAI or
@@ -721,7 +722,7 @@ Status: blocked on F6.
 5. Remove the legacy job from the `POKER_FLINK` deployment.
 6. Remove its code only after the retention window and explicit approval.
 
-Exit gate: `POKER_FLINK` runs hands-only JDBC context enrichment and pair
+Exit gate: `POKER_FLINK` runs hands-only internal context enrichment and pair
 features; no deployed job consumes the context Kafka topic.
 
 ### F8 — Conditional async lookup

@@ -5,7 +5,11 @@ test -s /opt/flink/usrlib/context-enrichment.jar
 test -s /opt/flink/usrlib/pair-features.jar
 test -s /opt/flink/lib/flink-metrics-prometheus-1.19.1.jar
 test -s /opt/flink/lib/flink-statebackend-rocksdb-1.19.1.jar
+test -s /opt/context-proxy/server.py
 bash -n /opt/flink/bin/submit-poker-jobs
+/usr/local/bin/python -m py_compile /opt/context-proxy/server.py
+/usr/local/bin/python -c \
+  'import snowflake.connector; assert tuple(map(int, snowflake.connector.VERSION[:2])) >= (4, 5)'
 
 verify_main_class() {
   local jar_path="$1"
@@ -56,12 +60,9 @@ for class_path in \
   com/aicampions/poker/context/adapter/jdbc/JdbcRepositoryObserver.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcRetryDelay.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcUserContextRepository.class \
-  com/aicampions/poker/context/adapter/snowflake/SnowflakeServiceConnectionFactory.class \
-  com/aicampions/poker/context/adapter/snowflake/SnowflakeServiceCredentials.class \
-  com/aicampions/poker/context/adapter/snowflake/SnowflakeUserContextRepository.class \
+  com/aicampions/poker/context/adapter/snowflake/SnowflakeContextProxyRepository.class \
   com/aicampions/poker/context/flink/ActiveContextState.class \
-  com/aicampions/poker/context/flink/JdbcContextEnrichmentFunction.class \
-  net/snowflake/client/api/driver/SnowflakeDriver.class; do
+  com/aicampions/poker/context/flink/JdbcContextEnrichmentFunction.class; do
   verify_jar_class /opt/flink/usrlib/context-enrichment.jar "${class_path}"
 done
 
