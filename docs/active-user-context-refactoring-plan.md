@@ -1,6 +1,6 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1–F4 complete locally; F5 next
+Status: F1–F4 complete locally; F5 local/rendered gates complete, live apply pending
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -638,15 +638,46 @@ existing state name at an incompatible serializer.
 
 ### F5 — SPCS network, secrets, and declarative deployment
 
-Status: next.
+Status: local implementation and rendered-spec gates complete on 2026-07-23;
+live resource creation, service update, and read-only post-deploy inspection
+remain an explicit release operation.
 
-1. Add the PostgreSQL network rule, EAI, and Secret creation templates.
-2. Mount the context Secret in the TaskManager spec.
-3. Configure `FLINK_CONTEXT_SOURCE=jdbc` as canonical.
-4. Remove the context topic from the canonical spec.
-5. Refactor EAI deployment to accept and reconcile a full list.
-6. Add the canonical service catalog and rendered-spec secret tests.
-7. Complete the `_SIM` to canonical naming/topic changes in R2.
+1. [x] Add exact PostgreSQL network-rule, EAI, and password-Secret
+   provisioning.
+2. [x] Mount the context Secret only in the TaskManager spec.
+3. [x] Configure `FLINK_CONTEXT_SOURCE=jdbc` as canonical.
+4. [x] Remove the context topic from the canonical spec.
+5. [x] Refactor EAI deployment to accept and reconcile a full ordered list.
+6. [x] Add the canonical service catalog and rendered-spec secret tests.
+7. [x] Use the canonical `POKER_FLINK` service and `poker.synthetic.*` v2
+   topic names; retain the explicitly isolated `_SIM` rollback services until
+   F7 rather than renaming or deleting live services during this phase.
+
+The declarative source of truth is
+`infra/snowflake/services.yaml`. `POKER_FLINK` declares exactly
+`POKER_FLINK_KAFKA_EAI` and `POKER_FLINK_CONTEXT_DB_EAI`. Its rendered spec
+references `CONTEXT_DB_CREDENTIALS` only from `taskmanager` and
+`KAFKA_CREDENTIALS` only from `submitter`. The JDBC URL is non-secret,
+validated, and cannot contain user/password fields or sensitive query
+parameters.
+
+`deploy_service` now replaces the complete EAI list, updates the spec, reads
+the effective configuration through `DESCRIBE SERVICE`, and fails on EAI or
+Secret-reference drift. `inspect-services` performs the same comparison
+without changing the service.
+
+Local evidence:
+
+- 37 focused deployment/packaging tests passed;
+- all seven service specs rendered with no unresolved placeholders;
+- all seven catalog entries matched their rendered Secret references; and
+- the dry-run plan resolved one exact PostgreSQL endpoint, one network rule,
+  one password Secret, one context EAI, and the TaskManager mount boundary.
+
+No Snowflake object or running SPCS service was changed during the local F5
+implementation. The live portion is intentionally pending a real public
+PostgreSQL endpoint/credential, immutable Flink image release, and explicit
+deployment approval.
 
 Exit gate: a dry run shows exact resources; the rendered spec contains no
 credential value; a read-only service inspection matches the catalog.

@@ -103,6 +103,10 @@ make snow-configure-kafka
 The credentials are written to a Snowflake password Secret. They are not
 written to YAML, `.env`, or the container image.
 
+The command also creates the dedicated `POKER_FLINK_KAFKA_EAI` used by the
+canonical Flink service. Risk/realtime services retain `POKER_KAFKA_EAI`, so
+each service's complete egress set can be reconciled independently.
+
 The C2 simulation adapter uses a separate Secret, network rule, and EAI. Prefer
 a Confluent principal restricted to the three `poker.sim.*` topics and the
 `poker-go-hand-adapter-sim-v1` consumer group:
@@ -117,14 +121,66 @@ make c2-adapter-configure-kafka
 For a bounded demo, shared Kafka credentials require the explicit
 `C2_ADAPTER_KAFKA_CONFIG_FLAGS=--allow-shared-credentials` override.
 
-## 4. Render and deploy
+## 4. Configure the Flink PostgreSQL context lookup
+
+The canonical `POKER_FLINK` service consumes only hand events from Kafka. On a
+cache miss, its TaskManager lazily reads the active player's context from
+PostgreSQL. Set a network-reachable PostgreSQL DNS host with an explicit port;
+do not put a username or password in the JDBC URL:
+
+```bash
+export USER_CONTEXT_JDBC_URL='jdbc:postgresql://context-db.example.com:5432/poker?sslmode=require'
+export USER_CONTEXT_DB_USER='...'
+export USER_CONTEXT_DB_PASSWORD='...'
+
+# Read-only local plan: prints object names and the exact host:port, never the
+# credential values.
+make snow-plan-flink-context-db
+
+# Explicit Snowflake mutation: creates/replaces the exact network rule,
+# password Secret, context EAI, and grants.
+make snow-configure-flink-context-db
+```
+
+The password Secret is mounted as `USER_CONTEXT_DB_USER` and
+`USER_CONTEXT_DB_PASSWORD` only in the Flink TaskManager. The JobManager and
+submitter never receive it. Snowflake requires the service owner to have
+`READ` on password Secrets; `ALLOWED_AUTHENTICATION_SECRETS` is an additional
+requirement for OAuth Secrets, not this password Secret.
+
+Run the complete local/rendered deployment gate before a live service update:
+
+```bash
+make phase-f5-check
+```
+
+[`services.yaml`](services.yaml) is the deployment source of truth. For
+`POKER_FLINK` it declares both `POKER_FLINK_KAFKA_EAI` and
+`POKER_FLINK_CONTEXT_DB_EAI`. Deployment replaces the full EAI set, updates
+the service spec, reads it back with `DESCRIBE SERVICE`, and fails if the
+effective EAI or Secret references differ from the catalog.
+
+## 5. Render and deploy
 
 ```bash
 make snow-render
+make snow-validate-catalog
 make snow-deploy-admin
 make snow-deploy-realtime
 make snow-status
 ```
+
+For the immutable Flink release, use `make c1-deploy-flink` after its image has
+been built, pushed, and rendered with the real `USER_CONTEXT_JDBC_URL`. Then
+perform a read-only catalog comparison:
+
+```bash
+make snow-inspect-flink
+```
+
+Changing the password Secret does not hot-update environment variables in an
+already running container. Redeploy/restart the service under the normal
+savepoint and rollback procedure after a credential rotation.
 
 The realtime service mounts `MODEL_ARTIFACTS` at `/opt/models`, consumes
 `hands.raw`, computes features/rules/scores, and persists history and alerts.
@@ -139,7 +195,7 @@ make snow-suspend-admin
 make snow-resume-admin  # when needed again
 ```
 
-## 5. Run CPU training
+## 6. Run CPU training
 
 After loading the frozen train/validation/test sets:
 

@@ -13,12 +13,17 @@ import os
 from pathlib import Path
 import re
 import sys
+from collections.abc import Mapping, Sequence
+from urllib.parse import parse_qsl, urlsplit
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SQL_DIR = Path(__file__).resolve().parent / "sql"
 SPECS_DIR = Path(__file__).resolve().parent / "specs"
 RENDERED_DIR = Path(__file__).resolve().parent / "rendered"
+SERVICE_CATALOG = Path(__file__).resolve().parent / "services.yaml"
 
 DEFAULT_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev"
 DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
@@ -33,8 +38,13 @@ POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
 ADAPTER_SIM_KAFKA_EAI = "POKER_ADAPTER_SIM_KAFKA_EAI"
+FLINK_KAFKA_EAI = "POKER_FLINK_KAFKA_EAI"
+FLINK_CONTEXT_DB_EAI = "POKER_FLINK_CONTEXT_DB_EAI"
+FLINK_CONTEXT_DB_RULE = "POKER_FLINK_CONTEXT_DB_EGRESS_RULE"
+CONTEXT_DB_SECRET = f"{DATABASE}.{SCHEMA}.CONTEXT_DB_CREDENTIALS"
 
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:[0-9]{2,5}$")
+_HOSTNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
 _IMAGE = re.compile(
     r"^/[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z_][A-Za-z0-9_$]*/"
     r"[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$"
@@ -43,6 +53,17 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SAVEPOINT_URI = re.compile(
     r"^file:/+opt/flink/state/savepoints/savepoint-[A-Za-z0-9_-]+$"
 )
+_SNOWFLAKE_ID = re.compile(r"^[A-Z][A-Z0-9_$]*$")
+_JDBC_URL_SAFE = re.compile(r"^[A-Za-z0-9:/?&=._%+-]+$")
+_SENSITIVE_JDBC_KEYS = {
+    "access_token",
+    "password",
+    "secret",
+    "sslpassword",
+    "token",
+    "user",
+    "username",
+}
 
 
 def _warehouse():
@@ -91,6 +112,76 @@ def _parse_brokers(raw: str) -> list[str]:
                 f"Kafka port {port} is not allowed by Snowpark Container Services"
             )
     return brokers
+
+
+def _validate_snowflake_identifier(value: str, *, label: str) -> str:
+    if not _SNOWFLAKE_ID.fullmatch(value):
+        raise SystemExit(f"Invalid {label}: {value!r}")
+    return value
+
+
+def _parse_postgres_jdbc_url(raw: str) -> tuple[str, str]:
+    """Validate a non-secret PostgreSQL JDBC URL and return its exact endpoint."""
+    if not raw or not _JDBC_URL_SAFE.fullmatch(raw):
+        raise SystemExit(
+            "USER_CONTEXT_JDBC_URL must be a plain PostgreSQL JDBC URL without "
+            "spaces, quotes, or credentials"
+        )
+    if not raw.startswith("jdbc:postgresql://"):
+        raise SystemExit("USER_CONTEXT_JDBC_URL must start with jdbc:postgresql://")
+    parsed = urlsplit(raw.removeprefix("jdbc:"))
+    if parsed.scheme != "postgresql" or parsed.fragment:
+        raise SystemExit("Invalid USER_CONTEXT_JDBC_URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise SystemExit(
+            "USER_CONTEXT_JDBC_URL must not contain a username or password"
+        )
+    host = parsed.hostname
+    if not host or not _HOSTNAME.fullmatch(host):
+        raise SystemExit("USER_CONTEXT_JDBC_URL must contain a valid DNS host")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise SystemExit(f"Invalid USER_CONTEXT_JDBC_URL port: {error}") from error
+    if port is None:
+        raise SystemExit("USER_CONTEXT_JDBC_URL must include an explicit port")
+    if port < 1 or port > 65535:
+        raise SystemExit("USER_CONTEXT_JDBC_URL port must be between 1 and 65535")
+    if not parsed.path or parsed.path == "/" or parsed.path.count("/") != 1:
+        raise SystemExit(
+            "USER_CONTEXT_JDBC_URL must include one database name in its path"
+        )
+    sensitive_keys = {
+        key.lower() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    } & _SENSITIVE_JDBC_KEYS
+    if sensitive_keys:
+        raise SystemExit(
+            "USER_CONTEXT_JDBC_URL query must not contain credentials: "
+            + ", ".join(sorted(sensitive_keys))
+        )
+    return raw, f"{host}:{port}"
+
+
+def _configured_context_db() -> tuple[str, str | None, str | None]:
+    return (
+        os.environ.get("USER_CONTEXT_JDBC_URL", ""),
+        os.environ.get("USER_CONTEXT_DB_USER"),
+        os.environ.get("USER_CONTEXT_DB_PASSWORD"),
+    )
+
+
+def context_db_access_plan(jdbc_url: str) -> dict[str, object]:
+    """Return the exact non-secret Snowflake objects needed by POKER_FLINK."""
+    validated_url, endpoint = _parse_postgres_jdbc_url(jdbc_url)
+    return {
+        "service": f"{DATABASE}.{SCHEMA}.POKER_FLINK",
+        "jdbc_url": validated_url,
+        "network_rule": f"{DATABASE}.{SCHEMA}.{FLINK_CONTEXT_DB_RULE}",
+        "network_endpoint": endpoint,
+        "secret": CONTEXT_DB_SECRET,
+        "external_access_integration": FLINK_CONTEXT_DB_EAI,
+        "secret_container": "taskmanager",
+    }
 
 
 def _configured_kafka() -> tuple[str, str | None, str | None]:
@@ -157,7 +248,13 @@ def configure_kafka() -> None:
                 "ALLOWED_NETWORK_RULES = "
                 "(POKER_ML_DEMO.SPCS.KAFKA_EGRESS_RULE) ENABLED = TRUE"
             ),
+            (
+                f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {FLINK_KAFKA_EAI} "
+                "ALLOWED_NETWORK_RULES = "
+                "(POKER_ML_DEMO.SPCS.KAFKA_EGRESS_RULE) ENABLED = TRUE"
+            ),
             "GRANT USAGE ON INTEGRATION POKER_KAFKA_EAI TO ROLE SYSADMIN",
+            f"GRANT USAGE ON INTEGRATION {FLINK_KAFKA_EAI} TO ROLE SYSADMIN",
             "USE ROLE SYSADMIN",
             (
                 "GRANT READ ON SECRET POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS "
@@ -170,6 +267,59 @@ def configure_kafka() -> None:
             "[snowflake] Kafka egress and secret configured for: " + ", ".join(brokers)
         )
         print("[snowflake] Kafka bootstrap servers: " + ", ".join(bootstrap_brokers))
+    finally:
+        wh.close()
+
+
+def configure_flink_context_db() -> None:
+    jdbc_url, username, password = _configured_context_db()
+    plan = context_db_access_plan(jdbc_url)
+    if bool(username) != bool(password):
+        raise SystemExit(
+            "Set both USER_CONTEXT_DB_USER and USER_CONTEXT_DB_PASSWORD"
+        )
+    if not username or not password:
+        raise SystemExit(
+            "Set USER_CONTEXT_DB_USER and USER_CONTEXT_DB_PASSWORD in the shell. "
+            "They are stored as a Snowflake Secret and never written to a spec file."
+        )
+
+    endpoint = str(plan["network_endpoint"])
+    wh = _warehouse()
+    try:
+        statements = [
+            "USE ROLE SYSADMIN",
+            f"USE DATABASE {DATABASE}",
+            f"USE SCHEMA {SCHEMA}",
+            (
+                f"CREATE OR REPLACE NETWORK RULE {FLINK_CONTEXT_DB_RULE} "
+                "MODE = EGRESS TYPE = HOST_PORT "
+                f"VALUE_LIST = ({_sql_string(endpoint)})"
+            ),
+            (
+                "CREATE OR REPLACE SECRET CONTEXT_DB_CREDENTIALS TYPE = PASSWORD "
+                f"USERNAME = {_sql_string(username)} PASSWORD = {_sql_string(password)}"
+            ),
+            "USE ROLE ACCOUNTADMIN",
+            (
+                f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION "
+                f"{FLINK_CONTEXT_DB_EAI} ALLOWED_NETWORK_RULES = "
+                f"({DATABASE}.{SCHEMA}.{FLINK_CONTEXT_DB_RULE}) ENABLED = TRUE"
+            ),
+            (
+                f"GRANT USAGE ON INTEGRATION {FLINK_CONTEXT_DB_EAI} "
+                "TO ROLE SYSADMIN"
+            ),
+            "USE ROLE SYSADMIN",
+            f"GRANT READ ON SECRET {CONTEXT_DB_SECRET} TO ROLE SYSADMIN",
+        ]
+        for statement in statements:
+            wh.execute(statement)
+        print(
+            "[snowflake] Flink PostgreSQL access configured "
+            f"endpoint={endpoint} secret={CONTEXT_DB_SECRET} "
+            f"eai={FLINK_CONTEXT_DB_EAI}"
+        )
     finally:
         wh.close()
 
@@ -243,6 +393,194 @@ def configure_adapter_sim_kafka(*, allow_shared_credentials: bool = False) -> No
         wh.close()
 
 
+def _normalize_object_name(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"{label} must be a Snowflake object name")
+    parts = [part.strip('"').upper() for part in value.split(".")]
+    if any(not _SNOWFLAKE_ID.fullmatch(part) for part in parts):
+        raise SystemExit(f"Invalid {label}: {value!r}")
+    if len(parts) == 1:
+        parts = [DATABASE, SCHEMA, parts[0]]
+    if len(parts) != 3:
+        raise SystemExit(f"{label} must be fully qualified: {value!r}")
+    return ".".join(parts)
+
+
+def _load_service_catalog() -> dict[str, dict[str, object]]:
+    if not SERVICE_CATALOG.is_file():
+        raise SystemExit(f"Missing service catalog: {SERVICE_CATALOG}")
+    raw = yaml.safe_load(SERVICE_CATALOG.read_text())
+    if not isinstance(raw, Mapping) or raw.get("version") != 1:
+        raise SystemExit("Service catalog must be a version 1 mapping")
+    if raw.get("database") != DATABASE or raw.get("schema") != SCHEMA:
+        raise SystemExit(
+            f"Service catalog must target {DATABASE}.{SCHEMA} exactly"
+        )
+    services = raw.get("services")
+    if not isinstance(services, Mapping) or not services:
+        raise SystemExit("Service catalog must declare at least one service")
+
+    catalog: dict[str, dict[str, object]] = {}
+    for raw_name, raw_entry in services.items():
+        name = _validate_snowflake_identifier(str(raw_name), label="service name")
+        if not isinstance(raw_entry, Mapping):
+            raise SystemExit(f"Catalog entry {name} must be a mapping")
+        spec = raw_entry.get("spec")
+        if (
+            not isinstance(spec, str)
+            or Path(spec).name != spec
+            or not spec.endswith(".yaml")
+        ):
+            raise SystemExit(f"Catalog entry {name} has an invalid spec")
+        compute_pool = raw_entry.get("compute_pool", POOL)
+        _validate_snowflake_identifier(str(compute_pool), label="compute pool")
+
+        raw_eais = raw_entry.get("external_access_integrations", [])
+        if (
+            not isinstance(raw_eais, list)
+            or len(raw_eais) > 10
+            or any(not isinstance(value, str) for value in raw_eais)
+        ):
+            raise SystemExit(
+                f"Catalog entry {name} must declare at most 10 EAIs as a list"
+            )
+        eais = tuple(
+            _validate_snowflake_identifier(value, label="EAI") for value in raw_eais
+        )
+        if len(eais) != len(set(eais)):
+            raise SystemExit(f"Catalog entry {name} contains a duplicate EAI")
+
+        raw_secret_refs = raw_entry.get("secret_references", {})
+        if not isinstance(raw_secret_refs, Mapping):
+            raise SystemExit(
+                f"Catalog entry {name} secret_references must be a mapping"
+            )
+        secret_refs: dict[str, tuple[str, ...]] = {}
+        for raw_container, raw_secrets in raw_secret_refs.items():
+            container = str(raw_container)
+            if not _SAFE_ID.fullmatch(container):
+                raise SystemExit(
+                    f"Catalog entry {name} has invalid container {container!r}"
+                )
+            if not isinstance(raw_secrets, list):
+                raise SystemExit(
+                    f"Catalog entry {name} secrets for {container} must be a list"
+                )
+            normalized = tuple(
+                _normalize_object_name(value, label="secret reference")
+                for value in raw_secrets
+            )
+            if len(normalized) != len(set(normalized)):
+                raise SystemExit(
+                    f"Catalog entry {name} contains a duplicate secret reference"
+                )
+            secret_refs[container] = normalized
+
+        catalog[name] = {
+            "spec": spec,
+            "compute_pool": str(compute_pool),
+            "external_access_integrations": eais,
+            "secret_references": secret_refs,
+        }
+    return catalog
+
+
+def _spec_secret_references(spec: str) -> dict[str, tuple[str, ...]]:
+    try:
+        document = yaml.safe_load(spec)
+    except yaml.YAMLError as error:
+        raise SystemExit(f"Invalid rendered service YAML: {error}") from error
+    if not isinstance(document, Mapping) or not isinstance(
+        document.get("spec"), Mapping
+    ):
+        raise SystemExit("Rendered service YAML must contain a spec mapping")
+    containers = document["spec"].get("containers")
+    if not isinstance(containers, list):
+        raise SystemExit("Rendered service YAML must contain spec.containers")
+
+    references: dict[str, tuple[str, ...]] = {}
+    for container in containers:
+        if not isinstance(container, Mapping) or not isinstance(
+            container.get("name"), str
+        ):
+            raise SystemExit("Every service container must have a name")
+        container_name = container["name"]
+        raw_secrets = container.get("secrets", [])
+        if not isinstance(raw_secrets, list):
+            raise SystemExit(f"Container {container_name} secrets must be a list")
+        values: list[str] = []
+        for secret in raw_secrets:
+            if not isinstance(secret, Mapping):
+                raise SystemExit(
+                    f"Container {container_name} has an invalid secret reference"
+                )
+            snowflake_secret = secret.get("snowflakeSecret")
+            if isinstance(snowflake_secret, Mapping):
+                snowflake_secret = snowflake_secret.get("objectName")
+            values.append(
+                _normalize_object_name(
+                    snowflake_secret,
+                    label=f"{container_name} secret reference",
+                )
+            )
+        if values:
+            references[container_name] = tuple(dict.fromkeys(values))
+    return references
+
+
+def _validate_declared_service(
+    name: str,
+    spec_name: str,
+    spec: str,
+    external_access_integrations: Sequence[str],
+) -> dict[str, object]:
+    catalog = _load_service_catalog()
+    if name not in catalog:
+        raise SystemExit(f"Service {name} is not declared in {SERVICE_CATALOG}")
+    entry = catalog[name]
+    if entry["spec"] != spec_name:
+        raise SystemExit(
+            f"Service {name} spec drift: declared={entry['spec']} actual={spec_name}"
+        )
+    declared_eais = tuple(entry["external_access_integrations"])
+    if tuple(external_access_integrations) != declared_eais:
+        raise SystemExit(
+            f"Service {name} EAI drift: declared={declared_eais} "
+            f"requested={tuple(external_access_integrations)}"
+        )
+    actual_secret_refs = _spec_secret_references(spec)
+    declared_secret_refs = entry["secret_references"]
+    if actual_secret_refs != declared_secret_refs:
+        raise SystemExit(
+            f"Service {name} secret-reference drift: "
+            f"declared={declared_secret_refs} rendered={actual_secret_refs}"
+        )
+    return entry
+
+
+def validate_rendered_catalog(*, require_all: bool = True) -> None:
+    catalog = _load_service_catalog()
+    missing: list[str] = []
+    for name, entry in catalog.items():
+        spec_name = str(entry["spec"])
+        path = RENDERED_DIR / spec_name
+        if not path.is_file():
+            missing.append(spec_name)
+            continue
+        spec = _read_rendered(spec_name)
+        _validate_declared_service(
+            name,
+            spec_name,
+            spec,
+            tuple(entry["external_access_integrations"]),
+        )
+    if require_all and missing:
+        raise SystemExit(
+            "Missing rendered catalog specs: " + ", ".join(sorted(set(missing)))
+        )
+    print(f"[catalog] validated {len(catalog) - len(missing)} rendered services")
+
+
 def render_specs(
     image_path: str,
     kafka_bootstrap_servers: str | None,
@@ -263,6 +601,7 @@ def render_specs(
     adapter_allowed_tenants: str = "demo",
     flink_context_savepoint_path: str = "",
     flink_pair_savepoint_path: str = "",
+    user_context_jdbc_url: str | None = None,
 ) -> None:
     image_paths = {
         "application": image_path,
@@ -313,6 +652,10 @@ def render_specs(
                 f"Invalid {label}: expected a savepoint below "
                 "file:///opt/flink/state/savepoints"
             )
+    if user_context_jdbc_url:
+        user_context_jdbc_url, _ = _parse_postgres_jdbc_url(
+            user_context_jdbc_url
+        )
 
     replacements = {
         "__IMAGE_PATH__": image_path,
@@ -332,18 +675,30 @@ def render_specs(
         "__FLINK_CONTEXT_SAVEPOINT_PATH__": flink_context_savepoint_path,
         "__FLINK_PAIR_SAVEPOINT_PATH__": flink_pair_savepoint_path,
     }
+    if user_context_jdbc_url:
+        replacements["__USER_CONTEXT_JDBC_URL__"] = user_context_jdbc_url
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     for template_path in sorted(SPECS_DIR.glob("*.yaml.template")):
+        output = RENDERED_DIR / template_path.name.removesuffix(".template")
         text = template_path.read_text()
         for placeholder, replacement in replacements.items():
             text = text.replace(placeholder, replacement)
         if "__KAFKA_BOOTSTRAP_SERVERS__" in text:
             if not kafka_bootstrap_servers:
+                output.unlink(missing_ok=True)
                 print(f"[render] skipped {template_path.name}: Kafka brokers not set")
                 continue
             brokers = _parse_brokers(kafka_bootstrap_servers)
             text = text.replace("__KAFKA_BOOTSTRAP_SERVERS__", ",".join(brokers))
-        output = RENDERED_DIR / template_path.name.removesuffix(".template")
+        if "__USER_CONTEXT_JDBC_URL__" in text:
+            output.unlink(missing_ok=True)
+            print(
+                f"[render] skipped {template_path.name}: "
+                "USER_CONTEXT_JDBC_URL not set"
+            )
+            continue
+        if "__" in text:
+            raise SystemExit(f"Unresolved placeholder in {template_path}")
         output.write_text(text)
         display_path = (
             output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
@@ -407,29 +762,156 @@ def _read_rendered(name: str) -> str:
     return spec
 
 
+def _normalize_eais(raw: object) -> tuple[str, ...]:
+    if raw is None or (isinstance(raw, float) and raw != raw):
+        return ()
+    if isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        text = str(raw).strip()
+        if not text or text.upper() == "NULL" or text == "[]":
+            return ()
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list):
+            values = decoded
+        else:
+            values = [
+                value.strip().strip("'\"")
+                for value in text.strip("[]()").split(",")
+                if value.strip()
+            ]
+    normalized = tuple(str(value).strip().strip("'\"") for value in values)
+    for value in normalized:
+        _validate_snowflake_identifier(value, label="service EAI")
+    if len(normalized) != len(set(normalized)):
+        raise SystemExit(f"Service reports duplicate EAIs: {normalized}")
+    return normalized
+
+
+def _inspect_service_configuration(wh: object, name: str) -> dict[str, object]:
+    _validate_snowflake_identifier(name, label="service name")
+    result = wh.fetch_df(  # type: ignore[attr-defined]
+        f"DESCRIBE SERVICE {DATABASE}.{SCHEMA}.{name}"
+    )
+    if result.empty:
+        raise SystemExit(f"Service not found: {DATABASE}.{SCHEMA}.{name}")
+    row = result.iloc[0].to_dict()
+    actual_name = str(row.get("name", "")).upper()
+    if actual_name != name:
+        raise SystemExit(
+            f"DESCRIBE SERVICE returned {actual_name!r}, expected {name!r}"
+        )
+    spec = row.get("spec")
+    if not isinstance(spec, str) or not spec.strip():
+        raise SystemExit(
+            f"Service {name} spec is unavailable; inspect with its owner role"
+        )
+    return {
+        "external_access_integrations": _normalize_eais(
+            row.get("external_access_integrations")
+        ),
+        "secret_references": _spec_secret_references(spec),
+        "spec": spec,
+        "spec_digest": row.get("spec_digest"),
+        "status": row.get("status"),
+        "is_upgrading": row.get("is_upgrading"),
+    }
+
+
+def _assert_service_matches_catalog(
+    name: str, actual: Mapping[str, object], declared: Mapping[str, object]
+) -> None:
+    expected_eais = tuple(declared["external_access_integrations"])
+    actual_eais = tuple(actual["external_access_integrations"])
+    if len(actual_eais) != len(expected_eais) or set(actual_eais) != set(
+        expected_eais
+    ):
+        raise SystemExit(
+            f"Service {name} EAI readback drift: "
+            f"declared={expected_eais} actual={actual_eais}"
+        )
+    expected_secrets = declared["secret_references"]
+    actual_secrets = actual["secret_references"]
+    if actual_secrets != expected_secrets:
+        raise SystemExit(
+            f"Service {name} secret-reference readback drift: "
+            f"declared={expected_secrets} actual={actual_secrets}"
+        )
+
+
+def inspect_declared_services(names: Sequence[str] | None = None) -> None:
+    """Read back service EAIs and Secret references without changing SPCS."""
+    catalog = _load_service_catalog()
+    selected = tuple(names) if names else tuple(catalog)
+    for name in selected:
+        _validate_snowflake_identifier(name, label="service name")
+        if name not in catalog:
+            raise SystemExit(f"Service {name} is not declared in the catalog")
+    wh = _warehouse()
+    try:
+        wh.execute("USE ROLE SYSADMIN")
+        for name in selected:
+            actual = _inspect_service_configuration(wh, name)
+            _assert_service_matches_catalog(name, actual, catalog[name])
+            print(
+                f"[catalog] {name} matches "
+                f"eais={','.join(actual['external_access_integrations']) or 'none'} "
+                f"spec_digest={actual['spec_digest']}"
+            )
+    finally:
+        wh.close()
+
+
 def deploy_service(
     name: str,
     spec_name: str,
     *,
-    kafka_eai: bool | str = False,
+    external_access_integrations: Sequence[str] = (),
 ) -> None:
+    _validate_snowflake_identifier(name, label="service name")
+    eais = tuple(
+        _validate_snowflake_identifier(value, label="EAI")
+        for value in external_access_integrations
+    )
+    if len(eais) > 10 or len(eais) != len(set(eais)):
+        raise SystemExit("A service must declare at most 10 unique EAIs")
     spec = _read_rendered(spec_name)
-    if kafka_eai is True:
-        kafka_eai = "POKER_KAFKA_EAI"
-    eai = f" EXTERNAL_ACCESS_INTEGRATIONS = ({kafka_eai})" if kafka_eai else ""
+    declared = _validate_declared_service(name, spec_name, spec, eais)
+    compute_pool = str(declared["compute_pool"])
+    service = f"{DATABASE}.{SCHEMA}.{name}"
+    create_eai = (
+        f" EXTERNAL_ACCESS_INTEGRATIONS = ({', '.join(eais)})" if eais else ""
+    )
     wh = _warehouse()
     try:
         wh.execute("USE ROLE SYSADMIN")
         wh.execute(f"USE DATABASE {DATABASE}")
         wh.execute(f"USE SCHEMA {SCHEMA}")
         create_sql = (
-            f"CREATE SERVICE IF NOT EXISTS {name} IN COMPUTE POOL {POOL} "
-            f"FROM SPECIFICATION $${spec}$${eai} AUTO_RESUME = TRUE "
+            f"CREATE SERVICE IF NOT EXISTS {service} IN COMPUTE POOL {compute_pool} "
+            f"FROM SPECIFICATION $${spec}$${create_eai} AUTO_RESUME = TRUE "
             "MIN_INSTANCES = 1 MAX_INSTANCES = 1 QUERY_WAREHOUSE = DEMO_WH"
         )
         wh.execute(create_sql)
-        wh.execute(f"ALTER SERVICE {name} FROM SPECIFICATION $${spec}$$")
-        print(f"[snowflake] service submitted: {DATABASE}.{SCHEMA}.{name}")
+        if eais:
+            wh.execute(
+                f"ALTER SERVICE {service} SET "
+                f"EXTERNAL_ACCESS_INTEGRATIONS = ({', '.join(eais)})"
+            )
+        else:
+            wh.execute(
+                f"ALTER SERVICE {service} UNSET EXTERNAL_ACCESS_INTEGRATIONS"
+            )
+        wh.execute(f"ALTER SERVICE {service} FROM SPECIFICATION $${spec}$$")
+        actual = _inspect_service_configuration(wh, name)
+        _assert_service_matches_catalog(name, actual, declared)
+        print(
+            f"[snowflake] service submitted and catalog-verified: {service} "
+            f"spec_digest={actual['spec_digest']}"
+        )
     finally:
         wh.close()
 
@@ -492,6 +974,11 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("bootstrap")
     sub.add_parser("configure-kafka")
+    sub.add_parser("configure-flink-context-db")
+    context_plan = sub.add_parser("plan-flink-context-db")
+    context_plan.add_argument(
+        "--jdbc-url", default=os.environ.get("USER_CONTEXT_JDBC_URL")
+    )
     adapter_kafka = sub.add_parser("configure-adapter-sim-kafka")
     adapter_kafka.add_argument("--allow-shared-credentials", action="store_true")
 
@@ -565,7 +1052,19 @@ def main() -> None:
         "--flink-pair-savepoint-path",
         default=os.environ.get("SPCS_FLINK_PAIR_SAVEPOINT_PATH", ""),
     )
+    render.add_argument(
+        "--user-context-jdbc-url",
+        default=os.environ.get("USER_CONTEXT_JDBC_URL"),
+    )
 
+    sub.add_parser("validate-catalog")
+    inspect = sub.add_parser("inspect-services")
+    inspect.add_argument(
+        "--service",
+        action="append",
+        dest="services",
+        help="catalog service name; repeat to inspect more than one",
+    )
     sub.add_parser("deploy-admin")
     sub.add_parser("suspend-admin")
     sub.add_parser("resume-admin")
@@ -588,6 +1087,12 @@ def main() -> None:
         bootstrap()
     elif args.command == "configure-kafka":
         configure_kafka()
+    elif args.command == "configure-flink-context-db":
+        configure_flink_context_db()
+    elif args.command == "plan-flink-context-db":
+        if not args.jdbc_url:
+            raise SystemExit("Set USER_CONTEXT_JDBC_URL or pass --jdbc-url")
+        print(json.dumps(context_db_access_plan(args.jdbc_url), indent=2))
     elif args.command == "configure-adapter-sim-kafka":
         configure_adapter_sim_kafka(
             allow_shared_credentials=args.allow_shared_credentials
@@ -617,7 +1122,12 @@ def main() -> None:
             adapter_allowed_tenants=args.adapter_allowed_tenants,
             flink_context_savepoint_path=args.flink_context_savepoint_path,
             flink_pair_savepoint_path=args.flink_pair_savepoint_path,
+            user_context_jdbc_url=args.user_context_jdbc_url,
         )
+    elif args.command == "validate-catalog":
+        validate_rendered_catalog()
+    elif args.command == "inspect-services":
+        inspect_declared_services(args.services)
     elif args.command == "deploy-admin":
         deploy_service("POKER_ADMIN", "admin.yaml")
     elif args.command == "suspend-admin":
@@ -625,28 +1135,43 @@ def main() -> None:
     elif args.command == "resume-admin":
         set_admin_state("RESUME")
     elif args.command == "deploy-realtime":
-        deploy_service("POKER_REALTIME", "realtime.yaml", kafka_eai=True)
+        deploy_service(
+            "POKER_REALTIME",
+            "realtime.yaml",
+            external_access_integrations=("POKER_KAFKA_EAI",),
+        )
     elif args.command == "deploy-risk":
-        deploy_service("POKER_RISK", "risk.yaml", kafka_eai=True)
+        deploy_service(
+            "POKER_RISK",
+            "risk.yaml",
+            external_access_integrations=("POKER_KAFKA_EAI",),
+        )
     elif args.command == "deploy-flink":
-        deploy_service("POKER_FLINK", "flink.yaml", kafka_eai=True)
+        deploy_service(
+            "POKER_FLINK",
+            "flink.yaml",
+            external_access_integrations=(
+                FLINK_KAFKA_EAI,
+                FLINK_CONTEXT_DB_EAI,
+            ),
+        )
     elif args.command == "deploy-adapter-sim":
         deploy_service(
             "POKER_ADAPTER_SIM",
             "adapter-sim.yaml",
-            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+            external_access_integrations=(ADAPTER_SIM_KAFKA_EAI,),
         )
     elif args.command == "deploy-flink-sim":
         deploy_service(
             "POKER_FLINK_SIM",
             "flink-sim.yaml",
-            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+            external_access_integrations=(ADAPTER_SIM_KAFKA_EAI,),
         )
     elif args.command == "deploy-risk-sim":
         deploy_service(
             "POKER_RISK_SIM",
             "risk-sim.yaml",
-            kafka_eai=ADAPTER_SIM_KAFKA_EAI,
+            external_access_integrations=(ADAPTER_SIM_KAFKA_EAI,),
         )
     elif args.command == "upload-risk-bundle":
         upload_risk_bundle(args.bundle_dir)

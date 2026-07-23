@@ -6,6 +6,7 @@ pyarrow==15.0.2
 pydantic==2.7.4
 pydantic-settings==2.3.4
 python-dotenv==1.0.1
+PyYAML==6.0.3
 pokerkit==0.7.4
 protobuf==5.29.6
 psycopg[binary]==3.2.9

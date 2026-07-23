@@ -1,0 +1,70 @@
+version: 1
+database: POKER_ML_DEMO
+schema: SPCS
+
+# This is the source of truth for each service's rendered specification,
+# complete EAI set, and Snowflake Secret object references. Credential values
+# never belong in this file.
+services:
+  POKER_ADMIN:
+    spec: admin.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations: []
+    secret_references: {}
+
+  POKER_REALTIME:
+    spec: realtime.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_KAFKA_EAI
+    secret_references:
+      realtime:
+        - POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+
+  POKER_RISK:
+    spec: risk.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_KAFKA_EAI
+    secret_references:
+      risk:
+        - POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+
+  POKER_FLINK:
+    spec: flink.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_FLINK_KAFKA_EAI
+      - POKER_FLINK_CONTEXT_DB_EAI
+    secret_references:
+      taskmanager:
+        - POKER_ML_DEMO.SPCS.CONTEXT_DB_CREDENTIALS
+      submitter:
+        - POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+
+  POKER_ADAPTER_SIM:
+    spec: adapter-sim.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_ADAPTER_SIM_KAFKA_EAI
+    secret_references:
+      hand-adapter-sim:
+        - POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+
+  POKER_FLINK_SIM:
+    spec: flink-sim.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_ADAPTER_SIM_KAFKA_EAI
+    secret_references:
+      submitter:
+        - POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS
+
+  POKER_RISK_SIM:
+    spec: risk-sim.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_ADAPTER_SIM_KAFKA_EAI
+    secret_references:
+      risk-sim:
+        - POKER_ML_DEMO.SPCS.KAFKA_ADAPTER_SIM_CREDENTIALS

@@ -56,6 +56,9 @@ def test_c1_specs_define_separate_private_services(monkeypatch, tmp_path: Path) 
         build_version="0123456789ab",
         model_run_id=deploy.DEFAULT_MODEL_RUN_ID,
         allowed_tenants="tenant-a,tenant-b",
+        user_context_jdbc_url=(
+            "jdbc:postgresql://context-db.example.com:5432/poker?sslmode=require"
+        ),
     )
 
     risk = yaml.safe_load((tmp_path / "risk.yaml").read_text())["spec"]
@@ -107,8 +110,8 @@ def test_c1_dockerfiles_pin_language_and_runtime_versions() -> None:
 
 def test_flink_supervisor_requires_both_jobs() -> None:
     script = (ROOT / "streaming/flink-java/docker/submit-jobs.sh").read_text()
-    assert "poker-event-time-context-enrichment-v1" in script
-    assert "poker-pair-features-v1" in script
+    assert "poker-active-context-enrichment-v2" in script
+    assert "poker-pair-features-v1-from-context-v2" in script
     assert "FLINK_CONTEXT_SAVEPOINT_PATH" in script
     assert "FLINK_PAIR_SAVEPOINT_PATH" in script
     assert "flink list -r" in script
