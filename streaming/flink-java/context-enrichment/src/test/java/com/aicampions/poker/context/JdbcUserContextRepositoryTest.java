@@ -23,6 +23,8 @@ final class JdbcUserContextRepositoryTest {
             statement.execute("CREATE SCHEMA IF NOT EXISTS public");
             statement.execute("""
                     CREATE TABLE public.poker_user_context (
+                      tenant_id VARCHAR NOT NULL,
+                      product_id VARCHAR NOT NULL,
                       user_id VARCHAR NOT NULL,
                       context_version INTEGER NOT NULL,
                       effective_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -37,12 +39,17 @@ final class JdbcUserContextRepositoryTest {
                       skill_rating DOUBLE PRECISION NOT NULL,
                       device_id VARCHAR NOT NULL,
                       network_cluster_id VARCHAR NOT NULL,
-                      PRIMARY KEY (user_id, context_version)
+                      PRIMARY KEY (tenant_id, product_id, user_id, context_version)
                     )
                     """);
-            insert(statement, 1, "2026-07-23T08:00:00Z", "device-old");
-            insert(statement, 2, "2026-07-23T10:00:00Z", "device-current");
-            insert(statement, 3, "2026-07-23T13:00:00Z", "device-future");
+            insert(statement, "tenant-a", "poker", 1,
+                    "2026-07-23T08:00:00Z", "device-old");
+            insert(statement, "tenant-a", "poker", 2,
+                    "2026-07-23T10:00:00Z", "device-current");
+            insert(statement, "tenant-a", "poker", 3,
+                    "2026-07-23T13:00:00Z", "device-future");
+            insert(statement, "tenant-b", "poker", 1,
+                    "2026-07-23T09:00:00Z", "device-other-tenant");
         }
     }
 
@@ -52,14 +59,41 @@ final class JdbcUserContextRepositoryTest {
                 new JdbcUserContextRepository(
                         URL, "sa", "", "public.poker_user_context", 1)) {
             UserContextRecord result = repository
-                    .findEffective("A", Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
+                    .findEffective(
+                            new ContextKey("tenant-a", "poker", "A"),
+                            Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
                     .orElseThrow();
 
+            assertEquals("tenant-a", result.tenantId());
+            assertEquals("poker", result.productId());
             assertEquals(2, result.contextVersion());
             assertEquals("device-current", result.deviceId());
             assertTrue(repository
-                    .findEffective("G", Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
+                    .findEffective(
+                            new ContextKey("tenant-a", "poker", "G"),
+                            Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
                     .isEmpty());
+        }
+    }
+
+    @Test
+    void isolatesTheSamePlayerIdAcrossTenants() throws Exception {
+        try (JdbcUserContextRepository repository =
+                new JdbcUserContextRepository(
+                        URL, "sa", "", "public.poker_user_context", 1)) {
+            UserContextRecord tenantA = repository
+                    .findEffective(
+                            new ContextKey("tenant-a", "poker", "A"),
+                            Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
+                    .orElseThrow();
+            UserContextRecord tenantB = repository
+                    .findEffective(
+                            new ContextKey("tenant-b", "poker", "A"),
+                            Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
+                    .orElseThrow();
+
+            assertEquals("device-current", tenantA.deviceId());
+            assertEquals("device-other-tenant", tenantB.deviceId());
         }
     }
 
@@ -72,15 +106,20 @@ final class JdbcUserContextRepositoryTest {
     }
 
     private static void insert(
-            Statement statement, int version, String effectiveAt, String deviceId)
+            Statement statement,
+            String tenantId,
+            String productId,
+            int version,
+            String effectiveAt,
+            String deviceId)
             throws Exception {
         statement.execute("""
                 INSERT INTO public.poker_user_context VALUES (
-                  'A', %d, TIMESTAMP WITH TIME ZONE '%s',
+                  '%s', '%s', 'A', %d, TIMESTAMP WITH TIME ZONE '%s',
                   TIMESTAMP WITH TIME ZONE '2025-01-01T00:00:00Z',
                   'TR', 'Europe/Istanbul', 'organic', 'verified', 'active',
                   'medium', 'low', 0.63, '%s', 'network-18'
                 )
-                """.formatted(version, effectiveAt, deviceId));
+                """.formatted(tenantId, productId, version, effectiveAt, deviceId));
     }
 }

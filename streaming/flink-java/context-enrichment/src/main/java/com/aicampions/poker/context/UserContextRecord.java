@@ -7,6 +7,8 @@ import java.util.UUID;
 
 /** Narrow context projection returned by the PostgreSQL lookup table. */
 record UserContextRecord(
+        String tenantId,
+        String productId,
         String userId,
         int contextVersion,
         Instant effectiveAt,
@@ -25,9 +27,7 @@ record UserContextRecord(
             UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
 
     UserContextRecord {
-        if (userId == null || userId.isBlank()) {
-            throw new IllegalArgumentException("userId must be non-empty");
-        }
+        new ContextKey(tenantId, productId, userId);
         if (contextVersion < 1) {
             throw new IllegalArgumentException("contextVersion must be positive");
         }
@@ -38,9 +38,16 @@ record UserContextRecord(
 
     String toCanonicalEvent(String expandedHand) {
         JsonNode hand = EventJson.parse(expandedHand).path("hand");
+        ContextKey handKey = EventJson.contextKeyFromExpandedHand(expandedHand);
+        ContextKey recordKey = new ContextKey(tenantId, productId, userId);
+        if (!recordKey.equals(handKey)) {
+            throw new IllegalArgumentException("context scope does not match the hand scope");
+        }
         String eventName = String.join(
                 ":",
                 "jdbc-user-context-v1",
+                tenantId,
+                productId,
                 userId,
                 Integer.toString(contextVersion),
                 effectiveAt.toString());

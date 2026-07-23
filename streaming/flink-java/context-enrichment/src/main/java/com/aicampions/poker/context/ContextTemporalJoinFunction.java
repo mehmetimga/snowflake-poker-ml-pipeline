@@ -18,7 +18,7 @@ import org.apache.flink.util.Collector;
 
 /** Keyed event-time join of hand/player rows and versioned user context. */
 final class ContextTemporalJoinFunction
-        extends KeyedCoProcessFunction<String, String, String, String> {
+        extends KeyedCoProcessFunction<ContextKey, String, String, String> {
     private final long allowedLatenessMs;
     private final long correctionWindowMs;
     private final long stateTtlHours;
@@ -118,7 +118,7 @@ final class ContextTemporalJoinFunction
                         EventJson.deadLetter(
                                 contextTopic,
                                 "context-version-conflict",
-                                "duplicate context_version with a different event_id",
+                                "duplicate-context-version",
                                 contextEvent));
                 return;
             }

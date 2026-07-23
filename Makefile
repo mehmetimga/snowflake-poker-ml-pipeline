@@ -1010,10 +1010,12 @@ cdc-sim-migrate: cdc-sim-up
 		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/002_simulation_scenario.sql
 	docker compose exec -T postgres-cdc psql -U poker_sim -d poker_sim \
 		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003_user_context_lookup.sql
+	docker compose exec -T postgres-cdc psql -U poker_sim -d poker_sim \
+		-v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/004_scope_user_context.sql
 
 cdc-sim-seed-user-context: cdc-sim-migrate
 	CDC_SIM_POSTGRES_DSN=$(CDC_SIM_POSTGRES_DSN) \
-		$(PY) scripts/seed_postgres_user_context.py \
+		$(PY) -m scripts.seed_postgres_user_context \
 		--source-dataset-id $(CDC_SIM_SOURCE_DATASET_ID)
 
 cdc-sim-topics:

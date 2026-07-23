@@ -61,6 +61,12 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
 - [x] One PokerKit hand seeds exactly its six users into PostgreSQL.
 - [x] Local bounded Kafka/Flink/JDBC run emits six matched player-context rows
   and zero DLQs.
+- [x] Production-shape architectural review and staged context/Flink
+  refactoring plan completed in
+  [`active-user-context-refactoring-plan.md`](active-user-context-refactoring-plan.md).
+- [x] Context refactoring F1 completed locally: tenant/product/player
+  isolation, TaskManager-only JDBC credentials, classified failures,
+  minimized diagnostics, and bounded shaded-JAR validation.
 - [ ] A multi-hand running-job test proves cache-hit metrics, refresh, and TTL
   expiry.
 - [ ] SPCS PostgreSQL network rule, EAI, Secret, and rendered spec exist.
@@ -358,6 +364,11 @@ Expected count: 13 objects become 7 without changing application behavior.
 
 Status: in progress.
 
+The detailed correctness, secret handling, package separation, JDBC
+reliability, state recovery, and SPCS migration work for item 9 is tracked in
+[`active-user-context-refactoring-plan.md`](active-user-context-refactoring-plan.md).
+Its F1 correctness/security phase must precede remote cutover work.
+
 1. Rename `poker.sim.*` constants to `poker.synthetic.*`.
 2. Rename `ShadowSimulationTopics`/`CdcSimulationTopics` to synthetic
    terminology.
@@ -580,9 +591,12 @@ the cleanup action restoring the previous limit.
 
 ## 14. Recommended next slice
 
-1. Complete R0 inventory after MFA.
-2. Implement R1 historical job evidence export and dry-run cleanup.
-3. Implement R2 naming/topic/guard changes locally.
-4. Generate PokerKit hands and seed deterministic PostgreSQL context from one
-   run manifest.
-5. Execute R3 only after all local gates pass.
+1. Implement F2 from the
+   [active-user context refactoring plan](active-user-context-refactoring-plan.md):
+   versioned JDBC lineage/output contract, canonical/legacy entrypoints, and
+   package boundaries.
+2. Complete R0 inventory after MFA.
+3. Implement R1 historical job evidence export and dry-run cleanup.
+4. Continue R2 naming/topic/guard changes locally.
+5. Execute R3 only after the context plan's F1–F5 local and rendered-spec
+   gates pass.

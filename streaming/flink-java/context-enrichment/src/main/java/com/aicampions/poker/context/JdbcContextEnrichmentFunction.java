@@ -13,10 +13,8 @@ import org.apache.flink.util.Collector;
 
 /** Lazy synchronous JDBC enrichment with one TTL-managed cache entry per active player. */
 final class JdbcContextEnrichmentFunction
-        extends KeyedProcessFunction<String, String, String> {
+        extends KeyedProcessFunction<ContextKey, String, String> {
     private final String jdbcUrl;
-    private final String username;
-    private final String password;
     private final String tableName;
     private final int queryTimeoutSeconds;
     private final long cacheTtlHours;
@@ -30,19 +28,20 @@ final class JdbcContextEnrichmentFunction
     private transient Counter cacheRefreshes;
     private transient Counter lookupFailures;
     private transient Counter contextNotFound;
+    private transient Counter transientFailures;
+    private transient Counter authorizationFailures;
+    private transient Counter configurationFailures;
+    private transient Counter dataFailures;
+    private transient Counter unknownFailures;
 
     JdbcContextEnrichmentFunction(
             String jdbcUrl,
-            String username,
-            String password,
             String tableName,
             int queryTimeoutSeconds,
             long cacheTtlHours,
             long refreshMinutes,
             String handTopic) {
         this.jdbcUrl = jdbcUrl;
-        this.username = username;
-        this.password = password;
         this.tableName = tableName;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
         this.cacheTtlHours = cacheTtlHours;
@@ -61,13 +60,31 @@ final class JdbcContextEnrichmentFunction
                 new ValueStateDescriptor<>("active-user-context-jdbc-v1", Types.STRING);
         descriptor.enableTimeToLive(ttl);
         cachedContext = getRuntimeContext().getState(descriptor);
-        repository = new JdbcUserContextRepository(
-                jdbcUrl, username, password, tableName, queryTimeoutSeconds);
         cacheHits = counter("context_cache_hits");
         cacheMisses = counter("context_cache_misses");
         cacheRefreshes = counter("context_cache_refreshes");
         lookupFailures = counter("context_lookup_failures");
         contextNotFound = counter("context_not_found");
+        transientFailures = counter("context_lookup_failure_transient");
+        authorizationFailures =
+                counter("context_lookup_failure_authentication_or_authorization");
+        configurationFailures = counter("context_lookup_failure_configuration");
+        dataFailures = counter("context_lookup_failure_data");
+        unknownFailures = counter("context_lookup_failure_unknown");
+        try {
+            JdbcCredentials credentials = JdbcCredentials.fromEnvironment(System.getenv());
+            repository = new JdbcUserContextRepository(
+                    jdbcUrl,
+                    credentials.username(),
+                    credentials.password(),
+                    tableName,
+                    queryTimeoutSeconds);
+        } catch (Exception error) {
+            lookupFailures.inc();
+            JdbcFailureClassifier.Failure failure = JdbcFailureClassifier.classify(error);
+            incrementFailureCounter(failure.kind());
+            throw new UserContextLookupException(failure);
+        }
     }
 
     @Override
@@ -76,7 +93,7 @@ final class JdbcContextEnrichmentFunction
         long nowMs = context.timerService().currentProcessingTime();
         long playedAtMs = EventJson.parseInstant(EventJson.requireText(
                 EventJson.parse(expandedHand).path("hand").path("payload"), "played_at"));
-        String playerId = EventJson.playerIdFromExpandedHand(expandedHand);
+        ContextKey contextKey = EventJson.contextKeyFromExpandedHand(expandedHand);
         String cached = cachedContext.value();
         String contextEvent;
 
@@ -93,17 +110,13 @@ final class JdbcContextEnrichmentFunction
             }
             Optional<UserContextRecord> loaded;
             try {
-                loaded = repository.findEffective(playerId, playedAtMs);
+                loaded = repository.findEffective(contextKey, playedAtMs);
             } catch (Exception error) {
                 lookupFailures.inc();
-                context.output(
-                        DeadLetters.TAG,
-                        EventJson.deadLetter(
-                                handTopic,
-                                "jdbc-user-context-lookup",
-                                error.getClass().getSimpleName() + ": " + safeMessage(error),
-                                expandedHand));
-                return;
+                JdbcFailureClassifier.Failure failure =
+                        JdbcFailureClassifier.classify(error);
+                incrementFailureCounter(failure.kind());
+                throw new UserContextLookupException(failure);
             }
             if (loaded.isEmpty()) {
                 contextNotFound.inc();
@@ -112,7 +125,7 @@ final class JdbcContextEnrichmentFunction
                         EventJson.deadLetter(
                                 handTopic,
                                 "jdbc-user-context-not-found",
-                                "no effective user context for player_id=" + playerId,
+                                "context-not-found",
                                 expandedHand));
                 return;
             }
@@ -143,11 +156,13 @@ final class JdbcContextEnrichmentFunction
         return getRuntimeContext().getMetricGroup().counter(name);
     }
 
-    private static String safeMessage(Exception error) {
-        String message = error.getMessage();
-        if (message == null || message.isBlank()) {
-            return "lookup failed";
+    private void incrementFailureCounter(JdbcFailureClassifier.Kind kind) {
+        switch (kind) {
+            case TRANSIENT -> transientFailures.inc();
+            case AUTHENTICATION_OR_AUTHORIZATION -> authorizationFailures.inc();
+            case CONFIGURATION -> configurationFailures.inc();
+            case DATA -> dataFailures.inc();
+            case UNKNOWN -> unknownFailures.inc();
         }
-        return message.length() <= 240 ? message : message.substring(0, 240);
     }
 }

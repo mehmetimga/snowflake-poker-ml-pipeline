@@ -16,13 +16,19 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
 
 - No full user table or daily batch is loaded.
 - The first hand for A–F produces lookups only for A–F.
-- State is keyed by `player_id`; reads and writes extend its 36-hour TTL.
+- State and PostgreSQL lookups are keyed by
+  `(tenant_id, product_id, player_id)`; reads and writes extend the 36-hour
+  state TTL.
 - A separate 60-minute freshness interval forces periodic refresh for active
   players.
 - The SQL lookup selects the latest version whose
   `effective_at <= played_at`.
-- Missing rows and database failures go to
-  `poker.pipeline.dead-letter.v1`; incomplete context is never fabricated.
+- Missing rows produce a minimized data-quality diagnostic. Transient,
+  authentication, schema, and other JDBC failures fail the operator with a
+  sanitized category so Flink can restart from its checkpoint rather than
+  silently advancing past unscored work.
+- Diagnostics retain safe lineage and a SHA-256 digest but never copy the raw
+  hand, hole cards, or database error message.
 - Stable operator UIDs and UUIDv5 output IDs keep downstream upserts safe.
 
 The output contract is `poker.hand-player-context.enriched` schema v1 on
@@ -77,9 +83,15 @@ Important options:
 | `--checkpoint-interval-ms` | `30000` |
 | `--parallelism` | `1` |
 
-JDBC mode also requires `USER_CONTEXT_JDBC_URL`,
-`USER_CONTEXT_DB_USER`, and `USER_CONTEXT_DB_PASSWORD`. These values must come
-from runtime secrets and are excluded from the safe configuration summary.
+JDBC mode requires `USER_CONTEXT_JDBC_URL` in job configuration. The
+TaskManager also requires `USER_CONTEXT_DB_USER` and
+`USER_CONTEXT_DB_PASSWORD` from its runtime Secret. Username/password command
+line arguments are rejected, and neither credential is stored in the
+serializable job configuration or process-function fields.
+
+The tenant/product migration is
+`infra/simulation/postgres/init/004_scope_user_context.sql`. It is forward-only
+and can be safely reapplied to the local POC database.
 
 For production, configure durable checkpoint storage in the Flink cluster and
 start from a savepoint when upgrading stateful operator code.

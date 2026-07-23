@@ -60,12 +60,12 @@ public final class ContextEnrichmentJob {
         DataStream<String> deadLetters;
         if (config.contextSource().equals("jdbc")) {
             enriched = handPlayers
-                    .keyBy(EventJson::playerIdFromExpandedHand, Types.STRING)
+                    .keyBy(
+                            EventJson::contextKeyFromExpandedHand,
+                            Types.POJO(ContextKey.class))
                     .process(
                             new JdbcContextEnrichmentFunction(
                                     config.contextJdbcUrl(),
-                                    config.contextJdbcUsername(),
-                                    config.contextJdbcPassword(),
                                     config.contextJdbcTable(),
                                     config.contextJdbcQueryTimeoutSeconds(),
                                     config.contextCacheTtlHours(),
@@ -73,7 +73,7 @@ public final class ContextEnrichmentJob {
                                     config.handTopic()),
                             Types.STRING)
                     .name("jdbc-active-user-context-lookup")
-                    .uid("jdbc-active-user-context-lookup-v1");
+                    .uid("jdbc-active-user-context-lookup-v2");
             deadLetters = validHands.getSideOutput(DeadLetters.TAG)
                     .union(enriched.getSideOutput(DeadLetters.TAG));
         } else {
@@ -95,8 +95,12 @@ public final class ContextEnrichmentJob {
                     .name("context-event-time")
                     .uid("context-event-time-v1");
             enriched = handPlayers
-                    .keyBy(EventJson::playerIdFromExpandedHand, Types.STRING)
-                    .connect(contexts.keyBy(EventJson::contextUserId, Types.STRING))
+                    .keyBy(
+                            EventJson::contextKeyFromExpandedHand,
+                            Types.POJO(ContextKey.class))
+                    .connect(contexts.keyBy(
+                            EventJson::contextKeyFromContextEvent,
+                            Types.POJO(ContextKey.class)))
                     .process(
                             new ContextTemporalJoinFunction(
                                     config.allowedLatenessMs(),
@@ -106,7 +110,7 @@ public final class ContextEnrichmentJob {
                                     config.contextTopic()),
                             Types.STRING)
                     .name("event-time-user-context-join")
-                    .uid("event-time-user-context-join-v1");
+                    .uid("event-time-user-context-join-v2");
             deadLetters = validHands.getSideOutput(DeadLetters.TAG)
                     .union(
                             validContexts.getSideOutput(DeadLetters.TAG),
@@ -164,8 +168,6 @@ public final class ContextEnrichmentJob {
             String groupId,
             String contextSource,
             String contextJdbcUrl,
-            String contextJdbcUsername,
-            String contextJdbcPassword,
             String contextJdbcTable,
             int contextJdbcQueryTimeoutSeconds,
             long contextCacheTtlHours,
@@ -184,6 +186,8 @@ public final class ContextEnrichmentJob {
 
         static JobConfig parse(String[] arguments, Map<String, String> environment) {
             Map<String, String> args = parseArguments(arguments);
+            rejectSecretArgument(args, "context-jdbc-username");
+            rejectSecretArgument(args, "context-jdbc-password");
             String bootstrap = value(args, environment, "bootstrap-servers",
                     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092");
             String hands = value(args, environment, "hand-topic",
@@ -205,10 +209,6 @@ public final class ContextEnrichmentJob {
             }
             String contextJdbcUrl = value(
                     args, environment, "context-jdbc-url", "USER_CONTEXT_JDBC_URL", "");
-            String contextJdbcUsername = value(
-                    args, environment, "context-jdbc-username", "USER_CONTEXT_DB_USER", "");
-            String contextJdbcPassword = value(
-                    args, environment, "context-jdbc-password", "USER_CONTEXT_DB_PASSWORD", "");
             String contextJdbcTable = value(
                     args,
                     environment,
@@ -261,8 +261,6 @@ public final class ContextEnrichmentJob {
                     group,
                     contextSource,
                     contextJdbcUrl,
-                    contextJdbcUsername,
-                    contextJdbcPassword,
                     contextJdbcTable,
                     contextJdbcQueryTimeoutSeconds,
                     contextCacheTtlHours,
@@ -304,10 +302,6 @@ public final class ContextEnrichmentJob {
                 throw new IllegalArgumentException(
                         "USER_CONTEXT_JDBC_URL is required for JDBC context source");
             }
-            if (contextJdbcUsername.isBlank() || contextJdbcPassword.isBlank()) {
-                throw new IllegalArgumentException(
-                        "user-context JDBC username and password are required");
-            }
             JdbcUserContextRepository.validateTableName(contextJdbcTable);
         }
 
@@ -338,6 +332,13 @@ public final class ContextEnrichmentJob {
             if (!expected.equals(actual)) {
                 throw new IllegalArgumentException(
                         "simulation topic boundary: " + role + " must be " + expected);
+            }
+        }
+
+        private static void rejectSecretArgument(Map<String, String> args, String key) {
+            if (args.containsKey(key)) {
+                throw new IllegalArgumentException(
+                        "--" + key + " is forbidden; mount TaskManager runtime credentials");
             }
         }
 

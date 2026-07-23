@@ -25,17 +25,10 @@ final class EnvelopeValidationFunction extends ProcessFunction<String, String> {
                 throw new IllegalArgumentException("dataset_id must start with sim-");
             }
             output.collect(value);
-        } catch (RuntimeException error) {
+        } catch (RuntimeException ignored) {
             context.output(
                     DeadLetters.TAG,
-                    EventJson.deadLetter(sourceTopic, "validation", safeMessage(error), value));
+                    EventJson.deadLetter(sourceTopic, "validation", "invalid-envelope", value));
         }
-    }
-
-    private static String safeMessage(RuntimeException error) {
-        String message = error.getMessage();
-        return message == null || message.isBlank()
-                ? error.getClass().getSimpleName()
-                : message;
     }
 }

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.Arrays;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +41,7 @@ final class JobConfigTest {
     }
 
     @Test
-    void parsesJdbcActiveUserCacheWithoutExposingCredentials() {
+    void parsesJdbcActiveUserCacheWithoutSerializingCredentials() {
         ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
                 new String[] {
                     "--context-source", "jdbc",
@@ -48,15 +49,16 @@ final class JobConfigTest {
                     "--context-refresh-minutes", "60"
                 },
                 Map.of(
-                        "USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db.example/poker",
-                        "USER_CONTEXT_DB_USER", "context_reader",
-                        "USER_CONTEXT_DB_PASSWORD", "context-secret"));
+                        "USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db.example/poker"));
 
         assertEquals("jdbc", config.contextSource());
         assertEquals(36L, config.contextCacheTtlHours());
         assertEquals(60L, config.contextRefreshMinutes());
-        assertFalse(config.safeSummary().contains("context-secret"));
         assertFalse(config.safeSummary().contains("db.example"));
+        assertFalse(Arrays.stream(config.getClass().getRecordComponents())
+                .anyMatch(component -> component.getName().toLowerCase().contains("password")));
+        assertFalse(Arrays.stream(config.getClass().getRecordComponents())
+                .anyMatch(component -> component.getName().toLowerCase().contains("username")));
     }
 
     @Test
@@ -65,6 +67,18 @@ final class JobConfigTest {
                 IllegalArgumentException.class,
                 () -> ContextEnrichmentJob.JobConfig.parse(
                         new String[] {"--context-source", "jdbc"}, Map.of()));
+    }
+
+    @Test
+    void rejectsJdbcCredentialsInCommandLineArguments() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ContextEnrichmentJob.JobConfig.parse(
+                        new String[] {
+                            "--context-source", "jdbc",
+                            "--context-jdbc-password", "must-not-enter-job-graph"
+                        },
+                        Map.of("USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db/poker")));
     }
 
     @Test

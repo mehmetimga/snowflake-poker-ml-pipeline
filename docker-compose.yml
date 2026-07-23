@@ -156,6 +156,8 @@ services:
       - flink-jobmanager
     command: taskmanager
     environment:
+      USER_CONTEXT_DB_USER: ${USER_CONTEXT_DB_USER:-poker_sim}
+      USER_CONTEXT_DB_PASSWORD: ${USER_CONTEXT_DB_PASSWORD:-poker_sim}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 2

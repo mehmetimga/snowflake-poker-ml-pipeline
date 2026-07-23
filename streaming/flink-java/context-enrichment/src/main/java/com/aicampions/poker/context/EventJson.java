@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -159,6 +162,23 @@ final class EventJson {
         return requireText(parse(value).path("payload"), "user_id");
     }
 
+    static ContextKey contextKeyFromContextEvent(String value) {
+        JsonNode event = parse(value);
+        return new ContextKey(
+                requireText(event, "tenant_id"),
+                requireText(event, "product_id"),
+                requireText(event.path("payload"), "user_id"));
+    }
+
+    static ContextKey contextKeyFromExpandedHand(String value) {
+        JsonNode expanded = parse(value);
+        JsonNode hand = expanded.path("hand");
+        return new ContextKey(
+                requireText(hand, "tenant_id"),
+                requireText(hand, "product_id"),
+                requireText(expanded, "player_id"));
+    }
+
     static String playerIdFromExpandedHand(String value) {
         return requireText(parse(value), "player_id");
     }
@@ -182,7 +202,9 @@ final class EventJson {
         root.put("stage", stage);
         root.put("reason", reason);
         root.put("emitted_at", Instant.now().toString());
-        root.put("raw_value", rawValue);
+        root.put("raw_value_sha256", sha256(rawValue));
+        root.put("raw_value_bytes", utf8(rawValue).length);
+        addSafeReferences(root, rawValue);
         return compact(root);
     }
 
@@ -190,4 +212,35 @@ final class EventJson {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
+    private static void addSafeReferences(ObjectNode target, String rawValue) {
+        try {
+            JsonNode parsed = parse(rawValue);
+            JsonNode event = parsed.has("hand") ? parsed.path("hand") : parsed;
+            copySafeText(target, event, "event_id", "source_event_id");
+            copySafeText(target, event, "tenant_id", "tenant_id");
+            copySafeText(target, event, "product_id", "product_id");
+            copySafeText(target, event, "dataset_id", "dataset_id");
+            copySafeText(target, event.path("payload"), "hand_id", "hand_id");
+            copySafeText(target, parsed, "player_id", "player_id");
+        } catch (RuntimeException ignored) {
+            // The digest and byte length are sufficient for malformed input.
+        }
+    }
+
+    private static void copySafeText(
+            ObjectNode target, JsonNode source, String sourceField, String targetField) {
+        JsonNode value = source.path(sourceField);
+        if (value.isTextual() && !value.textValue().isBlank() && value.textValue().length() <= 128) {
+            target.put(targetField, value.textValue());
+        }
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(utf8(value));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
 }
