@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.alert-acceptance-score-expectation.v1",
+  "title": "Frozen model, decision, alert, sink, and admin expectation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "hand_id",
+    "model_name",
+    "model_run_id",
+    "decision_threshold",
+    "hand_risk_probability",
+    "probability_tolerance",
+    "highest_risk_pair",
+    "expected_alert",
+    "selected_demo_alert",
+    "score_id",
+    "risk_score_event_id",
+    "review_decision_event_id",
+    "risk_alert_event_id",
+    "review_policy_id",
+    "review_policy_version",
+    "expected_policy_outcome",
+    "expected_rule_evidence_event_ids",
+    "expected_sink_rows",
+    "expected_admin_row_id",
+    "expected_admin_visible"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "hand_id": {"type": "string", "minLength": 1},
+    "model_name": {"type": "string", "minLength": 1},
+    "model_run_id": {"type": "string", "minLength": 1},
+    "decision_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+    "hand_risk_probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "probability_tolerance": {"type": "number", "exclusiveMinimum": 0},
+    "highest_risk_pair": {"type": "string", "minLength": 3},
+    "expected_alert": {"type": "boolean"},
+    "selected_demo_alert": {"type": "boolean"},
+    "score_id": {"type": "string", "minLength": 32, "maxLength": 32},
+    "risk_score_event_id": {"type": "string", "format": "uuid"},
+    "review_decision_event_id": {"type": "string", "format": "uuid"},
+    "risk_alert_event_id": {
+      "oneOf": [
+        {"type": "string", "format": "uuid"},
+        {"type": "null"}
+      ]
+    },
+    "review_policy_id": {"type": "string", "minLength": 1},
+    "review_policy_version": {"type": "integer", "minimum": 1},
+    "expected_policy_outcome": {
+      "enum": ["no_review", "review_recommended"]
+    },
+    "expected_rule_evidence_event_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "format": "uuid"}
+    },
+    "expected_sink_rows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_scores",
+        "review_decisions",
+        "risk_alerts",
+        "rule_evidence"
+      ],
+      "properties": {
+        "risk_scores": {"const": 1},
+        "review_decisions": {"const": 1},
+        "risk_alerts": {"type": "integer", "minimum": 0, "maximum": 1},
+        "rule_evidence": {"type": "integer", "minimum": 0}
+      }
+    },
+    "expected_admin_row_id": {
+      "oneOf": [
+        {"type": "string", "format": "uuid"},
+        {"type": "null"}
+      ]
+    },
+    "expected_admin_visible": {"type": "boolean"}
+  }
+}

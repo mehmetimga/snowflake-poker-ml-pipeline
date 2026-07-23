@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "profile_id": "multitable-alert-acceptance-v1",
+  "dataset_id": "multitable-alert-acceptance-v1",
+  "dataset_split": "acceptance",
+  "tenant_id": "demo",
+  "product_id": "poker",
+  "seed": 7301,
+  "player_count": 30,
+  "table_count": 5,
+  "candidate_hand_limit": 250,
+  "repeated_fold_hands": 6,
+  "same_device_hands": 3,
+  "same_network_hands": 3,
+  "innocent_household_hands": 2,
+  "multitabler_control_hands": 2,
+  "minimum_model_alerts": 10
+}

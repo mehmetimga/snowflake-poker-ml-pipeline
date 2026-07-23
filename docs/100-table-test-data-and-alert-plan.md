@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1–D5 implemented; D6 alert-acceptance pack next
+Status: D1–D5 complete; D6 pack/oracle implemented, runtime replay next
 
 Last reviewed: 2026-07-23
 
@@ -32,8 +32,22 @@ Implementation evidence:
   and no challenge-label read or copy.
 - All 34 focused generator, contract, frozen-world, pair-dataset, and D5
   benchmark tests passed after the refactor.
-- The complete 267-test Python suite also passed; its only output was existing
+- The complete 272-test Python suite also passed; its only output was existing
   third-party SciPy deprecation warnings.
+- The first D6 slice generated a separate 16-hand, 30-player acceptance pack:
+  240 complete six-player pair snapshots, five cases, 13 evidence assertions,
+  176 expected rule-evidence events, and 16 score/decision identities.
+- All 39 focused D1–D6 generator, benchmark, oracle, and training-exclusion
+  tests passed.
+- The frozen `pair_7a1c58c1046b` model produced 14 expected hand alerts at its
+  registered `0.9841920644` threshold; exactly ten were selected and sealed as
+  demo alerts.
+- D6 has zero D5 hand-ID overlap. Its manifest prohibits training, validation,
+  testing, calibration, threshold selection, and promotion use. Both the pair
+  builder and CatBoost trainer reject it before creating output.
+- Python and Go share a golden identity fixture for score, risk-score event,
+  review-decision, and alert IDs. Java/Flink, Go runtime, Snowflake sink, and
+  admin replay statuses remain explicitly `not_run`.
 
 ## 1. Outcome
 
@@ -574,15 +588,36 @@ Implementation:
 
 ### D6 — Alert-acceptance pack
 
-- [ ] Generate deterministic rule-positive and rule-negative cases.
+- [x] Generate deterministic rule-positive and rule-negative cases.
 - [ ] Replay features through the Java/Flink rule path.
 - [ ] Score through the frozen Go/CatBoost path.
-- [ ] Select and seal at least ten model-threshold-positive demo rows.
-- [ ] Record exact evidence, decision, alert, sink, and admin expectations.
-- [ ] Prove that this dataset is rejected by training commands.
+- [x] Select and seal at least ten model-threshold-positive demo rows.
+- [x] Record exact evidence, decision, alert, sink, and admin-row expectations.
+- [x] Prove that this dataset is rejected by training commands.
 
 Exit gate: replay produces the expected evidence and at least ten final alerts
 for the registered model/policy versions.
+
+Implemented offline pack/oracle slice:
+
+- `config/generator/multitable-alert-acceptance-v1.json` defines a versioned,
+  high-intensity profile separate from every quality benchmark.
+- `pipeline/generator/alert_acceptance.py` generates legal PokerKit hands,
+  inference-safe context, pair-feature expectations, stateful/static rule
+  evidence, frozen ONNX score expectations, and deterministic downstream IDs.
+- The pack covers repeated directional fold/wins, suspicious same-device and
+  same-network relationships, a precise fold-benefit condition, an innocent
+  household negative, and a legitimate multi-table activity control.
+- `pipeline/ml/dataset_guardrails.py` is enforced by pair-dataset construction
+  and CatBoost training before either command creates output.
+- `scripts/build_alert_acceptance.py` and
+  `scripts/check_alert_acceptance.py` build and independently rescore/check the
+  pack.
+- The pack binds D5, model artifact, scoring contract, decision policy, review
+  policy, static-rule, and stateful-rule hashes.
+- Current offline status: Python feature oracle passed, frozen ONNX score oracle
+  passed, 14 expected alerts, ten selected demo alerts. Java/Flink and Go
+  runtime replay are deliberately not claimed yet.
 
 ### D7 — Snowflake, Confluent, and SPCS smoke
 
@@ -684,9 +719,12 @@ make multitable-data-smoke
 make multitable-benchmarks-test
 make multitable-benchmarks
 make multitable-benchmarks-check
+make multitable-alert-acceptance-test
+make multitable-alert-acceptance
+make multitable-alert-acceptance-check
 ```
 
-D6–D8 should add:
+D6 runtime replay and D7–D8 should add:
 
 ```bash
 make multitable-alert-acceptance
@@ -705,7 +743,7 @@ hands, the deterministic 100-table scheduler, point-in-time context, scheduled
 positive and difficult-negative cases, group truth, benchmark assignments, and
 machine-readable leakage gates are implemented.
 
-The next implementation slice is D6: build a training-excluded
-alert-acceptance pack, replay its deterministic rule cases through Flink, score
-it through the frozen Go/CatBoost path, and seal the exact evidence, decision,
-alert, sink, and admin expectations.
+The D6 pack and offline oracle are now implemented. The next slice is D6 runtime
+parity: replay only its hands through Java/Flink, compare all 240 pair snapshots
+and stateful evidence with the oracle, score complete hands through Go/Triton,
+and reconcile the resulting evidence, decisions, alerts, sinks, and admin rows.

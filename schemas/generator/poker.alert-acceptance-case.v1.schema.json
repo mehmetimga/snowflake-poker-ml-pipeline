@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.alert-acceptance-case.v1",
+  "title": "Private alert-acceptance case truth",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_split",
+    "case_id",
+    "case_kind",
+    "scenario_family",
+    "members",
+    "pair_key",
+    "hand_ids",
+    "is_collusive",
+    "required_context_relationship",
+    "label_available_at",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {"const": "acceptance"},
+    "case_id": {"type": "string", "format": "uuid"},
+    "case_kind": {
+      "enum": ["rule_positive", "hard_negative", "activity_control"]
+    },
+    "scenario_family": {
+      "enum": [
+        "repeated_fold_to_partner_wins",
+        "suspicious_same_device",
+        "suspicious_same_network",
+        "innocent_household",
+        "legitimate_multitabler"
+      ]
+    },
+    "members": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "pair_key": {"type": "string", "minLength": 3},
+    "hand_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "is_collusive": {"type": "boolean"},
+    "required_context_relationship": {
+      "enum": ["same_device", "same_network", "none"]
+    },
+    "label_available_at": {"type": "string", "format": "date-time"},
+    "provenance": {"const": "synthetic"}
+  }
+}

@@ -134,6 +134,23 @@ boundaries, protected relationship isolation, train-only preprocessing policy,
 validation-only threshold policy, hashes, and challenge isolation. The builder
 intentionally does not open the source challenge label directory.
 
+Build the first D6 slice after D5:
+
+```bash
+make multitable-alert-acceptance-test
+make multitable-alert-acceptance
+make multitable-alert-acceptance-check
+```
+
+This creates a separate 16-hand PokerKit replay pack with 240 complete
+six-player pair snapshots, precise rule-positive and must-not-fire assertions,
+frozen model/policy hashes, 14 expected model alerts, and exactly ten selected
+demo alerts. Score, decision, alert, sink, and admin identities are sealed in a
+private post-score oracle. The dataset manifest sets `training_allowed=false`,
+and both the pair-dataset builder and CatBoost trainer reject it before writing
+output. Java/Flink and Go runtime replay remain the next D6 step; the manifest
+reports those statuses as `not_run` until measured.
+
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:
 

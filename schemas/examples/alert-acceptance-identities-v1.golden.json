@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "model_run_id": "pair_7a1c58c1046b",
+  "tenant_id": "demo",
+  "product_id": "poker",
+  "dataset_id": "multitable-alert-acceptance-v1",
+  "dataset_split": "acceptance",
+  "review_policy_id": "poker.review-routing",
+  "review_policy_version": 1,
+  "features": [
+    {
+      "event_id": "d6e7e1da-357c-5d7b-a56e-699612048763",
+      "pair_key": "3c15b67b-5164-5b3f-9057-d68e72c6edb5:4ab004ae-0a3a-589f-807d-a4998f567b9e",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "c9cbf187-cefb-5669-9e29-1704ac0e57f0",
+      "pair_key": "3c15b67b-5164-5b3f-9057-d68e72c6edb5:6b65a46c-9688-5b66-af6d-08b90a8e60d6",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "d4c957d1-86ca-56af-8d37-9157d7da95a1",
+      "pair_key": "3c15b67b-5164-5b3f-9057-d68e72c6edb5:a62378d8-dbb6-52cb-bb7f-d0e46ed83bd5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "f39f3877-dca1-53e8-9fce-c25c06f2dc65",
+      "pair_key": "3c15b67b-5164-5b3f-9057-d68e72c6edb5:ac3eb345-70c1-59dd-a215-12507af7d6b5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "436c6a0e-4964-5d3d-b053-3fdfeffe4658",
+      "pair_key": "3c15b67b-5164-5b3f-9057-d68e72c6edb5:c2ae594a-bca2-56ba-b9ad-b825bdb74ad4",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "bbdcd224-fc78-5f29-89c1-55a9e5beafa8",
+      "pair_key": "4ab004ae-0a3a-589f-807d-a4998f567b9e:6b65a46c-9688-5b66-af6d-08b90a8e60d6",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "d13070fc-7c23-5f37-9d53-97782ef12010",
+      "pair_key": "4ab004ae-0a3a-589f-807d-a4998f567b9e:a62378d8-dbb6-52cb-bb7f-d0e46ed83bd5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "3de12f86-ff27-5219-9c48-926ebdc8d1b1",
+      "pair_key": "4ab004ae-0a3a-589f-807d-a4998f567b9e:ac3eb345-70c1-59dd-a215-12507af7d6b5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "2b0a3084-6a55-5c78-9d5c-937d595aedb8",
+      "pair_key": "4ab004ae-0a3a-589f-807d-a4998f567b9e:c2ae594a-bca2-56ba-b9ad-b825bdb74ad4",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "a4d01fd8-3d78-575d-90c0-8ac88e33f2c4",
+      "pair_key": "6b65a46c-9688-5b66-af6d-08b90a8e60d6:a62378d8-dbb6-52cb-bb7f-d0e46ed83bd5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "16942253-3104-5cf9-9750-7ecb999538e8",
+      "pair_key": "6b65a46c-9688-5b66-af6d-08b90a8e60d6:ac3eb345-70c1-59dd-a215-12507af7d6b5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "00514e7d-4352-5265-be6e-105e61f51947",
+      "pair_key": "6b65a46c-9688-5b66-af6d-08b90a8e60d6:c2ae594a-bca2-56ba-b9ad-b825bdb74ad4",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "95317d3c-3f29-5a04-b8b3-11b7f4a92f2e",
+      "pair_key": "a62378d8-dbb6-52cb-bb7f-d0e46ed83bd5:ac3eb345-70c1-59dd-a215-12507af7d6b5",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "b154c79c-4c69-5882-85e2-55fd92f3c0e5",
+      "pair_key": "a62378d8-dbb6-52cb-bb7f-d0e46ed83bd5:c2ae594a-bca2-56ba-b9ad-b825bdb74ad4",
+      "snapshot_revision": 1
+    },
+    {
+      "event_id": "ffed4df7-49cf-58ca-91db-04abb47c064d",
+      "pair_key": "ac3eb345-70c1-59dd-a215-12507af7d6b5:c2ae594a-bca2-56ba-b9ad-b825bdb74ad4",
+      "snapshot_revision": 1
+    }
+  ],
+  "expected": {
+    "score_id": "54f22510e2442020245e9ab122cd2ecd",
+    "risk_score_event_id": "78b0524e-d2c9-50f1-8dd3-f73c64b9a4de",
+    "review_decision_event_id": "4d920bff-8437-5469-8ddb-146f48b5aefe",
+    "risk_alert_event_id": "d2c13919-5a34-5f81-abbe-df7856c13611"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.alert-acceptance-evidence-expectation.v1",
+  "title": "Alert-acceptance rule evidence expectation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "pair_key",
+    "rule_id",
+    "rule_version",
+    "expectation",
+    "minimum_firings",
+    "maximum_firings",
+    "qualifying_hand_ids",
+    "reason_code"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "format": "uuid"},
+    "pair_key": {"type": "string", "minLength": 3},
+    "rule_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$"},
+    "rule_version": {"const": 1},
+    "expectation": {"enum": ["must_fire", "must_not_fire"]},
+    "minimum_firings": {"type": "integer", "minimum": 0},
+    "maximum_firings": {"type": "integer", "minimum": 0},
+    "qualifying_hand_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "reason_code": {"type": "string", "minLength": 1}
+  }
+}

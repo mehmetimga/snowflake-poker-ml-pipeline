@@ -24,6 +24,7 @@ from pipeline.events import (
     validate_event,
 )
 from pipeline.features import PairFeatureCore
+from pipeline.ml.dataset_guardrails import assert_training_allowed
 
 
 PAIR_DATASET_SCHEMA_VERSION = 1
@@ -462,15 +463,13 @@ def _write_dgx_exports(
 def build_pair_datasets(config: PairDatasetBuildConfig) -> dict[str, Any]:
     source_dir = config.source_dir.resolve()
     output_dir = config.output_dir.resolve()
-    if not (source_dir / "manifest.json").exists():
-        raise FileNotFoundError(f"missing source manifest: {source_dir / 'manifest.json'}")
+    source_manifest = assert_training_allowed(source_dir)
     if output_dir.exists() and any(output_dir.iterdir()):
         if not config.overwrite:
             raise FileExistsError(f"output directory is not empty: {output_dir}")
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    source_manifest = json.loads((source_dir / "manifest.json").read_text())
     derived = {split: derive_world_split(source_dir, split) for split in SPLIT_NAMES}
     cold_start = {split: derived[split] for split in SPLIT_NAMES}
 

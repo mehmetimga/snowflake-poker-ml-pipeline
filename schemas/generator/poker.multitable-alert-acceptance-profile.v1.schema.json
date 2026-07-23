@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.multitable-alert-acceptance-profile.v1",
+  "title": "Multi-table alert-acceptance generation profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "dataset_id",
+    "dataset_split",
+    "tenant_id",
+    "product_id",
+    "seed",
+    "player_count",
+    "table_count",
+    "candidate_hand_limit",
+    "repeated_fold_hands",
+    "same_device_hands",
+    "same_network_hands",
+    "innocent_household_hands",
+    "multitabler_control_hands",
+    "minimum_model_alerts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_id": {"type": "string", "minLength": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {"const": "acceptance"},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "seed": {"type": "integer", "minimum": 0},
+    "player_count": {"type": "integer", "minimum": 30},
+    "table_count": {"type": "integer", "minimum": 5},
+    "candidate_hand_limit": {"type": "integer", "minimum": 20},
+    "repeated_fold_hands": {"type": "integer", "minimum": 6},
+    "same_device_hands": {"type": "integer", "minimum": 1},
+    "same_network_hands": {"type": "integer", "minimum": 1},
+    "innocent_household_hands": {"type": "integer", "minimum": 1},
+    "multitabler_control_hands": {"type": "integer", "minimum": 2},
+    "minimum_model_alerts": {"type": "integer", "minimum": 10}
+  }
+}

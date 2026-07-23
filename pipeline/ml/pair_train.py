@@ -27,6 +27,7 @@ from pipeline.ml.pair_model import (
     rules_only_score,
     select_alert_budget_threshold,
 )
+from pipeline.ml.dataset_guardrails import assert_training_allowed
 
 
 PAIR_MODEL_VERSION = "pair-catboost-v1"
@@ -349,6 +350,7 @@ def _quality_gate(
 def train_pair_catboost(config: PairTrainingConfig) -> dict[str, Any]:
     dataset_dir = config.dataset_dir.resolve()
     output_dir = config.output_dir.resolve()
+    assert_training_allowed(dataset_dir)
     if output_dir.exists() and any(output_dir.iterdir()):
         if not config.overwrite:
             raise FileExistsError(
