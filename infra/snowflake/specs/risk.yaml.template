@@ -18,12 +18,12 @@ spec:
       KAFKA_BOOTSTRAP_SERVERS: __KAFKA_BOOTSTRAP_SERVERS__
       KAFKA_SECURITY_PROTOCOL: SASL_SSL
       KAFKA_SASL_MECHANISM: PLAIN
-      KAFKA_PAIR_FEATURES_TOPIC: poker.pair-features.v1
-      KAFKA_RISK_SCORES_TOPIC: poker.risk-scores.v1
-      KAFKA_RULE_EVIDENCE_TOPIC: poker.rule-evidence.v1
-      KAFKA_REVIEW_DECISIONS_TOPIC: poker.review-decisions.v1
-      KAFKA_RISK_ALERTS_TOPIC: poker.risk-alerts.v1
-      KAFKA_DEAD_LETTER_TOPIC: poker.pipeline.dead-letter.v1
+      KAFKA_PAIR_FEATURES_TOPIC: poker.synthetic.pair-features.context-v2.v1
+      KAFKA_RISK_SCORES_TOPIC: poker.synthetic.risk-scores.v1
+      KAFKA_RULE_EVIDENCE_TOPIC: poker.synthetic.rule-evidence.v1
+      KAFKA_REVIEW_DECISIONS_TOPIC: poker.synthetic.review-decisions.v1
+      KAFKA_RISK_ALERTS_TOPIC: poker.synthetic.risk-alerts.v1
+      KAFKA_DEAD_LETTER_TOPIC: poker.synthetic.pipeline.dead-letter.v1
       KAFKA_RISK_SCORER_GROUP_ID: __RISK_SCORER_GROUP_ID__
     secrets:
     - snowflakeSecret: POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS

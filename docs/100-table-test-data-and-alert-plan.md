@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1–D6 core acceptance complete; D7 SPCS/Kafka/Snowflake replay next
+Status: D1–D6 complete; D7 Confluent/SPCS slice passed, sink/admin slice next
 
 Last reviewed: 2026-07-23
 
@@ -48,7 +48,18 @@ Implementation evidence:
 - Python and Go share a golden identity fixture for score, risk-score event,
   review-decision, and alert IDs. The bounded Java/Flink shared-core replay
   matched 240/240 features, and Go plus DGX Triton matched 16/16 hand outputs.
-  Kafka/SPCS, Snowflake sink, and admin replay remain explicitly `not_run`.
+- The measured D7 canonical replay seeded exactly 30 observed users in
+  Snowflake and published only 16 public hand events plus six hand-shaped
+  event-time markers to Confluent. It published zero context events.
+- `POKER_FLINK` emitted 96 Snowflake-resolved context rows and 240 pair rows.
+  `POKER_RISK` emitted 176 evidence events, 16 scores, 16 review decisions, and
+  14 alerts. Every bounded count and semantic oracle check passed, with zero
+  target DLQ records.
+- Schema-v2 context deliberately creates new context, pair, score, decision,
+  and alert transport identities. The D7 report records those IDs, validates
+  their causal links, and compares semantic features, rule evidence, model
+  probabilities, threshold outcomes, and policy outcomes to the sealed D6
+  oracle. Snowflake event sinks and admin remain explicitly `not_run`.
 
 ## 1. Outcome
 
@@ -631,14 +642,40 @@ Implemented offline pack/oracle slice:
 
 ### D7 — Snowflake, Confluent, and SPCS smoke
 
-- [ ] Seed the internal Snowflake context projection.
-- [ ] Publish only hand events to the canonical Confluent input topic.
-- [ ] Confirm lazy context loads for observed players only.
-- [ ] Verify player, pair, score, evidence, decision, and alert row counts.
+- [x] Seed the internal Snowflake context projection.
+- [x] Publish only hand events to the canonical Confluent input topic.
+- [x] Confirm lazy context loads for observed players only.
+- [x] Verify player, pair, score, evidence, decision, and alert Kafka counts.
+- [ ] Persist the event-native records idempotently in Snowflake.
 - [ ] Confirm alerts are visible in admin with source hand and evidence lineage.
 
 Exit gate: manifest counts reconcile through Kafka and Snowflake, and the admin
 view displays the sealed alert-acceptance cases.
+
+Implemented Confluent/SPCS slice:
+
+- `CanonicalFlinkTopics` and `CanonicalScoringTopics` define one complete,
+  managed `poker.synthetic.*` boundary. The shared DLQ is created once.
+- The canonical risk spec now consumes
+  `poker.synthetic.pair-features.context-v2.v1` and publishes all risk outputs
+  to matching synthetic topics.
+- `scripts/seed_snowflake_user_context.py --acceptance-pack ...` verifies the
+  sealed artifact hashes and writes only the 30 users present in the hands.
+- `scripts/replay_alert_acceptance_spcs.py` captures start offsets before
+  publishing, reads no private oracle content, publishes only hands, and
+  writes a hash-bound replay manifest.
+- `scripts/verify_alert_acceptance_spcs.py` performs bounded reads after those
+  offsets, validates schema-v2 Snowflake lineage, compares all semantic
+  features and governed outputs, and records deployed causal IDs.
+- The measured report passed with 96 contexts, 240 pairs, 176 evidence events,
+  16 scores, 16 decisions, 14 alerts, 30 observed context users, and zero
+  target DLQ records.
+- The pair-feature and risk consumer groups committed beyond every target
+  partition. The context source exposes progress through Flink checkpoints
+  rather than broker group offsets; the report records that mode explicitly
+  instead of interpreting absent Kafka offsets as a commit.
+- `POKER_SINK` does not exist yet. Snowflake persistence and admin visibility
+  therefore remain honest `not_run` gates rather than inferred successes.
 
 ### D8 — Model benchmark and promotion report
 
@@ -721,7 +758,7 @@ independent.
 
 ## 14. Stable entry points
 
-D1–D6 currently expose:
+D1–D7 currently expose:
 
 ```bash
 make multitable-data-test
@@ -734,12 +771,17 @@ make multitable-alert-acceptance
 make multitable-alert-acceptance-check
 make multitable-alert-replay-java
 make multitable-alert-replay-local
+make multitable-alert-spcs-test
+make multitable-alert-spcs-topics
+make multitable-alert-spcs-seed-context
+make multitable-alert-spcs-replay
+make multitable-alert-spcs-verify
+make multitable-alert-replay-spcs
 ```
 
-D7–D8 should add:
+D8 should add:
 
 ```bash
-make multitable-alert-replay-spcs
 make multitable-model-benchmark
 ```
 
@@ -753,8 +795,10 @@ hands, the deterministic 100-table scheduler, point-in-time context, scheduled
 positive and difficult-negative cases, group truth, benchmark assignments, and
 machine-readable leakage gates are implemented.
 
-The D6 pack, Java/Flink shared-core parity, and real Go/Triton scoring are now
-implemented. The next slice is D7 deployed replay: publish only the acceptance
-hands to the isolated Confluent path, measure the SPCS Java/Flink and Go
-containers, then reconcile evidence, decisions, alerts, Snowflake sink rows,
-and admin visibility against the sealed oracle.
+The D6 pack, Java/Flink shared-core parity, real Go/Triton scoring, and the D7
+canonical Confluent/SPCS replay are now implemented and measured. The next
+slice is `POKER_SINK`: define event-native Snowflake tables, persist the
+bounded derived events idempotently by event ID/revision, commit Kafka offsets
+only after acknowledged writes, and move `POKER_ADMIN` to those lineage-rich
+tables. The same D7 manifest must then reconcile Kafka counts to Snowflake rows
+and visible admin alerts before the D7 exit gate can close.

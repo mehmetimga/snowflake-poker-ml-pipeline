@@ -56,23 +56,56 @@ def test_canonical_flink_render_uses_internal_snowflake_context(
         "port": 8090,
         "path": "/healthz",
     }
-    assert all(
-        endpoint["port"] != 8090 for endpoint in spec["endpoints"]
-    )
+    assert all(endpoint["port"] != 8090 for endpoint in spec["endpoints"])
     assert "secrets" not in context_proxy
     assert "secrets" not in taskmanager
     assert "secrets" not in containers["jobmanager"]
-    assert {
-        item["snowflakeSecret"] for item in submitter["secrets"]
-    } == {"POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS"}
+    assert {item["snowflakeSecret"] for item in submitter["secrets"]} == {
+        "POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS"
+    }
+
+
+def test_canonical_risk_render_consumes_flink_and_stays_synthetic(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(deploy, "RENDERED_DIR", tmp_path)
+    deploy.render_specs(
+        deploy.DEFAULT_IMAGE_PATH,
+        "broker.example.com:9092",
+    )
+    deploy.validate_rendered_catalog()
+
+    flink = yaml.safe_load((tmp_path / "flink.yaml").read_text())["spec"]
+    risk = yaml.safe_load((tmp_path / "risk.yaml").read_text())["spec"]
+    flink_submitter = next(
+        item for item in flink["containers"] if item["name"] == "submitter"
+    )
+    risk_container = next(item for item in risk["containers"] if item["name"] == "risk")
+    risk_env = risk_container["env"]
+
+    assert risk_env["KAFKA_PAIR_FEATURES_TOPIC"] == (
+        flink_submitter["env"]["KAFKA_PAIR_FEATURES_V2_TOPIC"]
+    )
+    topic_env = {
+        key: value
+        for key, value in risk_env.items()
+        if key.startswith("KAFKA_") and key.endswith("_TOPIC")
+    }
+    assert set(topic_env) == {
+        "KAFKA_PAIR_FEATURES_TOPIC",
+        "KAFKA_RISK_SCORES_TOPIC",
+        "KAFKA_RULE_EVIDENCE_TOPIC",
+        "KAFKA_REVIEW_DECISIONS_TOPIC",
+        "KAFKA_RISK_ALERTS_TOPIC",
+        "KAFKA_DEAD_LETTER_TOPIC",
+    }
+    assert all(value.startswith("poker.synthetic.") for value in topic_env.values())
 
 
 def test_catalog_declares_no_external_context_access() -> None:
     flink = deploy._load_service_catalog()["POKER_FLINK"]
 
-    assert flink["external_access_integrations"] == (
-        "POKER_FLINK_KAFKA_EAI",
-    )
+    assert flink["external_access_integrations"] == ("POKER_FLINK_KAFKA_EAI",)
     assert flink["secret_references"] == {
         "submitter": ("POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS",)
     }
@@ -132,9 +165,7 @@ def test_deploy_reconciles_kafka_only_eai_and_reads_it_back(
             self.statements.append(statement)
 
         def fetch_df(self, statement: str) -> pd.DataFrame:
-            assert statement == (
-                "DESCRIBE SERVICE POKER_ML_DEMO.SPCS.POKER_FLINK"
-            )
+            assert statement == ("DESCRIBE SERVICE POKER_ML_DEMO.SPCS.POKER_FLINK")
             return pd.DataFrame(
                 [
                     {
@@ -164,9 +195,7 @@ def test_deploy_reconciles_kafka_only_eai_and_reads_it_back(
         external_access_integrations=("POKER_FLINK_KAFKA_EAI",),
     )
 
-    eai_clause = (
-        "EXTERNAL_ACCESS_INTEGRATIONS = (POKER_FLINK_KAFKA_EAI)"
-    )
+    eai_clause = "EXTERNAL_ACCESS_INTEGRATIONS = (POKER_FLINK_KAFKA_EAI)"
     assert eai_clause in warehouse.statements[3]
     assert eai_clause in warehouse.statements[4]
     assert "ALTER SERVICE POKER_ML_DEMO.SPCS.POKER_FLINK FROM SPECIFICATION" in (

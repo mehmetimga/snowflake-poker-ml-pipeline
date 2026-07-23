@@ -88,6 +88,33 @@ class CanonicalFlinkTopics:
     dead_letters: str = "poker.synthetic.pipeline.dead-letter.v1"
 
 
+@dataclass(frozen=True)
+class CanonicalScoringTopics:
+    """Synthetic outputs produced by the canonical SPCS risk service."""
+
+    risk_scores: str = "poker.synthetic.risk-scores.v1"
+    rule_evidence: str = "poker.synthetic.rule-evidence.v1"
+    review_decisions: str = "poker.synthetic.review-decisions.v1"
+    risk_alerts: str = "poker.synthetic.risk-alerts.v1"
+    dead_letters: str = "poker.synthetic.pipeline.dead-letter.v1"
+
+
+def canonical_spcs_topics() -> dict[str, str]:
+    """Return the complete canonical hands -> Flink -> risk topic boundary."""
+    flink = CanonicalFlinkTopics()
+    scoring = CanonicalScoringTopics()
+    return {
+        "hands": flink.hands,
+        "player_context": flink.player_context,
+        "pair_features": flink.pair_features,
+        "risk_scores": scoring.risk_scores,
+        "rule_evidence": scoring.rule_evidence,
+        "review_decisions": scoring.review_decisions,
+        "risk_alerts": scoring.risk_alerts,
+        "dead_letters": flink.dead_letters,
+    }
+
+
 def canonical_flink_topic_specs(
     topics: CanonicalFlinkTopics | None = None,
     *,
@@ -108,7 +135,8 @@ def canonical_flink_topic_specs(
         not name.startswith("poker.synthetic.") for name in topic_names
     ):
         raise ValueError(
-            "canonical Flink topics must be unique poker.synthetic.* names")
+            "canonical Flink topics must be unique poker.synthetic.* names"
+        )
     seven_days_ms = str(7 * 24 * 60 * 60 * 1_000)
     thirty_days_ms = str(30 * 24 * 60 * 60 * 1_000)
     return tuple(
@@ -119,9 +147,7 @@ def canonical_flink_topic_specs(
             configs={
                 "cleanup.policy": "delete",
                 "retention.ms": (
-                    thirty_days_ms
-                    if name == names.dead_letters
-                    else seven_days_ms
+                    thirty_days_ms if name == names.dead_letters else seven_days_ms
                 ),
             },
         )
@@ -153,6 +179,97 @@ def ensure_canonical_flink_topics(
                 bootstrap_servers or settings.kafka_bootstrap_servers
             ).split(","),
             client_id="poker-canonical-flink-topic-manager-v1",
+            **kafka_client_kwargs(),
+        )
+    try:
+        existing = set(admin_client.list_topics())
+        missing = [spec for spec in specs if spec.name not in existing]
+        if missing:
+            from kafka.admin import NewTopic
+
+            admin_client.create_topics(
+                [
+                    NewTopic(
+                        name=spec.name,
+                        num_partitions=spec.partitions,
+                        replication_factor=spec.replication_factor,
+                        topic_configs=spec.configs,
+                    )
+                    for spec in missing
+                ],
+                validate_only=False,
+            )
+        return {
+            "created": [spec.name for spec in missing],
+            "existing": [spec.name for spec in specs if spec.name in existing],
+        }
+    finally:
+        if owns_client:
+            admin_client.close()
+
+
+def canonical_scoring_topic_specs(
+    topics: CanonicalScoringTopics | None = None,
+    *,
+    partitions: int = 3,
+    replication_factor: int = 3,
+) -> tuple[WorldTopicSpec, ...]:
+    """Define the canonical synthetic risk outputs and shared DLQ."""
+    if partitions < 1 or replication_factor < 1:
+        raise ValueError("partitions and replication_factor must be positive")
+    names = topics or CanonicalScoringTopics()
+    topic_names = (
+        names.risk_scores,
+        names.rule_evidence,
+        names.review_decisions,
+        names.risk_alerts,
+        names.dead_letters,
+    )
+    if len(set(topic_names)) != len(topic_names) or any(
+        not name.startswith("poker.synthetic.") for name in topic_names
+    ):
+        raise ValueError(
+            "canonical scoring topics must be unique poker.synthetic.* names"
+        )
+    thirty_days_ms = str(30 * 24 * 60 * 60 * 1_000)
+    return tuple(
+        WorldTopicSpec(
+            name=name,
+            partitions=partitions,
+            replication_factor=replication_factor,
+            configs={
+                "cleanup.policy": "delete",
+                "retention.ms": thirty_days_ms,
+            },
+        )
+        for name in topic_names
+    )
+
+
+def ensure_canonical_scoring_topics(
+    *,
+    bootstrap_servers: str | None = None,
+    topics: CanonicalScoringTopics | None = None,
+    partitions: int = 3,
+    replication_factor: int = 3,
+    admin_client: object | None = None,
+) -> dict[str, list[str]]:
+    """Create only missing canonical scoring topics; never alter existing ones."""
+    specs = canonical_scoring_topic_specs(
+        topics,
+        partitions=partitions,
+        replication_factor=replication_factor,
+    )
+    owns_client = admin_client is None
+    if admin_client is None:
+        from kafka.admin import KafkaAdminClient
+
+        settings = get_settings()
+        admin_client = KafkaAdminClient(
+            bootstrap_servers=(
+                bootstrap_servers or settings.kafka_bootstrap_servers
+            ).split(","),
+            client_id="poker-canonical-scoring-topic-manager-v1",
             **kafka_client_kwargs(),
         )
     try:

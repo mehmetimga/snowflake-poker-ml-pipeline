@@ -6,8 +6,8 @@
 .PHONY: c2-adapter-package-test c2-adapter-render c2-adapter-build c2-adapter-image-smoke c2-adapter-release-check c2-adapter-push c2-adapter-deploy-sim c2-adapter-configure-kafka c2-adapter-sim-topics c2-adapter-remote-replay c2-adapter-remote-verify c2-adapter-remote-e2e phase-c2-packaging-check
 .PHONY: shadow-sim-package-test shadow-sim-java-test shadow-sim-topics shadow-sim-render shadow-sim-deploy-flink shadow-sim-deploy-risk shadow-sim-deploy shadow-sim-generate shadow-sim-replay shadow-sim-verify shadow-sim-e2e phase-c2-shadow-packaging-check
 .PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-seed-user-context cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
-.PHONY: f5-package-test phase-f5-check
-.PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local
+.PHONY: f5-package-test phase-f5-check canonical-scoring-topics
+.PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local multitable-alert-spcs-test multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify multitable-alert-replay-spcs
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -44,6 +44,9 @@ ALERT_ACCEPTANCE_DIR ?= data/datasets/multitable-alert-acceptance-v1
 ALERT_ACCEPTANCE_MODEL_DIR ?= models/pair-catboost-full-v2
 ALERT_ACCEPTANCE_RUNTIME_DIR ?= data/runs/alert-acceptance-$(shell date -u +%Y%m%dT%H%M%SZ)
 ALERT_ACCEPTANCE_TRITON_URL ?= http://127.0.0.1:18000
+ALERT_ACCEPTANCE_SPCS_RUN_DIR ?= data/runs/alert-acceptance-spcs-$(shell date -u +%Y%m%dT%H%M%SZ)
+ALERT_ACCEPTANCE_SPCS_MANIFEST ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/replay-manifest.json
+ALERT_ACCEPTANCE_SPCS_REPORT ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/verification-report.json
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -431,6 +434,34 @@ multitable-alert-replay-local: multitable-alert-acceptance-check multitable-aler
 		--triton-url $(ALERT_ACCEPTANCE_TRITON_URL) \
 		--output-dir $(ALERT_ACCEPTANCE_RUNTIME_DIR)
 
+multitable-alert-spcs-test:
+	$(PY) -m pytest -q tests/test_alert_acceptance_spcs.py \
+		tests/test_canonical_flink_topics.py \
+		tests/test_canonical_scoring_topics.py \
+		tests/test_seed_snowflake_user_context.py \
+		tests/test_f5_context_deployment.py
+
+multitable-alert-spcs-topics: check-kafka
+	$(PY) scripts/ensure_canonical_flink_topics.py
+	$(PY) scripts/ensure_canonical_scoring_topics.py
+
+multitable-alert-spcs-seed-context: multitable-alert-acceptance-check
+	WAREHOUSE_BACKEND=snowflake \
+		$(PY) scripts/seed_snowflake_user_context.py \
+		--acceptance-pack $(ALERT_ACCEPTANCE_DIR)
+
+multitable-alert-spcs-replay: multitable-alert-acceptance-check
+	$(PY) scripts/replay_alert_acceptance_spcs.py \
+		--dataset $(ALERT_ACCEPTANCE_DIR) \
+		--manifest $(ALERT_ACCEPTANCE_SPCS_MANIFEST)
+
+multitable-alert-spcs-verify:
+	$(PY) scripts/verify_alert_acceptance_spcs.py \
+		--manifest $(ALERT_ACCEPTANCE_SPCS_MANIFEST) \
+		--report $(ALERT_ACCEPTANCE_SPCS_REPORT)
+
+multitable-alert-replay-spcs: multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify
+
 pair-dataset:
 	$(PY) scripts/build_pair_dataset.py --source-dir $(WORLD_DATASET_DIR) \
 		--output-dir $(PAIR_DATASET_DIR) $(PAIR_DATASET_FLAGS)
@@ -764,6 +795,9 @@ scoring-topics: check-kafka
 
 canonical-flink-topics: check-kafka
 	$(PY) scripts/ensure_canonical_flink_topics.py
+
+canonical-scoring-topics: check-kafka
+	$(PY) scripts/ensure_canonical_scoring_topics.py
 
 world-replay-dry:
 	$(PY) scripts/replay_world.py --dataset $(WORLD_DATASET_DIR) \

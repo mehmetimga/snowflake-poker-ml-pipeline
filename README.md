@@ -160,6 +160,33 @@ through the Go service and a real Triton V2 endpoint, opening the private
 oracle only after scoring. Its run report keeps Kafka/SPCS, Snowflake sinks,
 and admin status as `not_run`; those deployment checks belong to D7.
 
+Run the D7 canonical Confluent/SPCS acceptance slice after the services have
+been rendered with the `poker.synthetic.*` topic map:
+
+```bash
+make multitable-alert-spcs-test
+make multitable-alert-spcs-topics
+make multitable-alert-spcs-seed-context
+make multitable-alert-spcs-replay
+make multitable-alert-spcs-verify
+
+# Or run the topic, seed, replay, and verification steps together:
+make multitable-alert-replay-spcs
+```
+
+The replay publisher reads only the public hand artifact, captures every
+derived-topic end offset, publishes 16 hands plus hand-shaped event-time
+markers, and sends no user-context records. The verifier opens the private
+oracle only after the outputs exist. The measured SPCS run resolved exactly 30
+users from Snowflake and reconciled 96 player contexts, 240 pair features, 176
+evidence events, 16 scores, 16 decisions, and 14 alerts with zero target DLQ
+records. Schema-v2 Snowflake context creates new transport IDs by design, so
+the verifier checks their causal lineage and compares the complete semantic
+feature/model output rather than incorrectly requiring the schema-v1 context
+IDs. The report also verifies broker commits for the pair and risk consumers
+and records the context source as Flink-checkpoint-managed. Snowflake event
+sinks and the modern admin view are still pending.
+
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:
 

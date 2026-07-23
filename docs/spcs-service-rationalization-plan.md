@@ -493,7 +493,10 @@ Five persistent objects remain before `POKER_SINK` is added.
 
 ### R5 — Add `POKER_SINK` and migrate admin
 
-Status: pending.
+Status: next implementation slice. The 2026-07-23 bounded canonical
+Confluent/SPCS replay passed through `POKER_FLINK` and `POKER_RISK` with 96
+contexts, 240 pair rows, 176 evidence events, 16 scores, 16 decisions, 14
+alerts, and zero target DLQ records. Persistence and admin remain `not_run`.
 
 1. Define event-native Snowflake tables for canonical lineage, player context,
    pair revisions, scores, rule evidence, decisions, alerts, and DLQ audit.

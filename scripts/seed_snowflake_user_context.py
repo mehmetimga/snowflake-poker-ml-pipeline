@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -102,13 +104,94 @@ def build_seed_data(
         rows.append(payload)
     frame = pd.DataFrame(rows)
     frame["effective_at"] = pd.to_datetime(frame["effective_at"], utc=True)
-    frame["account_created_at"] = pd.to_datetime(
-        frame["account_created_at"], utc=True
-    )
+    frame["account_created_at"] = pd.to_datetime(frame["account_created_at"], utc=True)
     hand_events = [
         hand for hand, _player_labels, _pair_labels in world.iter_hands_with_labels()
     ]
     return frame, hand_events
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_acceptance_seed_data(
+    pack_dir: Path,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
+    """Load only the users observed by one sealed alert-acceptance pack."""
+    pack_dir = pack_dir.resolve()
+    manifest = json.loads((pack_dir / "manifest.json").read_text())
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("product_type") != "alert_acceptance"
+        or manifest.get("training_allowed") is not False
+    ):
+        raise ValueError("context seed requires a sealed training-excluded pack")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("acceptance manifest artifact bindings are missing")
+    for relative, expected_hash in artifacts.items():
+        artifact = pack_dir / relative
+        if not artifact.is_file() or _sha256(artifact) != expected_hash:
+            raise ValueError(f"alert-acceptance artifact hash mismatch: {relative}")
+
+    hand_events = _read_jsonl(pack_dir / "events" / "hands.jsonl")
+    user_rows = _read_jsonl(pack_dir / "snapshots" / "users.jsonl")
+    if not hand_events or not user_rows:
+        raise ValueError("acceptance pack must contain hands and user snapshots")
+    dataset_id = str(manifest["dataset_id"])
+    tenant_ids = {str(event["tenant_id"]) for event in hand_events}
+    product_ids = {str(event["product_id"]) for event in hand_events}
+    dataset_ids = {str(event["dataset_id"]) for event in hand_events}
+    if len(tenant_ids) != 1 or len(product_ids) != 1 or dataset_ids != {dataset_id}:
+        raise ValueError("acceptance hand scope is inconsistent")
+    observed_users = {
+        str(player["player_id"])
+        for event in hand_events
+        for player in event["payload"]["players"]
+    }
+    snapshot_users = {str(row["user_id"]) for row in user_rows}
+    if observed_users != snapshot_users:
+        raise ValueError("acceptance snapshots must exactly cover observed players")
+    if len(user_rows) != int(manifest["counts"]["players"]):
+        raise ValueError("acceptance context row count changed")
+
+    tenant_id = next(iter(tenant_ids))
+    product_id = next(iter(product_ids))
+    rows = [
+        {
+            **row,
+            "tenant_id": tenant_id,
+            "product_id": product_id,
+            "dataset_id": dataset_id,
+        }
+        for row in user_rows
+    ]
+    frame = pd.DataFrame(rows)
+    frame["effective_at"] = pd.to_datetime(frame["effective_at"], utc=True)
+    frame["account_created_at"] = pd.to_datetime(frame["account_created_at"], utc=True)
+    first_hand_at = pd.Timestamp(
+        min(event["payload"]["played_at"] for event in hand_events)
+    )
+    if frame["effective_at"].max() > first_hand_at:
+        raise ValueError("acceptance context cannot be effective after its first hand")
+    metadata = {
+        "dataset_id": dataset_id,
+        "tenant_id": tenant_id,
+        "product_id": product_id,
+        "manifest_sha256": _sha256(pack_dir / "manifest.json"),
+        "players": len(frame),
+        "hands": len(hand_events),
+    }
+    return frame, hand_events, metadata
 
 
 def seed_context_table(
@@ -118,7 +201,9 @@ def seed_context_table(
     dataset_id: str,
 ) -> int:
     if warehouse.kind != "snowflake":
-        raise RuntimeError("Snowflake context seed requires WAREHOUSE_BACKEND=snowflake")
+        raise RuntimeError(
+            "Snowflake context seed requires WAREHOUSE_BACKEND=snowflake"
+        )
     warehouse.execute("USE ROLE SYSADMIN")
     warehouse.execute("USE DATABASE POKER_ML_DEMO")
     warehouse.execute("USE SCHEMA SPCS")
@@ -161,44 +246,63 @@ def main() -> None:
         type=_timestamp,
         default=datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc),
     )
+    parser.add_argument("--hands-output", type=Path, default=DEFAULT_HANDS_OUTPUT)
     parser.add_argument(
-        "--hands-output", type=Path, default=DEFAULT_HANDS_OUTPUT
+        "--acceptance-pack",
+        type=Path,
+        help="seed the exact observed users from a sealed acceptance pack",
     )
     args = parser.parse_args()
 
-    frame, hand_events = build_seed_data(
-        dataset_id=args.dataset_id,
-        tenant_id=args.tenant_id,
-        product_id=args.product_id,
-        players=args.players,
-        hands=args.hands,
-        tables=args.tables,
-        pairs=args.pairs,
-        seed=args.seed,
-        hand_start_at=args.hand_start_at,
-    )
+    if args.acceptance_pack is not None:
+        frame, hand_events, metadata = build_acceptance_seed_data(args.acceptance_pack)
+        dataset_id = metadata["dataset_id"]
+    else:
+        frame, hand_events = build_seed_data(
+            dataset_id=args.dataset_id,
+            tenant_id=args.tenant_id,
+            product_id=args.product_id,
+            players=args.players,
+            hands=args.hands,
+            tables=args.tables,
+            pairs=args.pairs,
+            seed=args.seed,
+            hand_start_at=args.hand_start_at,
+        )
+        dataset_id = args.dataset_id
+        metadata = {
+            "dataset_id": dataset_id,
+            "tenant_id": args.tenant_id,
+            "product_id": args.product_id,
+            "players": len(frame),
+            "hands": len(hand_events),
+        }
     warehouse = get_warehouse()
     try:
-        row_count = seed_context_table(
-            warehouse, frame, dataset_id=args.dataset_id
-        )
+        row_count = seed_context_table(warehouse, frame, dataset_id=dataset_id)
     finally:
         warehouse.close()
-    write_hands(args.hands_output, hand_events)
+    if args.acceptance_pack is None:
+        write_hands(args.hands_output, hand_events)
     print(
         json.dumps(
             {
                 "status": "seeded",
                 "table": TABLE,
-                "current_view": (
-                    f"POKER_ML_DEMO.SPCS.{CURRENT_VIEW}"
-                ),
-                "dataset_id": args.dataset_id,
+                "current_view": (f"POKER_ML_DEMO.SPCS.{CURRENT_VIEW}"),
+                "dataset_id": dataset_id,
                 "context_rows": row_count,
-                "generated_hands": len(hand_events),
-                "hands_file": str(args.hands_output),
-                "tenant_id": args.tenant_id,
-                "product_id": args.product_id,
+                "generated_hands": (
+                    len(hand_events) if args.acceptance_pack is None else 0
+                ),
+                "hands_file": str(
+                    args.hands_output
+                    if args.acceptance_pack is None
+                    else args.acceptance_pack / "events" / "hands.jsonl"
+                ),
+                "tenant_id": metadata["tenant_id"],
+                "product_id": metadata["product_id"],
+                "acceptance_manifest_sha256": metadata.get("manifest_sha256"),
             },
             indent=2,
             sort_keys=True,
