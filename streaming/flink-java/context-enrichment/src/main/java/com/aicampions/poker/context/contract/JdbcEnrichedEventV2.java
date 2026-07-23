@@ -1,6 +1,8 @@
 package com.aicampions.poker.context.contract;
 
 import com.aicampions.poker.context.EventJson;
+import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
+import com.aicampions.poker.context.domain.UserContextRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.ByteBuffer;
@@ -20,24 +22,26 @@ public final class JdbcEnrichedEventV2 {
 
     private JdbcEnrichedEventV2() {}
 
-    public static String create(String expandedHand, String cachedContext) {
+    public static String create(
+            String expandedHand,
+            ActiveContextCacheEntry contextEntry) {
         JsonNode expanded = EventJson.parse(expandedHand);
         JsonNode hand = expanded.path("hand");
         JsonNode handPayload = hand.path("payload");
-        JsonNode context = CachedUserContext.context(cachedContext);
+        UserContextRecord record = contextEntry.toRecord();
+        ObjectNode context = context(record);
         String playerId = EventJson.requireText(expanded, "player_id");
-        if (!playerId.equals(EventJson.requireText(context, "user_id"))) {
+        if (!playerId.equals(record.userId())) {
             throw new IllegalArgumentException("context user does not match hand player");
         }
-        long effectiveAt = EventJson.parseInstant(
-                EventJson.requireText(context, "effective_at"));
+        long effectiveAt = record.effectiveAt().toEpochMilli();
         long playedAt = EventJson.parseInstant(
                 EventJson.requireText(handPayload, "played_at"));
         if (effectiveAt > playedAt) {
             throw new IllegalArgumentException("future context cannot enrich an older hand");
         }
 
-        String contextRecordId = CachedUserContext.contextRecordId(cachedContext);
+        String contextRecordId = contextEntry.getContextRecordId();
         ObjectNode payload = EventJson.MAPPER.createObjectNode();
         copy(payload, handPayload, "hand_id");
         copy(payload, handPayload, "table_id");
@@ -87,6 +91,33 @@ public final class JdbcEnrichedEventV2 {
         copy(output, hand, "trace_id");
         output.set("payload", payload);
         return EventJson.compact(output);
+    }
+
+    private static ObjectNode context(UserContextRecord record) {
+        ObjectNode payload = EventJson.MAPPER.createObjectNode();
+        payload.put("user_id", record.userId());
+        payload.put("context_version", record.contextVersion());
+        payload.put("effective_at", record.effectiveAt().toString());
+        payload.put(
+                "account_created_at",
+                record.accountCreatedAt().toString());
+        payload.put("country_bucket", record.countryBucket());
+        payload.put("timezone", record.timezone());
+        payload.put(
+                "acquisition_channel",
+                record.acquisitionChannel());
+        payload.put("kyc_level", record.kycLevel());
+        payload.put("account_status", record.accountStatus());
+        payload.put("bankroll_bucket", record.bankrollBucket());
+        payload.put(
+                "preferred_stake_bucket",
+                record.preferredStakeBucket());
+        payload.put("skill_rating", record.skillRating());
+        payload.put("device_id", record.deviceId());
+        payload.put(
+                "network_cluster_id",
+                record.networkClusterId());
+        return payload;
     }
 
     private static JsonNode findPlayer(JsonNode players, String playerId) {

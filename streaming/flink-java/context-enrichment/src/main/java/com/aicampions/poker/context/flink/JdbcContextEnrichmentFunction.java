@@ -7,8 +7,8 @@ import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
 import com.aicampions.poker.context.adapter.jdbc.JdbcRepositoryObserver;
 import com.aicampions.poker.context.adapter.jdbc.JdbcUserContextRepository;
 import com.aicampions.poker.context.adapter.jdbc.UserContextLookupException;
-import com.aicampions.poker.context.contract.CachedUserContext;
 import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
+import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
 import com.aicampions.poker.context.domain.ContextKey;
 import com.aicampions.poker.context.domain.UserContextRecord;
 import com.aicampions.poker.context.port.UserContextRepository;
@@ -16,10 +16,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
@@ -39,7 +36,8 @@ public final class JdbcContextEnrichmentFunction
     private final String handTopic;
 
     private transient UserContextRepository repository;
-    private transient ValueState<String> cachedContext;
+    private transient ValueState<ActiveContextCacheEntry>
+            cachedContext;
     private transient Counter cacheHits;
     private transient Counter cacheMisses;
     private transient Counter cacheRefreshes;
@@ -78,15 +76,8 @@ public final class JdbcContextEnrichmentFunction
 
     @Override
     public void open(Configuration parameters) throws Exception {
-        StateTtlConfig ttl = StateTtlConfig.newBuilder(Duration.ofHours(cacheTtlHours))
-                .setUpdateType(StateTtlConfig.UpdateType.OnReadAndWrite)
-                .setStateVisibility(StateTtlConfig.StateVisibility.NeverReturnExpired)
-                .cleanupInRocksdbCompactFilter(1_000L)
-                .build();
-        ValueStateDescriptor<String> descriptor =
-                new ValueStateDescriptor<>("active-user-context-jdbc-v2", Types.STRING);
-        descriptor.enableTimeToLive(ttl);
-        cachedContext = getRuntimeContext().getState(descriptor);
+        cachedContext = getRuntimeContext().getState(
+                ActiveContextState.descriptor(cacheTtlHours));
         cacheHits = counter("context_cache_hits");
         cacheMisses = counter("context_cache_misses");
         cacheRefreshes = counter("context_cache_refreshes");
@@ -145,12 +136,12 @@ public final class JdbcContextEnrichmentFunction
         long playedAtMs = EventJson.parseInstant(EventJson.requireText(
                 EventJson.parse(expandedHand).path("hand").path("payload"), "played_at"));
         ContextKey contextKey = EventJson.contextKeyFromExpandedHand(expandedHand);
-        String cached = cachedContext.value();
-        String resolvedContext;
+        ActiveContextCacheEntry cached = cachedContext.value();
+        ActiveContextCacheEntry resolvedContext;
 
         if (cached != null
-                && CachedUserContext.isFresh(cached, nowMs, refreshAfterMs)
-                && CachedUserContext.isEffectiveFor(cached, playedAtMs)) {
+                && cached.isFresh(nowMs, refreshAfterMs)
+                && cached.isEffectiveFor(playedAtMs)) {
             cacheHits.inc();
             resolvedContext = cached;
         } else {
@@ -193,8 +184,12 @@ public final class JdbcContextEnrichmentFunction
             if (!contextKey.equals(loadedKey)) {
                 throw new IllegalArgumentException("loaded context scope does not match state key");
             }
-            resolvedContext = CachedUserContext.create(record, nowMs);
-            cachedContext.update(resolvedContext);
+            resolvedContext =
+                    ActiveContextCacheEntry.from(record, nowMs);
+            if (cached == null
+                    || cached.shouldBeReplacedBy(resolvedContext)) {
+                cachedContext.update(resolvedContext);
+            }
         }
 
         output.collect(JdbcEnrichedEventV2.create(expandedHand, resolvedContext));

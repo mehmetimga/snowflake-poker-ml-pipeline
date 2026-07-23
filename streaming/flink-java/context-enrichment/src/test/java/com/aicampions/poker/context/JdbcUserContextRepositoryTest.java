@@ -1,6 +1,7 @@
 package com.aicampions.poker.context;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -8,6 +9,7 @@ import com.aicampions.poker.context.adapter.jdbc.JdbcConnectionFactory;
 import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
 import com.aicampions.poker.context.adapter.jdbc.JdbcRepositoryObserver;
 import com.aicampions.poker.context.adapter.jdbc.JdbcUserContextRepository;
+import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
 import com.aicampions.poker.context.domain.ContextKey;
 import com.aicampions.poker.context.domain.UserContextRecord;
 import java.sql.Connection;
@@ -85,6 +87,43 @@ final class JdbcUserContextRepositoryTest {
                             new ContextKey("tenant-a", "poker", "G"),
                             Instant.parse("2026-07-23T12:00:00Z").toEpochMilli())
                     .isEmpty());
+        }
+    }
+
+    @Test
+    void lateHandResolvesPriorVersionWithoutDowngradingCurrentCache()
+            throws Exception {
+        try (JdbcUserContextRepository repository =
+                new JdbcUserContextRepository(
+                        URL,
+                        "sa",
+                        "",
+                        "public.poker_user_context",
+                        1)) {
+            ActiveContextCacheEntry current =
+                    ActiveContextCacheEntry.from(
+                            repository
+                                    .findEffective(
+                                            key(),
+                                            Instant.parse(
+                                                            "2026-07-23T14:00:00Z")
+                                                    .toEpochMilli())
+                                    .orElseThrow(),
+                            1_000L);
+            ActiveContextCacheEntry prior =
+                    ActiveContextCacheEntry.from(
+                            repository
+                                    .findEffective(
+                                            key(),
+                                            Instant.parse(
+                                                            "2026-07-23T12:00:00Z")
+                                                    .toEpochMilli())
+                                    .orElseThrow(),
+                            2_000L);
+
+            assertEquals(3, current.getContextVersion());
+            assertEquals(2, prior.getContextVersion());
+            assertFalse(current.shouldBeReplacedBy(prior));
         }
     }
 

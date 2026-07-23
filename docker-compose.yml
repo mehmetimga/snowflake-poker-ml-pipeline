@@ -136,10 +136,24 @@ services:
     command: ["streamlit", "run", "admin/Home.py", "--server.address=0.0.0.0", "--server.port=8501"]
     profiles: ["pipeline"]
 
+  flink-state-init:
+    image: apache/flink:1.19.1-scala_2.12-java17
+    profiles: ["flink"]
+    user: root
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - install -d -o 9999 -g 9999 /opt/flink/state/checkpoints /opt/flink/state/savepoints
+    volumes:
+      - flink_state:/opt/flink/state
+    restart: "no"
+
   flink-jobmanager:
     image: apache/flink:1.19.1-scala_2.12-java17
     container_name: poker-flink-jobmanager
     profiles: ["flink"]
+    depends_on:
+      flink-state-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8081"
     command: jobmanager
@@ -147,6 +161,10 @@ services:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         parallelism.default: 1
+        state.checkpoints.dir: file:///opt/flink/state/checkpoints
+        state.savepoints.dir: file:///opt/flink/state/savepoints
+    volumes:
+      - flink_state:/opt/flink/state
 
   flink-taskmanager:
     image: apache/flink:1.19.1-scala_2.12-java17
@@ -162,7 +180,12 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 2
         parallelism.default: 1
+        state.checkpoints.dir: file:///opt/flink/state/checkpoints
+        state.savepoints.dir: file:///opt/flink/state/savepoints
+    volumes:
+      - flink_state:/opt/flink/state
 
 volumes:
   qdrant_storage:
   postgres_cdc_data:
+  flink_state:

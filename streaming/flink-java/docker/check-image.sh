@@ -45,6 +45,7 @@ verify_main_class \
 for class_path in \
   com/aicampions/poker/context/config/ContextJobConfig.class \
   com/aicampions/poker/context/contract/JdbcEnrichedEventV2.class \
+  com/aicampions/poker/context/domain/ActiveContextCacheEntry.class \
   com/aicampions/poker/context/domain/ContextKey.class \
   com/aicampions/poker/context/domain/UserContextRecord.class \
   com/aicampions/poker/context/port/UserContextRepository.class \
@@ -52,6 +53,7 @@ for class_path in \
   com/aicampions/poker/context/adapter/jdbc/JdbcRepositoryObserver.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcRetryDelay.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcUserContextRepository.class \
+  com/aicampions/poker/context/flink/ActiveContextState.class \
   com/aicampions/poker/context/flink/JdbcContextEnrichmentFunction.class; do
   verify_jar_class /opt/flink/usrlib/context-enrichment.jar "${class_path}"
 done

@@ -3,8 +3,8 @@ package com.aicampions.poker.context;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import com.aicampions.poker.context.contract.CachedUserContext;
 import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
+import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
 import com.aicampions.poker.context.domain.UserContextRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
@@ -48,9 +48,11 @@ final class JdbcEnrichedEventV2Test {
                 EventJson.parse(HAND).path("payload").path("players").get(0));
         UserContextRecord record = record();
         String first = JdbcEnrichedEventV2.create(
-                expanded, CachedUserContext.create(record, 1_000L));
+                expanded,
+                ActiveContextCacheEntry.from(record, 1_000L));
         String replay = JdbcEnrichedEventV2.create(
-                expanded, CachedUserContext.create(record, 9_000L));
+                expanded,
+                ActiveContextCacheEntry.from(record, 9_000L));
         JsonNode output = EventJson.parse(first);
         JsonNode payload = output.path("payload");
         JsonNode resolution = payload.path("context_resolution");

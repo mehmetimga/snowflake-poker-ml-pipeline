@@ -1,6 +1,6 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1–F3 complete locally; F4 next
+Status: F1–F4 complete locally; F5 next
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -60,10 +60,10 @@ The current JDBC slice is a successful proof:
 It is not ready for a production deployment yet. The following issues should
 be fixed before package-level cleanup or SPCS cutover.
 
-This section preserves the original review baseline. F1–F3 have resolved the
+This section preserves the original review baseline. F1–F4 have resolved the
 keying, secret, failure, contract, package, and synchronous-JDBC findings;
 the phase checklists and validation evidence below are authoritative for
-current status. Typed-state recovery and deployment work remain.
+current status. SPCS deployment work remains.
 
 ### 3.1 Critical correctness and security findings
 
@@ -178,16 +178,19 @@ string transport key, use a versioned canonical encoding and test collisions.
 
 ### 5.2 Typed state
 
-Replace `ValueState<String>` with:
+The canonical operator now uses:
 
 ```text
 ActiveContextCacheEntry {
-  schema_version,
+  state_schema_version,
   context_record_id,
+  tenant_id,
+  product_id,
+  user_id,
   context_version,
   effective_at,
   loaded_at,
-  model_feature_projection
+  narrow model feature projection
 }
 ```
 
@@ -197,7 +200,10 @@ Configuration:
 - update mode: `OnReadAndWrite`;
 - visibility: `NeverReturnExpired`;
 - freshness: a separate `loaded_at + refresh_interval`;
-- first serializer/schema version: `active-context-cache-v1`.
+- Flink state name: `active-user-context-cache-v1`;
+- POJO schema version: `1`; and
+- serializer: Flink `PojoSerializer` through
+  `Types.POJO(ActiveContextCacheEntry.class)`.
 
 The TTL is an inactivity/residency policy, not a historical retention policy.
 PostgreSQL and Snowflake retain the authoritative history. Old historical
@@ -298,6 +304,7 @@ com.aicampions.poker.context
     ContextJobConfig
     JdbcTableName
   domain/
+    ActiveContextCacheEntry
     ContextKey
     UserContextRecord
   port/
@@ -312,9 +319,9 @@ com.aicampions.poker.context
     JdbcUserContextRepository
     UserContextLookupException
   contract/
-    CachedUserContext
     JdbcEnrichedEventV2
   flink/
+    ActiveContextState
     JdbcContextEnrichmentFunction
   root package/
     shared Kafka topology plumbing
@@ -562,22 +569,76 @@ context-enrichment README. No SPCS service was changed.
 
 ### F4 — Typed Flink state and recovery
 
-Status: next.
+Status: complete locally on 2026-07-23.
 
-1. Replace JSON state with `ActiveContextCacheEntry`.
-2. Declare state schema and serializer versions.
-3. Add stable operator UIDs.
-4. Test 36-hour inactivity TTL and 60-minute refresh with a fake clock.
-5. Test late hands against current and prior context versions.
-6. Test checkpoint and savepoint restore with the same build.
-7. Test and document behavior for a state-schema upgrade.
+- [x] Replace JSON state with `ActiveContextCacheEntry`.
+- [x] Declare state schema and serializer versions.
+- [x] Preserve stable canonical operator UIDs.
+- [x] Test 36-hour inactivity TTL and 60-minute refresh with a fake clock.
+- [x] Test late hands against current and prior context versions.
+- [x] Test checkpoint and savepoint restore with the same build.
+- [x] Test and document behavior for a state-schema upgrade.
 
 Exit gate: restart/restore preserves correct context and no legacy-join
 savepoint is accepted by the canonical topology.
 
+Validation evidence:
+
+- the canonical cache now uses typed
+  `ValueState<ActiveContextCacheEntry>` named
+  `active-user-context-cache-v1`; the Kafka v2 contract remained unchanged;
+- 42 Java tests passed with zero failures or errors and two environment-gated
+  PostgreSQL tests skipped in the container-only suite;
+- fake-clock tests cover the exact refresh boundary, effective-time
+  eligibility, state schema validation, current-versus-prior replacement, and
+  lossless PostgreSQL microsecond timestamp/record-ID round trips;
+- a late hand resolves context version 2 from PostgreSQL while a cached
+  version 3 refuses the downgrade;
+- the local recovery job emitted six rows and zero DLQs, completed durable
+  checkpoints, and produced canonical savepoint
+  `file:/opt/flink/state/savepoints/savepoint-1f3da4-44af06505cd7`;
+- the exact build restored that savepoint and replaying the hand produced six
+  `context_cache_hits`, zero misses, zero refreshes, and zero database lookup
+  results;
+- restoring the canonical topology from legacy savepoint
+  `file:/opt/flink/state/savepoints/savepoint-a864d0-09fa08cee0e1` failed
+  closed because legacy operator state could not map to the canonical UID
+  namespace; and
+- the clean bounded F4 topics contain six deterministic context rows,
+  fifteen pair snapshots with offline/online parity, and zero DLQ offsets.
+
+The retained clean evidence topics are
+`poker.synthetic.hand-player-context.f4-final.v2`,
+`poker.synthetic.pair-features.f4-final.context-v2.v1`, and
+`poker.synthetic.pipeline.dead-letter.f4-final.v1`. The separate recovery
+topic `poker.synthetic.hand-player-context.f4-restore-final.v2` intentionally
+contains six exact at-least-once replay duplicates: twelve raw records and
+six unique deterministic event IDs.
+
+State upgrade policy:
+
+1. take a canonical savepoint and retain the previous JAR;
+2. keep every stable operator UID unchanged for a compatible typed-state
+   upgrade;
+3. add or remove POJO fields only under Flink's supported schema-evolution
+   rules; never change an existing field type, POJO class name, or key shape;
+4. increment `STATE_SCHEMA_VERSION` and add validation/default handling when
+   the typed schema changes compatibly;
+5. for the one-time F3 JSON-to-F4 transition, use the new
+   `active-user-context-cache-v1` state name, ignore
+   `active-user-context-jdbc-v2`, and lazily rebuild this derived cache from
+   PostgreSQL as hands arrive; and
+6. never use `--allowNonRestoredState` for the normal canonical restore or to
+   bypass a legacy-topology rejection.
+
+If an incompatible typed-state change is unavoidable, use a new versioned
+state name and an explicitly reviewed migration or derived-cache rebuild.
+Prove it with a saved fixture before deployment. Do not silently point an
+existing state name at an incompatible serializer.
+
 ### F5 — SPCS network, secrets, and declarative deployment
 
-Status: blocked on F4.
+Status: next.
 
 1. Add the PostgreSQL network rule, EAI, and Secret creation templates.
 2. Mount the context Secret in the TaskManager spec.
@@ -592,7 +653,7 @@ credential value; a read-only service inspection matches the catalog.
 
 ### F6 — Shadow, load, and chaos validation
 
-Status: blocked on F3–F5.
+Status: blocked on F5.
 
 Run the canonical JDBC job with a new consumer group and output topic. Keep
 the legacy path only as a temporary comparison/rollback job.
@@ -705,15 +766,15 @@ Do not include these in the current refactor:
 
 ## 15. Immediate implementation slice
 
-Start F4 by replacing JSON `ValueState` with a versioned typed cache entry
-without changing the v2 Kafka contract:
+Start F5 with local and rendered-spec work only:
 
-1. define `ActiveContextCacheEntry` and its serializer version;
-2. use typed `ValueState<ActiveContextCacheEntry>`;
-3. add fake-clock tests for 36-hour inactivity TTL and 60-minute freshness;
-4. test a late hand against current and prior context versions;
-5. prove checkpoint/savepoint restore with the same build; and
-6. document and test the first state-schema upgrade path.
+1. declare the PostgreSQL network rule, EAI, and credential Secret;
+2. mount the Secret only in the TaskManager container;
+3. make JDBC the canonical Flink context source and remove the context Kafka
+   source from that deployment;
+4. refactor EAI deployment to reconcile the complete declared set;
+5. add a canonical service catalog and no-secret rendered-spec tests; and
+6. render and inspect the exact change without mutating SPCS.
 
 Do not start SPCS mutation until F1–F5 local and rendered-spec gates pass.
 
@@ -721,6 +782,8 @@ Do not start SPCS mutation until F1–F5 local and rendered-spec gates pass.
 
 - [Flink stateful stream processing](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/)
 - [Flink state TTL](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/fault-tolerance/state/)
+- [Flink 1.19 savepoints and stable operator IDs](https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/ops/state/savepoints/)
+- [Flink 1.19 state schema evolution](https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/dev/datastream/fault-tolerance/serialization/schema_evolution/)
 - [Flink asynchronous I/O](https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/dev/datastream/operators/asyncio/)
 - [Snowflake CREATE SERVICE](https://docs.snowflake.com/en/sql-reference/sql/create-service)
 - [Snowflake ALTER SERVICE](https://docs.snowflake.com/en/sql-reference/sql/alter-service)

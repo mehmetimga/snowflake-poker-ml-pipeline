@@ -82,8 +82,14 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
   parity-checked pair snapshots with an empty DLQ. A controlled PostgreSQL
   outage stopped after the configured restart limit without advancing Kafka
   or writing an enriched/DLQ record.
-- [ ] A multi-hand running-job test proves cache-hit metrics, refresh, and TTL
-  expiry.
+- [x] Context refactoring F4 completed locally: versioned typed Flink state,
+  fake-clock refresh/TTL tests, late-hand cache protection, and durable
+  checkpoint/savepoint recovery.
+- [x] An exact-build restore produced six cache hits and zero lookups; a
+  canonical restore from a legacy-topology savepoint was rejected by the
+  isolated operator UID namespaces.
+- [x] The clean F4 replay produced six deterministic context rows and fifteen
+  parity-checked pair snapshots with an empty DLQ.
 - [ ] SPCS PostgreSQL network rule, EAI, Secret, and rendered spec exist.
 - [ ] Canonical SPCS service cutover is complete.
 

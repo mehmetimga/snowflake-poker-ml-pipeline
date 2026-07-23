@@ -19,10 +19,15 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
 - State and PostgreSQL lookups are keyed by
   `(tenant_id, product_id, player_id)`; reads and writes extend the 36-hour
   state TTL.
+- Cache entries are typed Flink POJOs in
+  `active-user-context-cache-v1`; state schema version 1 is validated whenever
+  an entry is used.
 - A separate 60-minute freshness interval forces periodic refresh for active
   players.
 - The SQL lookup selects the latest version whose
   `effective_at <= played_at`.
+- A late hand may resolve an older effective row for that event, but it cannot
+  replace a newer row already cached for subsequent hands.
 - Every cache-miss lookup validates its subtask-local connection. A closed or
   invalid connection is replaced before the prepared query executes.
 - PostgreSQL connect, socket, prepared-query, and validation timeouts are
@@ -55,11 +60,11 @@ The canonical path is separated by responsibility:
 |---|---|
 | `app` | Canonical and rollback-only process entrypoints |
 | `config` | Argument/environment parsing and validation |
-| `domain` | Flink-independent context identity and projection records |
+| `domain` | Flink-independent context identity, projection, and typed cache records |
 | `port` | Point-in-time context repository interface |
 | `adapter.jdbc` | PostgreSQL, credentials, and sanitized failure mapping |
-| `contract` | Versioned cache and enriched-event JSON contracts |
-| `flink` | Active-player keyed process operator and metrics |
+| `contract` | Enriched-event JSON contract |
+| `flink` | Typed state declaration, active-player keyed operator, and metrics |
 
 The root package contains shared Kafka/topology plumbing and the temporary
 legacy temporal-join implementation. Domain and port code does not depend on
@@ -175,3 +180,28 @@ and can be safely reapplied to the local POC database.
 
 For production, configure durable checkpoint storage in the Flink cluster and
 start from a savepoint when upgrading stateful operator code.
+
+## State recovery and upgrades
+
+The canonical lookup operator keeps its stable UID
+`active-context-v2-jdbc-lookup`. The typed cache uses the separate state name
+`active-user-context-cache-v1`, schema version
+`ActiveContextCacheEntry.STATE_SCHEMA_VERSION = 1`, and Flink's POJO
+serializer. The local compose profile mounts one shared
+`flink_state` volume into the JobManager and TaskManager and initializes
+`/opt/flink/state/checkpoints` and `/opt/flink/state/savepoints`.
+
+For compatible typed-state evolution, take a savepoint, retain the previous
+JAR, preserve operator UIDs and the POJO class name, and follow Flink's POJO
+rules: fields may be added or removed, but existing field types and the keyed
+`ContextKey` shape must not change. Increment the application schema version
+and test restore from a retained fixture.
+
+The F3 JSON state is a derived cache. F4 deliberately does not reuse its state
+name; after restoring source/operator state, the typed cache is populated
+lazily from PostgreSQL as active hands arrive. Do not use
+`--allowNonRestoredState` for a normal canonical restore. A legacy Kafka-join
+savepoint must fail because its UID namespace is intentionally incompatible.
+
+See the F4 evidence and upgrade checklist in
+[the active-user context refactoring plan](../../../docs/active-user-context-refactoring-plan.md).
