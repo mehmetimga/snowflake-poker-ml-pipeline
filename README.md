@@ -10,6 +10,7 @@ Planning documents:
 
 - [Real-time context and ML implementation plan](docs/realtime-context-ml-implementation-plan.md)
 - [Data generation, storage, and pipeline plan](docs/data-generation-and-pipeline-plan.md)
+- [100-table test data, alert, and dataset plan](docs/100-table-test-data-and-alert-plan.md)
 - [PostgreSQL/Debezium hand-history ingress contract](docs/debezium-hand-history-ingress.md)
 - [C2 simulation adapter Docker/SPCS packaging](docs/spcs-c2-adapter-simulation.md)
 - [How the Flink real-time feature pipeline works](docs/flink-realtime-feature-pipeline.md)
@@ -23,7 +24,7 @@ Planning documents:
 
 ## What's in here
 
-- **PokerKit hand generator** — valid 6-max NLHE cash-game state transitions with deterministic cards, real pot settlement, and injected synthetic collusion patterns.
+- **PokerKit hand generator** — valid 4–6 player NLHE cash-game state transitions with deterministic cards, real pot settlement, and injected synthetic collusion patterns.
 - **Kafka stream** — hands published to `hands.raw`; consumer batches them into the warehouse.
 - **Warehouse** — Snowflake or DuckDB (toggle with `WAREHOUSE_BACKEND`). Same SQL migrations run on both.
 - **Feature engineering** — ~60 numeric features per `(hand_id, player_id)` from raw actions.
@@ -100,6 +101,19 @@ This writes separate topic-ready JSONL streams under
 under `private_labels/`. Direct Kafka replay is the current project path. The
 future Debezium boundary and source-independent Go runtime are offline-verifiable
 with `make phase-c2-runtime-check`; this does not deploy a connector or service.
+
+The new structural multi-table smoke schedules 100 concurrent tables, 530
+seats, and users playing up to five tables. It currently validates generation
+and split artifacts; deliberate alert scenarios are the next implementation
+phase.
+
+```bash
+make multitable-data-test
+make multitable-data-smoke
+```
+
+The default smoke writes 3,000 train hands plus 1,000 hands in each of
+validation, test, and challenge under `data/datasets/multitable-cold-v1/`.
 
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:

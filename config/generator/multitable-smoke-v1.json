@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "profile_id": "multitable-smoke-v1",
+  "dataset_id": "multitable-cold-v1",
+  "split_hands": {
+    "train": 3000,
+    "validation": 1000,
+    "test": 1000,
+    "challenge": 1000
+  },
+  "registered_players": 10000,
+  "daily_active_players": 2000,
+  "peak_concurrent_players": 400,
+  "table_size_counts": {
+    "4": 20,
+    "5": 30,
+    "6": 50
+  },
+  "hands_per_table_hour": 60,
+  "simulated_day_hours": 8,
+  "max_simultaneous_tables": 5,
+  "simultaneous_table_distribution": {
+    "1": 0.75,
+    "2": 0.18,
+    "3": 0.05,
+    "4": 0.015,
+    "5": 0.005
+  },
+  "seat_rebalance_minutes": 60,
+  "minimum_session_minutes": 20,
+  "maximum_session_minutes": 240,
+  "n_colluding_pairs": 300,
+  "seed": 20260723
+}

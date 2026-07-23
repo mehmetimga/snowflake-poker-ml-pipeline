@@ -12,6 +12,10 @@ The companion
 defines the models, services, features, and delivery roadmap. This document is
 the source of truth for data ownership and movement.
 
+The detailed scale-up design for 100 concurrent tables, 4–6 player occupancy,
+multi-table users, alert cases, and leakage-safe benchmark products is in the
+[100-table test data and alert plan](100-table-test-data-and-alert-plan.md).
+
 ## Architecture decision
 
 Use each storage system for one clear responsibility:

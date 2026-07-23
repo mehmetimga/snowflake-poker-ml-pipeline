@@ -1,9 +1,13 @@
-"""Deterministic PokerKit-backed 6-max NLHE hand generator.
+"""Deterministic PokerKit-backed 4-6 player NLHE hand generator.
 
 All players, IDs, chip flow, and labels are synthetic. PokerKit owns the game
 state so emitted actions follow legal betting order and pots are settled with a
 real Texas Hold'em evaluator. The local random generator only chooses players,
 cards, and strategy decisions, which keeps a given seed exactly replayable.
+
+The legacy iterator still samples six players and advances one logical clock.
+The multi-table world uses :meth:`HandGenerator.generate_hand` to provide an
+explicit table, ordered seat list, and event time.
 """
 
 from __future__ import annotations
@@ -14,23 +18,62 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Iterator, Optional
 
-from pokerkit import Automation, BoardDealing, Card, ChipsPushing, Mode, NoLimitTexasHoldem
+from pokerkit import (
+    Automation,
+    BoardDealing,
+    Card,
+    ChipsPushing,
+    Mode,
+    NoLimitTexasHoldem,
+)
 
 from .collusion_patterns import CollusionPair, CollusionPattern
 
 
 _ADJECTIVES = [
-    "Blaze", "Frost", "Storm", "Shadow", "Crimson", "Silent", "Ember", "Lunar",
-    "Solar", "Iron", "Rapid", "Wild", "Steady", "Cold", "Golden", "Quiet",
+    "Blaze",
+    "Frost",
+    "Storm",
+    "Shadow",
+    "Crimson",
+    "Silent",
+    "Ember",
+    "Lunar",
+    "Solar",
+    "Iron",
+    "Rapid",
+    "Wild",
+    "Steady",
+    "Cold",
+    "Golden",
+    "Quiet",
 ]
 _NOUNS = [
-    "Phoenix", "Falcon", "Wolf", "Tiger", "Eagle", "Comet", "Drake", "Hawk",
-    "Lynx", "Otter", "Raven", "Stoat", "Viper", "Whale", "Bison", "Jackal",
+    "Phoenix",
+    "Falcon",
+    "Wolf",
+    "Tiger",
+    "Eagle",
+    "Comet",
+    "Drake",
+    "Hawk",
+    "Lynx",
+    "Otter",
+    "Raven",
+    "Stoat",
+    "Viper",
+    "Whale",
+    "Bison",
+    "Jackal",
 ]
 _STAKES = [(0.10, 0.25), (0.50, 1.00), (1.00, 2.00), (2.00, 5.00)]
 
-# PokerKit indexes a six-player blind game as SB, BB, UTG, MP, CO, BTN.
-_POSITIONS_6MAX = ("SB", "BB", "UTG", "MP", "CO", "BTN")
+# PokerKit indexes blind games from the small blind through the button.
+_POSITIONS_BY_PLAYER_COUNT = {
+    4: ("SB", "BB", "CO", "BTN"),
+    5: ("SB", "BB", "UTG", "CO", "BTN"),
+    6: ("SB", "BB", "UTG", "MP", "CO", "BTN"),
+}
 _STREETS = ("preflop", "flop", "turn", "river")
 _RANKS = "23456789TJQKA"
 _SUITS = "cdhs"
@@ -92,9 +135,10 @@ class GeneratorConfig:
             raise ValueError("n_tables must be positive")
         if self.n_colluding_pairs < 0 or self.n_colluding_pairs * 2 > self.n_players:
             raise ValueError("n_colluding_pairs must use at most n_players / 2 players")
-        if not self.dataset_split or not self.dataset_split.replace("-", "").replace(
-            "_", ""
-        ).isalnum():
+        if (
+            not self.dataset_split
+            or not self.dataset_split.replace("-", "").replace("_", "").isalnum()
+        ):
             raise ValueError("dataset_split must be a non-empty alphanumeric label")
         if self.dataset_id is not None and (
             not self.dataset_id
@@ -123,6 +167,7 @@ class HandGenerator:
         self.cfg = config
         self.rng = random.Random(config.seed)
         self.players = self._make_players()
+        self._players_by_id = {player.player_id: player for player in self.players}
         self.pairs = self._make_pairs()
         self._assign_pairs()
         table_scope = (
@@ -178,23 +223,81 @@ class HandGenerator:
         return pairs
 
     def _assign_pairs(self) -> None:
-        by_id = {player.player_id: player for player in self.players}
         for pair in self.pairs:
             for player_id in (pair.player_a, pair.player_b):
-                by_id[player_id].is_colluder = True
-                by_id[player_id].pair = pair
+                self._players_by_id[player_id].is_colluder = True
+                self._players_by_id[player_id].pair = pair
 
     def iter_hands(self) -> Iterator[dict]:
         for index in range(self.cfg.n_hands):
-            yield self._generate_hand(index)
+            yield self.generate_hand(index)
 
-    def _generate_hand(self, index: int) -> dict:
-        seats = self.rng.sample(self.players, k=6)
+    def generate_hand(
+        self,
+        index: int,
+        *,
+        table_id: str | None = None,
+        seat_player_ids: Iterable[str] | None = None,
+        played_at: datetime | None = None,
+    ) -> dict:
+        """Generate one hand, optionally using an explicit schedule.
+
+        ``seat_player_ids`` is ordered from the small blind through the button.
+        Existing callers may omit all optional arguments to retain the original
+        deterministic six-player behavior.
+        """
+        if index < 0:
+            raise ValueError("hand index must be non-negative")
+        if table_id is None:
+            table_id = self.rng.choice(self.tables)
+        elif table_id not in self.tables:
+            raise ValueError(f"unknown table_id: {table_id}")
+
+        if seat_player_ids is None:
+            seats = self.rng.sample(self.players, k=6)
+        else:
+            requested_ids = tuple(seat_player_ids)
+            if len(requested_ids) not in _POSITIONS_BY_PLAYER_COUNT:
+                raise ValueError("seat_player_ids must contain 4, 5, or 6 players")
+            if len(requested_ids) != len(set(requested_ids)):
+                raise ValueError("seat_player_ids must be unique within a hand")
+            unknown = [
+                player_id
+                for player_id in requested_ids
+                if player_id not in self._players_by_id
+            ]
+            if unknown:
+                raise ValueError(f"unknown scheduled player_id: {unknown[0]}")
+            seats = [self._players_by_id[player_id] for player_id in requested_ids]
+
+        if played_at is None:
+            played_at = self._t0 + timedelta(seconds=index * 30)
+        elif played_at.tzinfo is None or played_at.utcoffset() is None:
+            raise ValueError("played_at must include timezone information")
+        else:
+            played_at = played_at.astimezone(timezone.utc)
+
+        return self._generate_hand(
+            index,
+            table_id=table_id,
+            seats=seats,
+            played_at=played_at,
+        )
+
+    def _generate_hand(
+        self,
+        index: int,
+        *,
+        table_id: str,
+        seats: list[_Player],
+        played_at: datetime,
+    ) -> dict:
+        player_count = len(seats)
+        positions = _POSITIONS_BY_PLAYER_COUNT[player_count]
         small_blind, big_blind = self.rng.choice(_STAKES)
         small_blind_chips = int(round(small_blind * 100))
         big_blind_chips = int(round(big_blind * 100))
         stack_chips = big_blind_chips * 100
-        played_at = self._t0 + timedelta(seconds=index * 30)
 
         active_pair = self._active_pair(seats)
         state = NoLimitTexasHoldem.create_state(
@@ -203,8 +306,8 @@ class HandGenerator:
             0,
             (small_blind_chips, big_blind_chips),
             big_blind_chips,
-            (stack_chips,) * 6,
-            6,
+            (stack_chips,) * player_count,
+            player_count,
             mode=Mode.CASH_GAME,
         )
 
@@ -215,7 +318,9 @@ class HandGenerator:
         state.deck_cards.clear()
         state.deck_cards.extend(Card.parse("".join(deck)))
 
-        hole_lists: dict[int, list[str]] = {index: [] for index in range(6)}
+        hole_lists: dict[int, list[str]] = {
+            player_index: [] for player_index in range(player_count)
+        }
         while state.hole_dealee_index is not None:
             player_index = state.hole_dealee_index
             operation = state.deal_hole()
@@ -226,7 +331,7 @@ class HandGenerator:
         }
 
         actions: list[dict] = []
-        invested = [0] * 6
+        invested = [0] * player_count
         sequence = 0
         safety = 0
         while state.status:
@@ -276,7 +381,9 @@ class HandGenerator:
                 amount = 0
             elif decision in {"bet", "raise"} and state.can_complete_bet_or_raise_to():
                 minimum = int(state.min_completion_betting_or_raising_to_amount or 0)
-                maximum = int(state.max_completion_betting_or_raising_to_amount or minimum)
+                maximum = int(
+                    state.max_completion_betting_or_raising_to_amount or minimum
+                )
                 if current_bet:
                     target = max(minimum, current_bet * 3)
                 else:
@@ -308,7 +415,7 @@ class HandGenerator:
             )
             sequence += 1
 
-        won = [0] * 6
+        won = [0] * player_count
         pot_chips = 0
         board: list[str] = []
         for operation in state.operations:
@@ -321,17 +428,21 @@ class HandGenerator:
 
         players_payload = []
         for player_index, player in enumerate(seats):
-            pair_is_active = active_pair is not None and active_pair.involves(player.player_id)
+            pair_is_active = active_pair is not None and active_pair.involves(
+                player.player_id
+            )
             players_payload.append(
                 {
                     "player_id": player.player_id,
                     "name": player.name,
-                    "position": _POSITIONS_6MAX[player_index],
+                    "position": positions[player_index],
                     "stack_start": stack_chips / 100.0,
                     "hole_cards": " ".join(holes[player_index]),
                     "won_amount": won[player_index] / 100.0,
                     "is_suspicious": pair_is_active,
-                    "collusion_pair_id": active_pair.pair_id if pair_is_active else None,
+                    "collusion_pair_id": (
+                        active_pair.pair_id if pair_is_active else None
+                    ),
                 }
             )
 
@@ -343,7 +454,7 @@ class HandGenerator:
         )
         return {
             "hand_id": f"{hand_prefix}-H-{index:08d}",
-            "table_id": self.rng.choice(self.tables),
+            "table_id": table_id,
             "played_at": played_at.isoformat(),
             "dataset_split": split,
             "generator": "pokerkit",
@@ -359,7 +470,10 @@ class HandGenerator:
     def _active_pair(self, seats: list[_Player]) -> Optional[CollusionPair]:
         seated_ids = {player.player_id for player in seats}
         for pair in self.pairs:
-            if {pair.player_a, pair.player_b} <= seated_ids and self.rng.random() < pair.intensity:
+            if {
+                pair.player_a,
+                pair.player_b,
+            } <= seated_ids and self.rng.random() < pair.intensity:
                 return pair
         return None
 

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "poker.multitable-profile.v1",
+  "title": "Deterministic multi-table PokerKit dataset profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "dataset_id",
+    "split_hands",
+    "registered_players",
+    "daily_active_players",
+    "peak_concurrent_players",
+    "table_size_counts",
+    "hands_per_table_hour",
+    "simulated_day_hours",
+    "max_simultaneous_tables",
+    "simultaneous_table_distribution",
+    "seat_rebalance_minutes",
+    "minimum_session_minutes",
+    "maximum_session_minutes",
+    "n_colluding_pairs",
+    "seed"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "split_hands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["train", "validation", "test", "challenge"],
+      "properties": {
+        "train": {"type": "integer", "minimum": 0},
+        "validation": {"type": "integer", "minimum": 0},
+        "test": {"type": "integer", "minimum": 0},
+        "challenge": {"type": "integer", "minimum": 0}
+      }
+    },
+    "registered_players": {"type": "integer", "minimum": 6},
+    "daily_active_players": {"type": "integer", "minimum": 1},
+    "peak_concurrent_players": {"type": "integer", "minimum": 1},
+    "table_size_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["4", "5", "6"],
+      "properties": {
+        "4": {"type": "integer", "minimum": 0},
+        "5": {"type": "integer", "minimum": 0},
+        "6": {"type": "integer", "minimum": 0}
+      }
+    },
+    "hands_per_table_hour": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "simulated_day_hours": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 24
+    },
+    "max_simultaneous_tables": {"type": "integer", "minimum": 1},
+    "simultaneous_table_distribution": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[1-9][0-9]*$"},
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "seat_rebalance_minutes": {"type": "integer", "minimum": 1},
+    "minimum_session_minutes": {"type": "integer", "minimum": 1},
+    "maximum_session_minutes": {"type": "integer", "minimum": 1},
+    "n_colluding_pairs": {"type": "integer", "minimum": 0},
+    "seed": {"type": "integer"}
+  }
+}
