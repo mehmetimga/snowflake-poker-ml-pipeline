@@ -64,7 +64,7 @@ spec:
   - name: context-proxy
     image: __FLINK_IMAGE_PATH__
     command:
-    - /usr/local/bin/python
+    - /opt/context-proxy/venv/bin/python
     args:
     - /opt/context-proxy/server.py
     env:

@@ -23,11 +23,6 @@ RUN --mount=type=cache,target=/root/.m2 \
       -Dartifact=org.apache.flink:flink-statebackend-rocksdb:1.19.1 \
       -DoutputDirectory=/runtime-libs
 
-FROM python:3.10-slim-bullseye@sha256:f1fb49e4d5501ac93d0ca519fb7ee6250842245aba8612926a46a0832a1ed089 AS context-proxy-runtime
-COPY streaming/snowflake-context-proxy/requirements.txt /tmp/context-proxy-requirements.txt
-RUN pip install --no-cache-dir \
-      --requirement /tmp/context-proxy-requirements.txt
-
 FROM apache/flink:1.19.1-scala_2.12-java17@sha256:09cdcacefd0606c98e73bd9f7d308e3c7f2f949b287b81b3dc210cd7e55ba528
 
 ARG BUILD_VERSION=dev
@@ -36,13 +31,19 @@ LABEL org.opencontainers.image.title="poker-flink" \
       org.opencontainers.image.revision="${BUILD_VERSION}"
 
 USER root
-RUN mkdir -p \
+COPY streaming/snowflake-context-proxy/requirements.txt /tmp/context-proxy-requirements.txt
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends python3 python3-venv \
+    && python3 -m venv /opt/context-proxy/venv \
+    && /opt/context-proxy/venv/bin/pip install --no-cache-dir \
+      --requirement /tmp/context-proxy-requirements.txt \
+    && rm -rf /var/lib/apt/lists/* /tmp/context-proxy-requirements.txt \
+    && mkdir -p \
       /opt/context-proxy \
       /opt/flink/usrlib \
       /opt/flink/state/checkpoints \
       /opt/flink/state/savepoints
 
-COPY --from=context-proxy-runtime /usr/local /usr/local
 COPY --from=runtime-libs /runtime-libs/*.jar /opt/flink/lib/
 COPY --from=context-build \
     /build/context-enrichment/target/context-enrichment-0.1.0.jar \

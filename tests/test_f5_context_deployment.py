@@ -49,7 +49,7 @@ def test_canonical_flink_render_uses_internal_snowflake_context(
     assert "USER_CONTEXT_DB_USER" not in text
     assert "USER_CONTEXT_DB_PASSWORD" not in text
     assert "CONTEXT_DB_CREDENTIALS" not in text
-    assert context_proxy["command"] == ["/usr/local/bin/python"]
+    assert context_proxy["command"] == ["/opt/context-proxy/venv/bin/python"]
     assert context_proxy["args"] == ["/opt/context-proxy/server.py"]
     assert context_proxy["env"]["SNOWFLAKE_WAREHOUSE"] == "DEMO_WH"
     assert context_proxy["readinessProbe"] == {

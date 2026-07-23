@@ -7,8 +7,8 @@ test -s /opt/flink/lib/flink-metrics-prometheus-1.19.1.jar
 test -s /opt/flink/lib/flink-statebackend-rocksdb-1.19.1.jar
 test -s /opt/context-proxy/server.py
 bash -n /opt/flink/bin/submit-poker-jobs
-/usr/local/bin/python -m py_compile /opt/context-proxy/server.py
-/usr/local/bin/python -c \
+/opt/context-proxy/venv/bin/python -m py_compile /opt/context-proxy/server.py
+/opt/context-proxy/venv/bin/python -c \
   'import snowflake.connector; assert tuple(map(int, snowflake.connector.VERSION[:2])) >= (4, 5)'
 
 verify_main_class() {
