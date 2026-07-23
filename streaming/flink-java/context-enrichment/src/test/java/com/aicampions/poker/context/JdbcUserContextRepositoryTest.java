@@ -370,6 +370,60 @@ final class JdbcUserContextRepositoryTest {
         }
     }
 
+    @Test
+    void fallsBackToValidationQueryWhenDriverDoesNotSupportIsValid()
+            throws Exception {
+        AtomicInteger validationQueries = new AtomicInteger();
+        JdbcConnectionFactory factory = () -> {
+            Connection delegate = realConnection();
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[] {Connection.class},
+                    (proxy, method, arguments) -> {
+                        if (method.getName().equals("isValid")) {
+                            throw new SQLException(
+                                    "feature not supported", "0A000");
+                        }
+                        Object result = invoke(delegate, method, arguments);
+                        if (!method.getName().equals("createStatement")) {
+                            return result;
+                        }
+                        Statement statement = (Statement) result;
+                        return Proxy.newProxyInstance(
+                                Statement.class.getClassLoader(),
+                                new Class<?>[] {Statement.class},
+                                (statementProxy, statementMethod, statementArgs) -> {
+                                    if (statementMethod
+                                                    .getName()
+                                                    .equals("executeQuery")
+                                            && "SELECT 1".equals(
+                                                    statementArgs[0])) {
+                                        validationQueries.incrementAndGet();
+                                    }
+                                    return invoke(
+                                            statement,
+                                            statementMethod,
+                                            statementArgs);
+                                });
+                    });
+        };
+
+        try (JdbcUserContextRepository repository =
+                repository(
+                        factory,
+                        JdbcRepositoryObserver.NOOP,
+                        7,
+                        2)) {
+            assertTrue(repository
+                    .findEffective(key(), playedAt())
+                    .isPresent());
+            assertTrue(repository
+                    .findEffective(key(), playedAt())
+                    .isPresent());
+            assertEquals(2, validationQueries.get());
+        }
+    }
+
     private static JdbcUserContextRepository repository(
             JdbcConnectionFactory factory,
             JdbcRepositoryObserver observer,

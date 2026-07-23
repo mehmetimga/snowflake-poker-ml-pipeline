@@ -133,8 +133,12 @@ Create the history table, current view, and a deterministic PokerKit-backed
 test dataset:
 
 ```bash
+make canonical-flink-topics
 make snow-seed-user-context
 ```
+
+The topic command creates only missing `poker.synthetic.*` Flink topics. It
+never deletes, resets, or changes an existing topic.
 
 The generated hand fixture is written to
 `data/runs/spcs-snowflake-context-v1/hands.jsonl`. Every player referenced by

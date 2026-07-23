@@ -77,6 +77,7 @@ Flink or a specific database.
 
 ```bash
 make enrichment-topics
+make canonical-flink-topics
 make flink-context-test
 make flink-context-build
 ```

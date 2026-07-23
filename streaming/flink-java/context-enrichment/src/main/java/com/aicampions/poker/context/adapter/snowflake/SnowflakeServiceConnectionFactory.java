@@ -52,6 +52,11 @@ public final class SnowflakeServiceConnectionFactory
         properties.setProperty("queryTimeout", Integer.toString(networkTimeoutSeconds));
         properties.setProperty("CLIENT_SESSION_KEEP_ALIVE", "true");
         properties.setProperty("enablePutGet", "false");
+        // SPCS already supplies the platform identity and Snowflake host.
+        // Avoid AWS/Azure/GCP metadata probes that cannot succeed in the
+        // container network and add noise and delay to every reconnect.
+        properties.setProperty("disablePlatformDetection", "true");
+        properties.setProperty("disableGcsDefaultCredentials", "true");
         return DriverManager.getConnection(
                 "jdbc:snowflake://" + credentials.host() + "/",
                 properties);

@@ -7,10 +7,12 @@ import com.aicampions.poker.context.port.UserContextRepository;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.sql.Timestamp;
 import java.util.Optional;
 
 /** Synchronous point-in-time JDBC lookup used only on Flink cache misses. */
@@ -24,6 +26,7 @@ public final class JdbcUserContextRepository implements UserContextRepository {
 
     private Connection connection;
     private PreparedStatement lookup;
+    private boolean useValidationQuery;
 
     public JdbcUserContextRepository(
             String jdbcUrl,
@@ -139,10 +142,31 @@ public final class JdbcUserContextRepository implements UserContextRepository {
     }
 
     private void ensureUsableConnection() throws Exception {
-        if (connection == null
-                || connection.isClosed()
-                || !connection.isValid(validationTimeoutSeconds)) {
+        if (connection == null || connection.isClosed() || !connectionIsValid()) {
             reconnect();
+        }
+    }
+
+    private boolean connectionIsValid() throws Exception {
+        if (!useValidationQuery) {
+            try {
+                return connection.isValid(validationTimeoutSeconds);
+            } catch (SQLException error) {
+                String sqlState = error.getSQLState();
+                if (sqlState == null || !sqlState.startsWith("0A")) {
+                    throw error;
+                }
+                // Snowflake JDBC reports Connection.isValid as unsupported
+                // (SQLSTATE 0A). Remember that capability for this subtask and
+                // use an explicit bounded validation query thereafter.
+                useValidationQuery = true;
+            }
+        }
+        try (Statement validation = connection.createStatement()) {
+            validation.setQueryTimeout(validationTimeoutSeconds);
+            try (ResultSet ignored = validation.executeQuery("SELECT 1")) {
+                return ignored.next();
+            }
         }
     }
 
