@@ -114,6 +114,15 @@ def test_flink_supervisor_requires_both_jobs() -> None:
     assert "flink list -r" in script
 
 
+def test_flink_image_check_works_in_jre_and_requires_snowflake_adapter() -> None:
+    script = (ROOT / "streaming/flink-java/docker/check-image.sh").read_text()
+    assert "jar tf" not in script
+    assert 'grep -aFq "${class_path}" "${jar_path}"' in script
+    assert "SnowflakeServiceConnectionFactory.class" in script
+    assert "SnowflakeUserContextRepository.class" in script
+    assert "net/snowflake/client/api/driver/SnowflakeDriver.class" in script
+
+
 def test_release_guard_rejects_non_head_tag(monkeypatch) -> None:
     monkeypatch.setattr(
         "scripts.check_c1_release.git",

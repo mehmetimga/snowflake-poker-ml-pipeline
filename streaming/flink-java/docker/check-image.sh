@@ -26,7 +26,10 @@ verify_main_class() {
 verify_jar_class() {
   local jar_path="$1"
   local class_path="$2"
-  if ! jar tf "${jar_path}" | grep -Fx "${class_path}" >/dev/null; then
+  # The pinned Flink runtime contains a Java runtime, not the JDK `jar`
+  # command. ZIP entry names are stored verbatim in the JAR central directory,
+  # so fixed-string binary grep provides a dependency-free packaging check.
+  if ! grep -aFq "${class_path}" "${jar_path}"; then
     echo "Missing expected JAR class: ${class_path}" >&2
     exit 1
   fi
@@ -53,8 +56,12 @@ for class_path in \
   com/aicampions/poker/context/adapter/jdbc/JdbcRepositoryObserver.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcRetryDelay.class \
   com/aicampions/poker/context/adapter/jdbc/JdbcUserContextRepository.class \
+  com/aicampions/poker/context/adapter/snowflake/SnowflakeServiceConnectionFactory.class \
+  com/aicampions/poker/context/adapter/snowflake/SnowflakeServiceCredentials.class \
+  com/aicampions/poker/context/adapter/snowflake/SnowflakeUserContextRepository.class \
   com/aicampions/poker/context/flink/ActiveContextState.class \
-  com/aicampions/poker/context/flink/JdbcContextEnrichmentFunction.class; do
+  com/aicampions/poker/context/flink/JdbcContextEnrichmentFunction.class \
+  net/snowflake/client/api/driver/SnowflakeDriver.class; do
   verify_jar_class /opt/flink/usrlib/context-enrichment.jar "${class_path}"
 done
 
