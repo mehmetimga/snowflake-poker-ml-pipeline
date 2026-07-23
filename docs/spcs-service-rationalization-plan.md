@@ -90,7 +90,8 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
   isolated operator UID namespaces.
 - [x] The clean F4 replay produced six deterministic context rows and fifteen
   parity-checked pair snapshots with an empty DLQ.
-- [ ] SPCS PostgreSQL network rule, EAI, Secret, and rendered spec exist.
+- [x] Canonical context storage moved inside Snowflake; the SPCS service-token
+  adapter, history table seeder, and Secret-free rendered spec exist.
 - [ ] Canonical SPCS service cutover is complete.
 
 ## 3. Current baseline and target decision
@@ -135,20 +136,20 @@ persistent applications.
                          seed + run manifest
                           /                 \
                          v                   v
-            PostgreSQL user context   PostgreSQL hand history
-               no CDC publication              |
-                         |              outbox game filter
-                         |                      |
-                         |                  Debezium
-                         |                      |
-                         |       poker.synthetic.cdc-hand-outbox.v1
-                         |                      |
-                         |              POKER_ADAPTER (Go)
-                         |                      |
-                         |       poker.synthetic.hands.raw.v1
-                         |                      |
-                         +---- sync lookup -----+
-                                                |
+               Snowflake context     PostgreSQL hand history
+                history table                 |
+                         |             outbox game filter
+                         |                     |
+                         |                 Debezium
+                         |                     |
+                         |      poker.synthetic.cdc-hand-outbox.v1
+                         |                     |
+                         |             POKER_ADAPTER (Go)
+                         |                     |
+                         |      poker.synthetic.hands.raw.v1
+                         |                     |
+                         +--- internal lookup -+
+                                               |
                                   POKER_FLINK (Java/Flink)
                               active-player context TTL state
                                                 |
@@ -172,7 +173,7 @@ persistent applications.
 `POKERKIT_SIMULATOR` runs locally or in a client-side test environment.
 `POKER_ADAPTER`, `POKER_FLINK`, and `POKER_RISK` are the real services running
 in SPCS. Only hand data crosses Kafka into the selected online path. User
-context is loaded lazily from an SPCS-reachable PostgreSQL context projection.
+context is loaded lazily from the internal Snowflake history table.
 
 ## 5. Canonical synthetic topics
 
@@ -212,7 +213,8 @@ selected data plane. Replace `simulation_mode` terminology with
 PokerKit generates valid gameplay but does not natively know account, device,
 KYC, bankroll, acquisition, or network information. The
 `POKERKIT_SIMULATOR` wrapper creates deterministic context rows for the same
-player IDs and stores them in `public.poker_user_context`.
+player IDs and stores them in
+`POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY`.
 
 No full-table bootstrap is performed. `POKER_FLINK` begins with an empty
 context cache.
@@ -223,7 +225,8 @@ When the first hand containing players A, B, C, D, E, and F arrives:
 
 1. expand the hand to player-keyed rows;
 2. check Flink keyed state for each player;
-3. perform a synchronous PostgreSQL lookup only for missing or stale players;
+3. perform a synchronous internal Snowflake lookup only for missing or stale
+   players;
 4. store the returned narrow context in TTL-managed state; and
 5. enrich the hand and continue downstream.
 
@@ -244,7 +247,7 @@ The first implementation uses two independent clocks:
 - residency TTL: 36 hours after the most recent state read or write; and
 - refresh interval: 60 minutes after the row was loaded.
 
-An active player therefore remains in state while playing, but the PostgreSQL
+An active player therefore remains in state while playing, but the Snowflake
 row is periodically refreshed. Flink uses `NeverReturnExpired`; physical
 RocksDB cleanup may occur later.
 
@@ -254,28 +257,32 @@ The JDBC lookup is synchronous in the first POC because only about 10,000
 unique players are expected per day. It must use a persistent connection,
 indexed point lookup, strict query timeout, bounded retry, and lookup metrics.
 
-A missing row, timeout, or database error produces an explicit DLQ record. The
-pipeline must not fabricate context or score the incomplete player-hand row.
-If synchronous lookup latency creates Kafka backpressure, replace the lookup
-implementation with Flink Async I/O without changing the hand or enriched
-event contracts.
+A missing row produces a minimized data-quality DLQ record. Transient
+infrastructure failures fail the operator so Flink restarts from its
+checkpoint without advancing the Kafka offset. The pipeline must not fabricate
+context or score the incomplete player-hand row. If synchronous lookup latency
+creates Kafka backpressure, replace the lookup implementation with Flink Async
+I/O without changing the hand or enriched event contracts.
 
 ### 6.4 Generated and production sources
 
 For the POC:
 
-- hands: PokerKit -> PostgreSQL -> Debezium -> Kafka;
-- user context: PokerKit wrapper -> PostgreSQL -> lazy Flink JDBC lookup.
+- hands: PokerKit -> Kafka for the first live smoke; the CDC simulator remains
+  available for end-to-end tests;
+- user context: PokerKit wrapper -> Snowflake history table -> lazy internal
+  Flink lookup.
 
 For future production:
 
 - hands: poker server -> PostgreSQL -> Debezium -> Kafka;
-- user context: account/device systems -> narrow PostgreSQL projection or
-  context service -> lazy Flink lookup.
+- user context: account/device systems -> governed Snowflake history table ->
+  lazy Flink lookup.
 
-The context database must be reachable from SPCS through a dedicated network
-rule/EAI and read-only Secret. A laptop-only PostgreSQL endpoint is not a valid
-SPCS production dependency.
+Only the hand-history CDC stream crosses from the poker environment into the
+ML platform. Snowflake context access stays on Snowflake's internal network
+and uses the SPCS service identity, so it needs neither an external network
+rule/EAI nor a database password Secret.
 
 ## 7. Target service responsibilities
 

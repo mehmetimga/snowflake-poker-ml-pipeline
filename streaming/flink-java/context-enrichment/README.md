@@ -1,22 +1,25 @@
 # Active-player user-context enrichment
 
 This Flink 1.19.1 / Java 17 job consumes canonical hands, expands each hand to
-one record per player, and lazily looks up only active players in PostgreSQL.
-The result is retained in Flink keyed state with a sliding inactivity TTL.
+one record per player, and lazily looks up only active players in an internal
+Snowflake history table. The result is retained in Flink keyed state with a
+sliding inactivity TTL.
 
 The previous Kafka context-stream join remains available temporarily through
 the separate `LegacyKafkaTemporalContextJob` entrypoint. The canonical
-`ActiveContextEnrichmentJob` requires `FLINK_CONTEXT_SOURCE=jdbc`.
+`ActiveContextEnrichmentJob` requires `FLINK_CONTEXT_SOURCE=snowflake`. The
+PostgreSQL/JDBC adapter remains available for local compatibility tests, but
+it is not part of the canonical SPCS deployment.
 
 For a beginner-oriented explanation of streams, keyed state, event time,
 watermarks, timers, both Java jobs, and the downstream model vector, read
 [How the Flink real-time feature pipeline works](../../../docs/flink-realtime-feature-pipeline.md).
 
-## JDBC lookup policy
+## Point-in-time lookup policy
 
 - No full user table or daily batch is loaded.
 - The first hand for A–F produces lookups only for A–F.
-- State and PostgreSQL lookups are keyed by
+- State and Snowflake lookups are keyed by
   `(tenant_id, product_id, player_id)`; reads and writes extend the 36-hour
   state TTL.
 - Cache entries are typed Flink POJOs in
@@ -30,10 +33,9 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
   replace a newer row already cached for subsequent hands.
 - Every cache-miss lookup validates its subtask-local connection. A closed or
   invalid connection is replaced before the prepared query executes.
-- PostgreSQL connect, socket, prepared-query, and validation timeouts are
-  bounded. A transient SQLSTATE receives exactly one retry with at most
-  100 ms jitter by default; authentication, schema, and data errors never
-  retry.
+- Snowflake connect, prepared-query, and validation timeouts are bounded. A
+  transient SQLSTATE receives exactly one retry with at most 100 ms jitter by
+  default; authentication, schema, and data errors never retry.
 - If the retry fails, the operator throws a sanitized exception. The
   canonical job uses a failure-rate restart policy instead of advancing Kafka
   work or converting an infrastructure outage into a data-quality DLQ.
@@ -47,7 +49,7 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
 
 The canonical output contract is `poker.hand-player-context.enriched` schema
 v2 on `poker.hand-player-context.v2`, keyed by player ID. Its
-`context_resolution` object identifies PostgreSQL point-in-time resolution,
+`context_resolution` object identifies Snowflake point-in-time resolution,
 the policy version, context record ID, context version, and effective time.
 Cache hit/miss and lookup latency are runtime metrics rather than event
 fields, so replaying the same source data produces the same event bytes.
@@ -62,13 +64,14 @@ The canonical path is separated by responsibility:
 | `config` | Argument/environment parsing and validation |
 | `domain` | Flink-independent context identity, projection, and typed cache records |
 | `port` | Point-in-time context repository interface |
-| `adapter.jdbc` | PostgreSQL, credentials, and sanitized failure mapping |
+| `adapter.jdbc` | Shared prepared-query, reconnect, retry, and sanitized failure mapping |
+| `adapter.snowflake` | SPCS service-token connection and Snowflake repository |
 | `contract` | Enriched-event JSON contract |
 | `flink` | Typed state declaration, active-player keyed operator, and metrics |
 
 The root package contains shared Kafka/topology plumbing and the temporary
 legacy temporal-join implementation. Domain and port code does not depend on
-Flink or PostgreSQL.
+Flink or a specific database.
 
 ## Build and test
 
@@ -94,7 +97,7 @@ set +a
 $FLINK_HOME/bin/flink run \
   -c com.aicampions.poker.context.app.ActiveContextEnrichmentJob \
   streaming/flink-java/context-enrichment/target/context-enrichment-0.1.0.jar \
-  --context-source jdbc \
+  --context-source snowflake \
   --group-id flink-active-context-v2 \
   --parallelism 2
 ```
@@ -107,11 +110,11 @@ Important options:
 
 | Option | Default |
 |---|---:|
-| `--context-source` | required `jdbc` for the canonical entrypoint |
-| `--context-jdbc-table` | `public.poker_user_context` |
-| `--context-jdbc-query-timeout-seconds` | `1` |
-| `--context-jdbc-connect-timeout-seconds` | `3` |
-| `--context-jdbc-validation-timeout-seconds` | `1` |
+| `--context-source` | required `snowflake` for the canonical entrypoint |
+| `--context-snowflake-table` | `POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY` |
+| `--context-jdbc-query-timeout-seconds` | `20` |
+| `--context-jdbc-connect-timeout-seconds` | `15` |
+| `--context-jdbc-validation-timeout-seconds` | `5` |
 | `--context-jdbc-retry-max-jitter-ms` | `100`, maximum `5000` |
 | `--context-cache-ttl-hours` | `36` |
 | `--context-refresh-minutes` | `60` |
@@ -126,15 +129,17 @@ Important options:
 | `--restart-delay-ms` | `10000` |
 | `--parallelism` | `1` |
 
-JDBC mode requires `USER_CONTEXT_JDBC_URL` in job configuration. The
-TaskManager also requires `USER_CONTEXT_DB_USER` and
-`USER_CONTEXT_DB_PASSWORD` from its runtime Secret. Username/password command
-line arguments are rejected, and neither credential is stored in the
-serializable job configuration or process-function fields.
+SPCS supplies `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_HOST`, and a rotating OAuth
+service token at `/snowflake/session/token`. The TaskManager reads the token
+only when opening a connection; it is not stored in the serializable job
+configuration or process-function fields. The deployment sets
+`SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, and
+`USER_CONTEXT_SNOWFLAKE_TABLE`. No Snowflake username/password Secret is
+mounted.
 
 ## Connections and metrics
 
-Each active-context operator subtask owns one PostgreSQL connection; the pair
+Each active-context operator subtask owns one Snowflake connection; the pair
 feature job owns none. Therefore:
 
 ```text
@@ -145,15 +150,13 @@ steady JDBC connections =
 A reconnect closes the old resource before opening its replacement, so it
 does not intentionally double the steady connection count. During a
 blue/green or shadow comparison, include every concurrently running context
-job in the budget. Reserve separate PostgreSQL headroom for administration,
-migrations, monitoring, and brief TCP cleanup; do not size the database
-exactly to the Flink formula.
+job in the budget. Size the Snowflake warehouse and Flink parallelism from
+observed cache-miss rate, query latency, Kafka lag, and backpressure.
 
 For example, parallelism 4 uses four steady connections. Running old and new
-context jobs together uses eight. A practical POC allocation is those eight
-connections plus at least five non-Flink connections of operational
-headroom. Production must use the actual database connection limit and other
-application workloads.
+context jobs together uses eight. The expected steady query rate is driven by
+first-seen and refresh misses, not by every hand, because active players remain
+in keyed state.
 
 The TaskManager exports cache hit/miss/refresh, lookup found/not-found,
 retry, reconnect, final failure category, and latest lookup-latency metrics.
@@ -172,7 +175,7 @@ $FLINK_HOME/bin/flink run \
 
 It retains the schema-v1 topic and has a separate consumer group, job name,
 and operator UID namespace. Do not restore its savepoint into the canonical
-JDBC topology.
+point-in-time lookup topology.
 
 The tenant/product migration is
 `infra/simulation/postgres/init/004_scope_user_context.sql`. It is forward-only
@@ -199,7 +202,7 @@ and test restore from a retained fixture.
 
 The F3 JSON state is a derived cache. F4 deliberately does not reuse its state
 name; after restoring source/operator state, the typed cache is populated
-lazily from PostgreSQL as active hands arrive. Do not use
+lazily from Snowflake as active hands arrive. Do not use
 `--allowNonRestoredState` for a normal canonical restore. A legacy Kafka-join
 savepoint must fail because its UID namespace is intentionally incompatible.
 

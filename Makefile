@@ -292,7 +292,7 @@ help:
 	@echo "  snow-render  Render SPCS service specs"
 	@echo "  snow-validate-catalog Compare rendered specs with the service catalog"
 	@echo "  snow-inspect-flink Read-only compare live POKER_FLINK with the catalog"
-	@echo "  phase-f5-check Test and render the declarative Flink JDBC deployment"
+	@echo "  phase-f5-check Test and render the internal Snowflake-context deployment"
 	@echo "  snow-build   Build the linux/amd64 SPCS application image"
 	@echo "  snow-push    Tag and push the image to Snowflake (login first)"
 	@echo "  snow-deploy-admin Deploy Streamlit admin to SPCS"

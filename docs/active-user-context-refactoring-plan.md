@@ -1,6 +1,7 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: F1–F4 complete locally; F5 local/rendered gates complete, live apply pending
+Status: F1–F4 complete locally; F5 internal-Snowflake implementation complete,
+live apply in progress
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -14,9 +15,9 @@ The permanent online service boundaries remain:
 2. `POKER_FLINK` — active-player context enrichment and pair features; and
 3. `POKER_RISK` — model inference, rules, and policy.
 
-`POKERKIT_SIMULATOR` is the only simulator. PostgreSQL is the source of the
-narrow user-context projection. Kafka carries hands and pipeline outputs, but
-does not carry the canonical user-context table.
+`POKERKIT_SIMULATOR` is the only simulator. Snowflake is the authoritative
+narrow user-context projection used by the ML pipeline. Kafka carries hands
+and pipeline outputs, but does not carry the canonical user-context table.
 
 This document refines R2 and R3 of
 [the SPCS service rationalization plan](spcs-service-rationalization-plan.md).
@@ -28,14 +29,14 @@ service, topic, savepoint, table, or artifact.
 | Decision | Direction |
 |---|---|
 | Hand ingestion | PostgreSQL hand history -> Debezium -> Kafka -> `POKER_ADAPTER` |
-| Context ingestion | Lazy point-in-time PostgreSQL lookup inside `POKER_FLINK` |
-| Initial lookup method | Synchronous JDBC with strict limits and Flink restart semantics |
+| Context ingestion | Lazy point-in-time internal Snowflake lookup inside `POKER_FLINK` |
+| Initial lookup method | Synchronous Snowflake JDBC with strict limits and Flink restart semantics |
 | Active-player cache | Typed Flink keyed `ValueState`, 36-hour inactivity TTL |
 | Context refresh | 60 minutes initially; tune using measured staleness and load |
 | Full-table bootstrap | Never on the online path |
 | Context Kafka topic | Legacy rollback path only; remove after cutover |
 | Redis | Not justified at the expected 10,000 daily active users |
-| New context microservice | Not justified; PostgreSQL remains the source |
+| New context microservice | Not justified; Snowflake is directly available inside SPCS |
 | Async I/O | Implement only when load and backpressure gates require it |
 | Permanent Flink service count | One `POKER_FLINK` SPCS service |
 | Production authorization | Not the ML cache's responsibility |
@@ -111,8 +112,8 @@ Confluent Kafka: cdc-hand-outbox.v1
                                           |
                               hands.raw.v1 |
                                           v
-Context PostgreSQL <--- lazy JDBC --- POKER_FLINK (Java/Flink)
-narrow versioned projection             |
+Snowflake context <--- internal SQL --- POKER_FLINK (Java/Flink)
+versioned history table                 |
                                         +-- validate hand
                                         +-- expand six players
                                         +-- key by tenant/product/player
@@ -392,28 +393,22 @@ The async change should replace only the repository execution adapter:
 - retry classification identical to the sync path; and
 - checkpoint/restart tests.
 
-Do not add Redis automatically after async I/O. Consider Redis only if
-PostgreSQL remains the proven bottleneck after query/index, connection,
-parallelism, and async improvements, and if the team accepts cache
+Do not add Redis automatically after async I/O. Consider it only if internal
+Snowflake lookup remains the proven bottleneck after query, warehouse,
+connection, parallelism, and async improvements, and if the team accepts cache
 invalidation and another production dependency.
 
 ## 10. SPCS networking, secrets, and deployment
 
-`POKER_FLINK` needs outbound access to both Kafka and the context database.
-Use least-privilege integrations:
+`POKER_FLINK` needs outbound access only to Kafka. Use the dedicated
+least-privilege integration:
 
-- `POKER_FLINK_KAFKA_EAI`; and
-- `POKER_FLINK_CONTEXT_DB_EAI`.
+- `POKER_FLINK_KAFKA_EAI`.
 
-The PostgreSQL network rule should name only the required hostname and port.
-Use private connectivity when available. Grant a read-only database identity
-access only to the narrow context projection.
-
-Create a Snowflake Secret such as `CONTEXT_DB_CREDENTIALS`. Mount it only in
-the TaskManager container as the username/password environment variables read
-during operator `open()`. The submitter may receive the non-secret JDBC URL,
-table name, timeouts, and refresh settings, but not the password as a job
-argument or serialized config field.
+Context traffic remains inside Snowflake. SPCS supplies a rotating service
+OAuth token and account host to the TaskManager; no context network rule, EAI,
+username, password, or Secret is deployed. Grant the service owner only the
+Snowflake privileges needed to read the narrow context projection.
 
 Refactor `deploy_service()` to:
 
@@ -436,7 +431,9 @@ always send the complete intended set.
 Status: complete.
 
 - [x] Hands remain on Kafka.
-- [x] User context moves to hand-driven lazy PostgreSQL lookup.
+- [x] User context uses a hand-driven lazy point-in-time repository lookup.
+- [x] Canonical SPCS storage is the internal Snowflake history table; the
+  PostgreSQL adapter remains only for local compatibility evidence.
 - [x] Redis and a new context service are excluded.
 - [x] Local six-player JDBC proof passes.
 - [x] Existing code, SPCS spec, and deploy helper reviewed.
@@ -636,30 +633,32 @@ state name and an explicitly reviewed migration or derived-cache rebuild.
 Prove it with a saved fixture before deployment. Do not silently point an
 existing state name at an incompatible serializer.
 
-### F5 — SPCS network, secrets, and declarative deployment
+### F5 — Internal Snowflake context and declarative deployment
 
-Status: local implementation and rendered-spec gates complete on 2026-07-23;
-live resource creation, service update, and read-only post-deploy inspection
-remain an explicit release operation.
+Status: implementation and local gates complete on 2026-07-23; live table
+seed, immutable image release, service update, and post-deploy inspection are
+the remaining release operations.
 
-1. [x] Add exact PostgreSQL network-rule, EAI, and password-Secret
-   provisioning.
-2. [x] Mount the context Secret only in the TaskManager spec.
-3. [x] Configure `FLINK_CONTEXT_SOURCE=jdbc` as canonical.
+1. [x] Replace the external PostgreSQL runtime lookup with the internal
+   Snowflake history table.
+2. [x] Use the SPCS rotating service OAuth token; remove the context EAI and
+   password Secret from the canonical service.
+3. [x] Configure `FLINK_CONTEXT_SOURCE=snowflake` as canonical.
 4. [x] Remove the context topic from the canonical spec.
 5. [x] Refactor EAI deployment to accept and reconcile a full ordered list.
 6. [x] Add the canonical service catalog and rendered-spec secret tests.
 7. [x] Use the canonical `POKER_FLINK` service and `poker.synthetic.*` v2
    topic names; retain the explicitly isolated `_SIM` rollback services until
    F7 rather than renaming or deleting live services during this phase.
+8. [x] Add deterministic Snowflake table/view seeding and matching PokerKit
+   hand fixtures.
 
 The declarative source of truth is
 `infra/snowflake/services.yaml`. `POKER_FLINK` declares exactly
-`POKER_FLINK_KAFKA_EAI` and `POKER_FLINK_CONTEXT_DB_EAI`. Its rendered spec
-references `CONTEXT_DB_CREDENTIALS` only from `taskmanager` and
-`KAFKA_CREDENTIALS` only from `submitter`. The JDBC URL is non-secret,
-validated, and cannot contain user/password fields or sensitive query
-parameters.
+`POKER_FLINK_KAFKA_EAI`. Its rendered spec references
+`KAFKA_CREDENTIALS` only from `submitter`; it contains no context Secret.
+TaskManagers use the Snowflake-provided host and service token to query
+`POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY`.
 
 `deploy_service` now replaces the complete EAI list, updates the spec, reads
 the effective configuration through `DESCRIBE SERVICE`, and fails on EAI or
@@ -668,26 +667,21 @@ without changing the service.
 
 Local evidence:
 
-- 37 focused deployment/packaging tests passed;
-- all seven service specs rendered with no unresolved placeholders;
-- all seven catalog entries matched their rendered Secret references; and
-- the dry-run plan resolved one exact PostgreSQL endpoint, one network rule,
-  one password Secret, one context EAI, and the TaskManager mount boundary.
-
-No Snowflake object or running SPCS service was changed during the local F5
-implementation. The live portion is intentionally pending a real public
-PostgreSQL endpoint/credential, immutable Flink image release, and explicit
-deployment approval.
+- focused deployment, packaging, and deterministic seed tests pass;
+- all service specs render with no unresolved placeholders;
+- all catalog entries match their rendered Secret references; and
+- the Flink spec has a hands-only Kafka boundary, one dedicated Kafka EAI, and
+  no external context credential or endpoint.
 
 Exit gate: a dry run shows exact resources; the rendered spec contains no
 credential value; a read-only service inspection matches the catalog.
 
 ### F6 — Shadow, load, and chaos validation
 
-Status: blocked on F5.
+Status: pending live F5 verification.
 
-Run the canonical JDBC job with a new consumer group and output topic. Keep
-the legacy path only as a temporary comparison/rollback job.
+Run the canonical Snowflake-context job with a new consumer group and output
+topic. Keep the legacy path only as a temporary comparison/rollback job.
 
 Test datasets:
 

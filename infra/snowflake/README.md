@@ -121,32 +121,30 @@ make c2-adapter-configure-kafka
 For a bounded demo, shared Kafka credentials require the explicit
 `C2_ADAPTER_KAFKA_CONFIG_FLAGS=--allow-shared-credentials` override.
 
-## 4. Configure the Flink PostgreSQL context lookup
+## 4. Seed the internal Snowflake user-context projection
 
 The canonical `POKER_FLINK` service consumes only hand events from Kafka. On a
-cache miss, its TaskManager lazily reads the active player's context from
-PostgreSQL. Set a network-reachable PostgreSQL DNS host with an explicit port;
-do not put a username or password in the JDBC URL:
+cache miss, its TaskManager lazily reads the active player's point-in-time
+context from `POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY`. No context topic,
+external PostgreSQL connection, Redis service, context EAI, or database
+password Secret is required.
+
+Create the history table, current view, and a deterministic PokerKit-backed
+test dataset:
 
 ```bash
-export USER_CONTEXT_JDBC_URL='jdbc:postgresql://context-db.example.com:5432/poker?sslmode=require'
-export USER_CONTEXT_DB_USER='...'
-export USER_CONTEXT_DB_PASSWORD='...'
-
-# Read-only local plan: prints object names and the exact host:port, never the
-# credential values.
-make snow-plan-flink-context-db
-
-# Explicit Snowflake mutation: creates/replaces the exact network rule,
-# password Secret, context EAI, and grants.
-make snow-configure-flink-context-db
+make snow-seed-user-context
 ```
 
-The password Secret is mounted as `USER_CONTEXT_DB_USER` and
-`USER_CONTEXT_DB_PASSWORD` only in the Flink TaskManager. The JobManager and
-submitter never receive it. Snowflake requires the service owner to have
-`READ` on password Secrets; `ALLOWED_AUTHENTICATION_SECRETS` is an additional
-requirement for OAuth Secrets, not this password Secret.
+The generated hand fixture is written to
+`data/runs/spcs-snowflake-context-v1/hands.jsonl`. Every player referenced by
+that fixture has a matching versioned context row effective before the hand.
+
+Inside SPCS, Snowflake automatically mounts a rotating service OAuth token at
+`/snowflake/session/token` and supplies the account host. The Flink
+TaskManager rereads that token whenever it creates a JDBC connection and
+executes SQL as the `POKER_FLINK` service owner. This is internal Snowflake
+traffic and does not require an External Access Integration.
 
 Run the complete local/rendered deployment gate before a live service update:
 
@@ -155,10 +153,10 @@ make phase-f5-check
 ```
 
 [`services.yaml`](services.yaml) is the deployment source of truth. For
-`POKER_FLINK` it declares both `POKER_FLINK_KAFKA_EAI` and
-`POKER_FLINK_CONTEXT_DB_EAI`. Deployment replaces the full EAI set, updates
-the service spec, reads it back with `DESCRIBE SERVICE`, and fails if the
-effective EAI or Secret references differ from the catalog.
+`POKER_FLINK` it declares only `POKER_FLINK_KAFKA_EAI`; the submitter is the
+only container that receives the Kafka Secret. Deployment replaces the full
+EAI set, updates the service spec, reads it back with `DESCRIBE SERVICE`, and
+fails if the effective EAI or Secret references differ from the catalog.
 
 ## 5. Render and deploy
 
@@ -170,17 +168,17 @@ make snow-deploy-realtime
 make snow-status
 ```
 
-For the immutable Flink release, use `make c1-deploy-flink` after its image has
-been built, pushed, and rendered with the real `USER_CONTEXT_JDBC_URL`. Then
-perform a read-only catalog comparison:
+For the immutable Flink release, use `make c1-deploy-flink` after its exact
+Git-SHA image has been built, pushed, and rendered. Then perform a read-only
+catalog comparison:
 
 ```bash
 make snow-inspect-flink
 ```
 
-Changing the password Secret does not hot-update environment variables in an
-already running container. Redeploy/restart the service under the normal
-savepoint and rollback procedure after a credential rotation.
+Snowflake rotates the mounted service token. The connection factory rereads
+the token file on reconnect, so no user-managed Snowflake credential rotation
+is needed in the container.
 
 The realtime service mounts `MODEL_ARTIFACTS` at `/opt/models`, consumes
 `hands.raw`, computes features/rules/scores, and persists history and alerts.
