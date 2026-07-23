@@ -15,7 +15,7 @@ st.title("Alerts")
 wh = da.warehouse()
 col1, col2, col3 = st.columns(3)
 risk = col1.selectbox("Risk level", ["", "HIGH", "MEDIUM", "LOW"], index=0) or None
-status = col2.selectbox("Status", ["", "pending", "confirmed", "dismissed"], index=0) or None
+status = col2.selectbox("Status", ["", "pending"], index=0) or None
 limit = col3.slider("Limit", 50, 1000, 200, 50)
 
 df = da.alerts(wh, status=status, risk=risk, limit=limit)

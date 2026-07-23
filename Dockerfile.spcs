@@ -1,8 +1,14 @@
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-pipeline" \
+      org.opencontainers.image.description="Poker ML administration and batch runtime" \
+      org.opencontainers.image.revision="${BUILD_VERSION}"
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    ADMIN_BUILD_VERSION=${BUILD_VERSION}
 
 WORKDIR /app
 

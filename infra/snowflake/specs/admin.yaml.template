@@ -12,6 +12,7 @@ spec:
     - --server.headless=true
     env:
       WAREHOUSE_BACKEND: snowflake
+      ADMIN_DATA_MODE: canonical
       SNOWFLAKE_WAREHOUSE: DEMO_WH
       SNOWFLAKE_DATABASE: POKER_ML_DEMO
       SNOWFLAKE_SCHEMA: PUBLIC

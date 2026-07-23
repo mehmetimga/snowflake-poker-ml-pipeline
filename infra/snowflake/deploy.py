@@ -28,11 +28,13 @@ DEFAULT_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev"
 DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
 DEFAULT_FLINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:dev"
 DEFAULT_ADAPTER_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-adapter:dev"
+DEFAULT_SINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-sink:dev"
 DEFAULT_TRITON_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/tritonserver:25.12-py3"
 DEFAULT_MODEL_RUN_ID = "pair_7a1c58c1046b"
 DEFAULT_RISK_SCORER_GROUP_ID = "poker-go-risk-scorer-v1"
 DEFAULT_ADAPTER_GROUP_ID = "poker-go-hand-adapter-sim-v1"
 DEFAULT_ADAPTER_DATASET_ID = "sim-cdc-v1"
+DEFAULT_SINK_GROUP_ID = "poker-snowflake-sink-synthetic-v1"
 POOL = "POKER_ML_CPU_POOL"
 DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
@@ -70,6 +72,24 @@ def bootstrap() -> None:
     wh = _warehouse()
     try:
         for statement in _statements((SQL_DIR / "bootstrap.sql").read_text()):
+            wh.execute(statement)
+            first_line = next(
+                (
+                    line
+                    for line in statement.splitlines()
+                    if not line.lstrip().startswith("--")
+                ),
+                statement,
+            )
+            print(f"[snowflake] {first_line[:100]}")
+    finally:
+        wh.close()
+
+
+def bootstrap_sink() -> None:
+    wh = _warehouse()
+    try:
+        for statement in _statements((SQL_DIR / "sink.sql").read_text()):
             wh.execute(statement)
             first_line = next(
                 (
@@ -456,17 +476,21 @@ def render_specs(
     risk_image_path: str = DEFAULT_RISK_IMAGE_PATH,
     flink_image_path: str = DEFAULT_FLINK_IMAGE_PATH,
     adapter_image_path: str = DEFAULT_ADAPTER_IMAGE_PATH,
+    sink_image_path: str = DEFAULT_SINK_IMAGE_PATH,
     triton_image_path: str = DEFAULT_TRITON_IMAGE_PATH,
     build_version: str = "dev",
     risk_build_version: str | None = None,
     flink_build_version: str | None = None,
     adapter_build_version: str | None = None,
+    sink_build_version: str | None = None,
     model_run_id: str = DEFAULT_MODEL_RUN_ID,
     allowed_tenants: str = "demo",
     risk_scorer_group_id: str = DEFAULT_RISK_SCORER_GROUP_ID,
     adapter_group_id: str = DEFAULT_ADAPTER_GROUP_ID,
     adapter_dataset_id: str = DEFAULT_ADAPTER_DATASET_ID,
     adapter_allowed_tenants: str = "demo",
+    sink_allowed_tenants: str = "demo",
+    sink_group_id: str = DEFAULT_SINK_GROUP_ID,
     flink_context_savepoint_path: str = "",
     flink_pair_savepoint_path: str = "",
 ) -> None:
@@ -475,6 +499,7 @@ def render_specs(
         "risk": risk_image_path,
         "flink": flink_image_path,
         "adapter": adapter_image_path,
+        "sink": sink_image_path,
         "triton": triton_image_path,
     }
     for label, candidate in image_paths.items():
@@ -486,15 +511,18 @@ def render_specs(
     risk_build_version = risk_build_version or build_version
     flink_build_version = flink_build_version or build_version
     adapter_build_version = adapter_build_version or build_version
+    sink_build_version = sink_build_version or build_version
     for label, candidate in {
         "build version": build_version,
         "risk build version": risk_build_version,
         "Flink build version": flink_build_version,
         "adapter build version": adapter_build_version,
+        "sink build version": sink_build_version,
         "model run ID": model_run_id,
         "risk scorer group ID": risk_scorer_group_id,
         "adapter group ID": adapter_group_id,
         "adapter dataset ID": adapter_dataset_id,
+        "sink group ID": sink_group_id,
     }.items():
         if not _SAFE_ID.fullmatch(candidate):
             raise SystemExit(f"Invalid {label}: {candidate!r}")
@@ -510,6 +538,15 @@ def render_specs(
         raise SystemExit("CDC_ALLOWED_TENANTS must be a comma-separated ID allowlist")
     if not adapter_dataset_id.startswith("sim-"):
         raise SystemExit("simulation adapter dataset ID must start with sim-")
+    sink_tenants = [
+        value.strip() for value in sink_allowed_tenants.split(",") if value.strip()
+    ]
+    if not sink_tenants or any(
+        not _SAFE_ID.fullmatch(value) for value in sink_tenants
+    ):
+        raise SystemExit("SINK_ALLOWED_TENANTS must be a comma-separated ID allowlist")
+    if "synthetic" not in sink_group_id.lower():
+        raise SystemExit("POKER_SINK requires an isolated synthetic consumer group")
     for label, candidate in {
         "context savepoint URI": flink_context_savepoint_path,
         "pair savepoint URI": flink_pair_savepoint_path,
@@ -524,16 +561,20 @@ def render_specs(
         "__RISK_IMAGE_PATH__": risk_image_path,
         "__FLINK_IMAGE_PATH__": flink_image_path,
         "__ADAPTER_IMAGE_PATH__": adapter_image_path,
+        "__SINK_IMAGE_PATH__": sink_image_path,
         "__TRITON_IMAGE_PATH__": triton_image_path,
         "__RISK_BUILD_VERSION__": risk_build_version,
         "__FLINK_BUILD_VERSION__": flink_build_version,
         "__ADAPTER_BUILD_VERSION__": adapter_build_version,
+        "__SINK_BUILD_VERSION__": sink_build_version,
         "__MODEL_RUN_ID__": model_run_id,
         "__RISK_ALLOWED_TENANTS__": ",".join(tenants),
         "__RISK_SCORER_GROUP_ID__": risk_scorer_group_id,
         "__ADAPTER_GROUP_ID__": adapter_group_id,
         "__ADAPTER_DATASET_ID__": adapter_dataset_id,
         "__ADAPTER_ALLOWED_TENANTS__": ",".join(adapter_tenants),
+        "__SINK_ALLOWED_TENANTS__": ",".join(sink_tenants),
+        "__SINK_GROUP_ID__": sink_group_id,
         "__FLINK_CONTEXT_SAVEPOINT_PATH__": flink_context_savepoint_path,
         "__FLINK_PAIR_SAVEPOINT_PATH__": flink_pair_savepoint_path,
     }
@@ -826,6 +867,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("bootstrap")
+    sub.add_parser("bootstrap-sink")
     sub.add_parser("configure-kafka")
     adapter_kafka = sub.add_parser("configure-adapter-sim-kafka")
     adapter_kafka.add_argument("--allow-shared-credentials", action="store_true")
@@ -851,6 +893,10 @@ def main() -> None:
         default=os.environ.get("SPCS_ADAPTER_IMAGE_PATH", DEFAULT_ADAPTER_IMAGE_PATH),
     )
     render.add_argument(
+        "--sink-image-path",
+        default=os.environ.get("SPCS_SINK_IMAGE_PATH", DEFAULT_SINK_IMAGE_PATH),
+    )
+    render.add_argument(
         "--triton-image-path",
         default=os.environ.get("SPCS_TRITON_IMAGE_PATH", DEFAULT_TRITON_IMAGE_PATH),
     )
@@ -866,6 +912,10 @@ def main() -> None:
     render.add_argument(
         "--adapter-build-version",
         default=os.environ.get("SPCS_ADAPTER_BUILD_VERSION"),
+    )
+    render.add_argument(
+        "--sink-build-version",
+        default=os.environ.get("SPCS_SINK_BUILD_VERSION"),
     )
     render.add_argument(
         "--model-run-id",
@@ -893,6 +943,14 @@ def main() -> None:
         default=os.environ.get("SPCS_ADAPTER_ALLOWED_TENANTS", "demo"),
     )
     render.add_argument(
+        "--sink-allowed-tenants",
+        default=os.environ.get("SPCS_SINK_ALLOWED_TENANTS", "demo"),
+    )
+    render.add_argument(
+        "--sink-group-id",
+        default=os.environ.get("SPCS_SINK_GROUP_ID", DEFAULT_SINK_GROUP_ID),
+    )
+    render.add_argument(
         "--flink-context-savepoint-path",
         default=os.environ.get("SPCS_FLINK_CONTEXT_SAVEPOINT_PATH", ""),
     )
@@ -913,6 +971,7 @@ def main() -> None:
     sub.add_parser("resume-admin")
     sub.add_parser("deploy-realtime")
     sub.add_parser("deploy-risk")
+    sub.add_parser("deploy-sink")
     sub.add_parser("deploy-flink")
     sub.add_parser("deploy-adapter-sim")
     sub.add_parser("deploy-flink-sim")
@@ -928,6 +987,8 @@ def main() -> None:
 
     if args.command == "bootstrap":
         bootstrap()
+    elif args.command == "bootstrap-sink":
+        bootstrap_sink()
     elif args.command == "configure-kafka":
         configure_kafka()
     elif args.command == "configure-adapter-sim-kafka":
@@ -946,17 +1007,21 @@ def main() -> None:
             risk_image_path=args.risk_image_path,
             flink_image_path=args.flink_image_path,
             adapter_image_path=args.adapter_image_path,
+            sink_image_path=args.sink_image_path,
             triton_image_path=args.triton_image_path,
             build_version=args.build_version,
             risk_build_version=args.risk_build_version,
             flink_build_version=args.flink_build_version,
             adapter_build_version=args.adapter_build_version,
+            sink_build_version=args.sink_build_version,
             model_run_id=args.model_run_id,
             allowed_tenants=args.allowed_tenants,
             risk_scorer_group_id=args.risk_scorer_group_id,
             adapter_group_id=args.adapter_group_id,
             adapter_dataset_id=args.adapter_dataset_id,
             adapter_allowed_tenants=args.adapter_allowed_tenants,
+            sink_allowed_tenants=args.sink_allowed_tenants,
+            sink_group_id=args.sink_group_id,
             flink_context_savepoint_path=args.flink_context_savepoint_path,
             flink_pair_savepoint_path=args.flink_pair_savepoint_path,
         )
@@ -980,6 +1045,12 @@ def main() -> None:
         deploy_service(
             "POKER_RISK",
             "risk.yaml",
+            external_access_integrations=("POKER_KAFKA_EAI",),
+        )
+    elif args.command == "deploy-sink":
+        deploy_service(
+            "POKER_SINK",
+            "sink.yaml",
             external_access_integrations=("POKER_KAFKA_EAI",),
         )
     elif args.command == "deploy-flink":

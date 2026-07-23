@@ -30,6 +30,15 @@ services:
       risk:
         - POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
 
+  POKER_SINK:
+    spec: sink.yaml
+    compute_pool: POKER_ML_CPU_POOL
+    external_access_integrations:
+      - POKER_KAFKA_EAI
+    secret_references:
+      sink:
+        - POKER_ML_DEMO.SPCS.KAFKA_CREDENTIALS
+
   POKER_FLINK:
     spec: flink.yaml
     compute_pool: POKER_ML_CPU_POOL

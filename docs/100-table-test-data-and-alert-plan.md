@@ -1,6 +1,6 @@
 # 100-table test data, alert, and dataset plan
 
-Status: D1–D6 complete; D7 Confluent/SPCS slice passed, sink/admin slice next
+Status: D1–D6 complete; D7 Kafka/SPCS passed; R5 sink/admin implemented locally
 
 Last reviewed: 2026-07-23
 
@@ -59,7 +59,11 @@ Implementation evidence:
   and alert transport identities. The D7 report records those IDs, validates
   their causal links, and compares semantic features, rule evidence, model
   probabilities, threshold outcomes, and policy outcomes to the sealed D6
-  oracle. Snowflake event sinks and admin remain explicitly `not_run`.
+  oracle.
+- R5 now has a tested multi-topic Go sink, private SPCS-token Snowflake writer,
+  event-native tables, canonical admin view/reader, and exact D7 reconciliation
+  command. Image publication, Snowflake bootstrap, SPCS deployment, and live
+  sink/admin evidence remain explicitly `not_run`.
 
 ## 1. Outcome
 
@@ -795,10 +799,10 @@ hands, the deterministic 100-table scheduler, point-in-time context, scheduled
 positive and difficult-negative cases, group truth, benchmark assignments, and
 machine-readable leakage gates are implemented.
 
-The D6 pack, Java/Flink shared-core parity, real Go/Triton scoring, and the D7
-canonical Confluent/SPCS replay are now implemented and measured. The next
-slice is `POKER_SINK`: define event-native Snowflake tables, persist the
-bounded derived events idempotently by event ID/revision, commit Kafka offsets
-only after acknowledged writes, and move `POKER_ADMIN` to those lineage-rich
-tables. The same D7 manifest must then reconcile Kafka counts to Snowflake rows
-and visible admin alerts before the D7 exit gate can close.
+The D6 pack, Java/Flink shared-core parity, real Go/Triton scoring, D7
+canonical Confluent/SPCS replay, and the local R5 sink/admin implementation are
+complete. The next action is operational: commit and publish the immutable sink
+image, bootstrap the new Snowflake objects, deploy `POKER_SINK`, and run
+`make r5-sink-verify`. The same D7 manifest must reconcile Kafka counts to
+Snowflake rows, sink consumer commits, and visible admin alert IDs before the
+D7/R5 exit gate can close.

@@ -184,8 +184,11 @@ records. Schema-v2 Snowflake context creates new transport IDs by design, so
 the verifier checks their causal lineage and compares the complete semantic
 feature/model output rather than incorrectly requiring the schema-v1 context
 IDs. The report also verifies broker commits for the pair and risk consumers
-and records the context source as Flink-checkpoint-managed. Snowflake event
-sinks and the modern admin view are still pending.
+and records the context source as Flink-checkpoint-managed. `POKER_SINK`, its
+event-native Snowflake tables, the canonical admin reader, and the exact sink
+reconciliation command are implemented and locally tested; their live
+deployment evidence is still pending. See
+[`docs/poker-sink.md`](docs/poker-sink.md).
 
 Validate the complete replay locally, create any missing canonical topics, then
 publish and read a bounded split back from Kafka:

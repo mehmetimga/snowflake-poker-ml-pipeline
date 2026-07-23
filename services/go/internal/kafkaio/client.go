@@ -17,6 +17,7 @@ type Config struct {
 	ClientID         string
 	GroupID          string
 	InputTopic       string
+	InputTopics      []string
 	SecurityProtocol string
 	SASLMechanism    string
 	Username         string
@@ -31,8 +32,22 @@ type Client struct {
 }
 
 func NewClient(config Config) (*Client, error) {
-	if len(config.Brokers) == 0 || config.GroupID == "" || config.InputTopic == "" {
-		return nil, fmt.Errorf("Kafka brokers, group ID, and input topic are required")
+	topics := append([]string(nil), config.InputTopics...)
+	if len(topics) == 0 && config.InputTopic != "" {
+		topics = append(topics, config.InputTopic)
+	}
+	if len(config.Brokers) == 0 || config.GroupID == "" || len(topics) == 0 {
+		return nil, fmt.Errorf("Kafka brokers, group ID, and at least one input topic are required")
+	}
+	seenTopics := make(map[string]struct{}, len(topics))
+	for _, topic := range topics {
+		if strings.TrimSpace(topic) == "" {
+			return nil, fmt.Errorf("Kafka input topics cannot be empty")
+		}
+		if _, exists := seenTopics[topic]; exists {
+			return nil, fmt.Errorf("duplicate Kafka input topic %q", topic)
+		}
+		seenTopics[topic] = struct{}{}
 	}
 	if config.ClientID == "" {
 		config.ClientID = "poker-go-risk-scorer-v1"
@@ -48,7 +63,7 @@ func NewClient(config Config) (*Client, error) {
 		kgo.SeedBrokers(config.Brokers...),
 		kgo.ClientID(config.ClientID),
 		kgo.ConsumerGroup(config.GroupID),
-		kgo.ConsumeTopics(config.InputTopic),
+		kgo.ConsumeTopics(topics...),
 		kgo.DisableAutoCommit(),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.Balancers(kgo.CooperativeStickyBalancer()),

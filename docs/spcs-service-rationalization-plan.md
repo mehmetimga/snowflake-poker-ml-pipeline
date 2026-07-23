@@ -493,21 +493,32 @@ Five persistent objects remain before `POKER_SINK` is added.
 
 ### R5 — Add `POKER_SINK` and migrate admin
 
-Status: next implementation slice. The 2026-07-23 bounded canonical
-Confluent/SPCS replay passed through `POKER_FLINK` and `POKER_RISK` with 96
-contexts, 240 pair rows, 176 evidence events, 16 scores, 16 decisions, 14
-alerts, and zero target DLQ records. Persistence and admin remain `not_run`.
+Status: implementation and local release gate complete; immutable image
+publish, Snowflake bootstrap, SPCS deployment, D7 persistence reconciliation,
+and admin deployment remain `not_run`.
 
-1. Define event-native Snowflake tables for canonical lineage, player context,
-   pair revisions, scores, rule evidence, decisions, alerts, and DLQ audit.
-2. Build `POKER_SINK` as a separate Kafka consumer.
-3. Use event IDs and revisions as idempotency keys.
-4. Commit offsets only after acknowledged Snowflake persistence.
-5. Test replay, collision, partial failure, schema version, and poison events.
-6. Update `POKER_ADMIN` to read the new tables.
-7. Keep legacy readers behind a temporary compatibility flag.
+1. [x] Define event-native Snowflake tables for canonical lineage, player
+   context, pair revisions, scores, rule evidence, decisions, alerts, and DLQ
+   audit.
+2. [x] Build `POKER_SINK` as a separate multi-topic Go Kafka consumer with a
+   private SPCS-token Snowflake writer sidecar.
+3. [x] Use immutable event IDs, event hashes, and projected revisions for
+   idempotency and collision detection.
+4. [x] Commit offsets only after acknowledged Snowflake persistence.
+5. [x] Test replay, collision, writer failure, partial transaction failure,
+   schema version, poison sanitization, and the full Go suite.
+6. [x] Update `POKER_ADMIN` to read `POKER_ALERT_REVIEW_V`.
+7. [x] Keep the legacy reader behind `ADMIN_DATA_MODE=legacy`.
+8. [ ] Commit the verified source, publish the Git-SHA image, apply
+   `infra/snowflake/sql/sink.sql`, and deploy `POKER_SINK`.
+9. [ ] Reconcile the D7 dataset with `make r5-sink-verify` and deploy the
+   canonical admin image.
+10. [ ] Prove admin freshness while `POKER_REALTIME` is suspended.
 
-Exit gate: admin remains current when `POKER_REALTIME` is suspended.
+Implementation details and failure semantics are in
+[`poker-sink.md`](poker-sink.md).
+
+Exit gate remains open until items 8–10 pass.
 
 ### R6 — Retire `POKER_REALTIME`
 

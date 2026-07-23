@@ -1677,11 +1677,11 @@
       "locked": false,
       "fontSize": 16,
       "fontFamily": 1,
-      "text": "Docker: poker-sink:<git-sha>\nPython Kafka → Snowflake\nidempotent shadow-mode persistence",
+      "text": "Docker: poker-sink:<git-sha>\nGo Kafka + Python Snowflake writer\nidempotent shadow-mode persistence",
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": null,
-      "originalText": "Docker: poker-sink:<git-sha>\nPython Kafka → Snowflake\nidempotent shadow-mode persistence",
+      "originalText": "Docker: poker-sink:<git-sha>\nGo Kafka + Python Snowflake writer\nidempotent shadow-mode persistence",
       "autoResize": true,
       "lineHeight": 1.25
     },

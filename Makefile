@@ -8,6 +8,7 @@
 .PHONY: cdc-sim-config-check cdc-sim-up cdc-sim-migrate cdc-sim-seed-user-context cdc-sim-topics cdc-sim-register cdc-sim-status cdc-sim-generate cdc-sim-verify cdc-sim-e2e cdc-sim-fault-generate cdc-sim-fault-verify cdc-sim-fault-e2e cdc-sim-recovery-e2e cdc-sim-fault-replay-e2e cdc-sim-stop phase-c2-cdc-simulation-check
 .PHONY: f5-package-test phase-f5-check canonical-scoring-topics
 .PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local multitable-alert-spcs-test multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify multitable-alert-replay-spcs
+.PHONY: r5-sink-test r5-sink-render r5-sink-build r5-sink-image-smoke r5-sink-release-check r5-sink-push r5-sink-bootstrap r5-sink-deploy r5-sink-verify r5-admin-build r5-admin-image-smoke r5-admin-push r5-admin-deploy phase-r5-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -47,6 +48,7 @@ ALERT_ACCEPTANCE_TRITON_URL ?= http://127.0.0.1:18000
 ALERT_ACCEPTANCE_SPCS_RUN_DIR ?= data/runs/alert-acceptance-spcs-$(shell date -u +%Y%m%dT%H%M%SZ)
 ALERT_ACCEPTANCE_SPCS_MANIFEST ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/replay-manifest.json
 ALERT_ACCEPTANCE_SPCS_REPORT ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/verification-report.json
+ALERT_ACCEPTANCE_SINK_REPORT ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/sink-verification-report.json
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -1255,6 +1257,13 @@ C2_REMOTE_ADAPTER_IMAGE ?= $(SNOW_REPO_URL)/poker-adapter:$(C2_ADAPTER_IMAGE_TAG
 C2_ADAPTER_DATASET_ID ?= sim-cdc-v1
 C2_ADAPTER_ALLOWED_TENANTS ?= demo
 C2_ADAPTER_GROUP_ID ?= poker-go-hand-adapter-sim-v1
+R5_SINK_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+R5_SINK_IMAGE ?= poker-sink:$(R5_SINK_IMAGE_TAG)
+R5_REMOTE_SINK_IMAGE ?= $(SNOW_REPO_URL)/poker-sink:$(R5_SINK_IMAGE_TAG)
+R5_ADMIN_IMAGE ?= poker-pipeline:$(R5_SINK_IMAGE_TAG)
+R5_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-pipeline:$(R5_SINK_IMAGE_TAG)
+R5_SINK_ALLOWED_TENANTS ?= demo
+R5_SINK_GROUP_ID ?= poker-snowflake-sink-synthetic-v1
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -1393,6 +1402,73 @@ f5-package-test:
 phase-f5-check: f5-package-test
 	KAFKA_BOOTSTRAP_SERVERS=broker.f5.invalid:9092 \
 		$(PY) infra/snowflake/deploy.py render
+	$(PY) infra/snowflake/deploy.py validate-catalog
+
+r5-sink-test:
+	$(PY) -m pytest -q tests/test_snowflake_event_writer.py \
+		tests/test_r5_sink_packaging.py tests/test_snowflake_deploy.py \
+		tests/test_admin_canonical_data.py tests/test_alert_acceptance_sink.py
+	cd services/go && GOCACHE=/tmp/snowflake-poker-ml-go-build-cache \
+		$(GO) test ./...
+
+r5-sink-render:
+	SPCS_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:$(R5_SINK_IMAGE_TAG) \
+	SPCS_SINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-sink:$(R5_SINK_IMAGE_TAG) \
+	SPCS_SINK_BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
+	SPCS_SINK_ALLOWED_TENANTS=$(R5_SINK_ALLOWED_TENANTS) \
+	SPCS_SINK_GROUP_ID=$(R5_SINK_GROUP_ID) \
+		$(PY) infra/snowflake/deploy.py render
+
+r5-sink-build:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
+		-f Dockerfile.sink -t $(R5_SINK_IMAGE) .
+
+r5-sink-image-smoke:
+	docker run --rm --platform linux/amd64 $(R5_SINK_IMAGE) --help
+	docker run --rm --platform linux/amd64 \
+		--entrypoint /opt/snowflake-event-writer/venv/bin/python \
+		$(R5_SINK_IMAGE) -c "import snowflake.connector; print('writer-import-ok')"
+
+r5-sink-release-check:
+	$(PY) scripts/check_c1_release.py --phase R5 --tag $(R5_SINK_IMAGE_TAG)
+
+r5-sink-push: r5-sink-release-check
+	docker tag $(R5_SINK_IMAGE) $(R5_REMOTE_SINK_IMAGE)
+	docker push $(R5_REMOTE_SINK_IMAGE)
+
+r5-admin-build:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
+		-f Dockerfile.spcs -t $(R5_ADMIN_IMAGE) .
+
+r5-admin-image-smoke:
+	docker run --rm --platform linux/amd64 -e ADMIN_DATA_MODE=canonical \
+		--entrypoint python \
+		$(R5_ADMIN_IMAGE) -c "from admin import data_access; print(data_access.data_mode())"
+
+r5-admin-push: r5-sink-release-check
+	docker tag $(R5_ADMIN_IMAGE) $(R5_REMOTE_ADMIN_IMAGE)
+	docker push $(R5_REMOTE_ADMIN_IMAGE)
+
+r5-sink-bootstrap:
+	$(PY) infra/snowflake/deploy.py bootstrap-sink
+
+r5-sink-deploy: r5-sink-release-check r5-sink-render
+	$(PY) infra/snowflake/deploy.py deploy-sink
+
+r5-admin-deploy: r5-sink-release-check r5-sink-render
+	$(PY) infra/snowflake/deploy.py deploy-admin
+
+r5-sink-verify:
+	WAREHOUSE_BACKEND=snowflake \
+		$(PY) scripts/verify_alert_acceptance_sink.py \
+		--manifest $(ALERT_ACCEPTANCE_SPCS_MANIFEST) \
+		--spcs-report $(ALERT_ACCEPTANCE_SPCS_REPORT) \
+		--report $(ALERT_ACCEPTANCE_SINK_REPORT)
+
+phase-r5-check: r5-sink-test
+	KAFKA_BOOTSTRAP_SERVERS=broker.r5.invalid:9092 $(MAKE) r5-sink-render
 	$(PY) infra/snowflake/deploy.py validate-catalog
 
 c2-adapter-package-test:

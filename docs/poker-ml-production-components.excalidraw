@@ -2865,11 +2865,11 @@
       "locked": false,
       "fontSize": 17,
       "fontFamily": 1,
-      "text": "SPCS SERVICE — POKER_SINK\nDocker: poker-sink:<git-sha>\nPython Kafka → Snowflake\n• raw / context / feature / evidence sinks\n• score / review-decision / alert sinks\n• idempotent MERGE / event_id dedup\n• commit Kafka only after DB success\n• quarantine invalid records + lineage",
+      "text": "SPCS SERVICE — POKER_SINK\nDocker: poker-sink:<git-sha>\nGo Kafka + Python Snowflake writer\n• raw / context / feature / evidence sinks\n• score / review-decision / alert sinks\n• event_id + SHA-256 idempotency\n• commit Kafka only after DB success\n• sanitized invalid-record audit + lineage",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
-      "originalText": "SPCS SERVICE — POKER_SINK\nDocker: poker-sink:<git-sha>\nPython Kafka → Snowflake\n• raw / context / feature / evidence sinks\n• score / review-decision / alert sinks\n• idempotent MERGE / event_id dedup\n• commit Kafka only after DB success\n• quarantine invalid records + lineage",
+      "originalText": "SPCS SERVICE — POKER_SINK\nDocker: poker-sink:<git-sha>\nGo Kafka + Python Snowflake writer\n• raw / context / feature / evidence sinks\n• score / review-decision / alert sinks\n• event_id + SHA-256 idempotency\n• commit Kafka only after DB success\n• sanitized invalid-record audit + lineage",
       "autoResize": false,
       "lineHeight": 1.25
     },

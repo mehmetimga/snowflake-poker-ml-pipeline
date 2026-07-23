@@ -13,9 +13,12 @@ from admin import data_access as da
 
 st.set_page_config(page_title="Poker Collusion Demo", page_icon=":spades:", layout="wide")
 st.title("Poker collusion ML demo")
-st.caption("Synthetic data only. Toggle Snowflake vs DuckDB via WAREHOUSE_BACKEND.")
-
 wh = da.warehouse()
+st.caption(
+    "Synthetic data only. "
+    f"Warehouse={wh.kind.upper()}, event reader={da.data_mode()}."
+)
+
 counts = da.kpi_counts(wh)
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -28,7 +31,7 @@ c5.metric("Backend", wh.kind.upper())
 st.subheader("Top 25 alerts by risk score")
 top = da.alerts(wh, limit=25)
 if top.empty:
-    st.info("No alerts yet. Run `make demo` (or `python scripts/train.py && python -m pipeline.inference.scorer`).")
+    st.info("No canonical alerts have been persisted yet.")
 else:
     st.dataframe(
         top[["alert_id", "hand_id", "suspicious_player_id", "risk_level", "risk_score", "status"]],
