@@ -51,13 +51,6 @@ spec:
         state.savepoints.dir: file:///opt/flink/state/savepoints
         metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
         metrics.reporter.prom.port: 9250
-    secrets:
-    - snowflakeSecret: POKER_ML_DEMO.SPCS.CONTEXT_DB_CREDENTIALS
-      secretKeyRef: username
-      envVarName: USER_CONTEXT_DB_USER
-    - snowflakeSecret: POKER_ML_DEMO.SPCS.CONTEXT_DB_CREDENTIALS
-      secretKeyRef: password
-      envVarName: USER_CONTEXT_DB_PASSWORD
     volumeMounts:
     - name: flink-state
       mountPath: /opt/flink/state
@@ -83,9 +76,11 @@ spec:
       KAFKA_PLAYER_CONTEXT_V2_TOPIC: poker.synthetic.hand-player-context.v2
       KAFKA_PAIR_FEATURES_V2_TOPIC: poker.synthetic.pair-features.context-v2.v1
       KAFKA_DEAD_LETTER_TOPIC: poker.synthetic.pipeline.dead-letter.v1
-      FLINK_CONTEXT_SOURCE: jdbc
-      USER_CONTEXT_JDBC_URL: "__USER_CONTEXT_JDBC_URL__"
-      USER_CONTEXT_DB_TABLE: public.poker_user_context
+      FLINK_CONTEXT_SOURCE: snowflake
+      USER_CONTEXT_SNOWFLAKE_TABLE: POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY
+      FLINK_CONTEXT_JDBC_CONNECT_TIMEOUT_SECONDS: "15"
+      FLINK_CONTEXT_JDBC_QUERY_TIMEOUT_SECONDS: "20"
+      FLINK_CONTEXT_JDBC_VALIDATION_TIMEOUT_SECONDS: "5"
       FLINK_ACTIVE_CONTEXT_GROUP_ID: flink-active-context-synthetic-v2
       FLINK_PLAYER_CONTEXT_SCHEMA_VERSION: "2"
       FLINK_PAIR_FEATURES_V2_GROUP_ID: flink-pair-features-context-synthetic-v2

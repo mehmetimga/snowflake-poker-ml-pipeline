@@ -11,12 +11,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 
-/** Deterministic schema-v2 player-hand event with explicit PostgreSQL lineage. */
+/** Deterministic schema-v2 player-hand event with explicit context-store lineage. */
 public final class JdbcEnrichedEventV2 {
     public static final String EVENT_TYPE = "poker.hand-player-context.enriched";
-    public static final String RESOLUTION_MODE = "postgresql_point_in_time";
-    public static final String RESOLUTION_POLICY = "jdbc-effective-at-v1";
-    public static final String RESOLUTION_SOURCE = "postgresql";
     private static final UUID URL_NAMESPACE =
             UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
 
@@ -25,6 +22,13 @@ public final class JdbcEnrichedEventV2 {
     public static String create(
             String expandedHand,
             ActiveContextCacheEntry contextEntry) {
+        return create(expandedHand, contextEntry, "jdbc");
+    }
+
+    public static String create(
+            String expandedHand,
+            ActiveContextCacheEntry contextEntry,
+            String contextSource) {
         JsonNode expanded = EventJson.parse(expandedHand);
         JsonNode hand = expanded.path("hand");
         JsonNode handPayload = hand.path("payload");
@@ -59,9 +63,19 @@ public final class JdbcEnrichedEventV2 {
         payload.put("revision", 1);
 
         ObjectNode resolution = payload.putObject("context_resolution");
-        resolution.put("mode", RESOLUTION_MODE);
-        resolution.put("policy_version", RESOLUTION_POLICY);
-        resolution.put("source", RESOLUTION_SOURCE);
+        boolean snowflake = "snowflake".equals(contextSource);
+        resolution.put(
+                "mode",
+                snowflake
+                        ? "snowflake_point_in_time"
+                        : "postgresql_point_in_time");
+        resolution.put(
+                "policy_version",
+                snowflake
+                        ? "snowflake-effective-at-v1"
+                        : "jdbc-effective-at-v1");
+        resolution.put(
+                "source", snowflake ? "snowflake" : "postgresql");
         resolution.put("context_record_id", contextRecordId);
         resolution.set("context_version", context.path("context_version").deepCopy());
         resolution.set("context_effective_at", context.path("effective_at").deepCopy());

@@ -2,7 +2,7 @@ package com.aicampions.poker.context.app;
 
 import com.aicampions.poker.context.ContextEnrichmentJob;
 
-/** Canonical hands-only entrypoint with lazy PostgreSQL context resolution. */
+/** Canonical hands-only entrypoint with lazy internal Snowflake context resolution. */
 public final class ActiveContextEnrichmentJob {
     private ActiveContextEnrichmentJob() {}
 

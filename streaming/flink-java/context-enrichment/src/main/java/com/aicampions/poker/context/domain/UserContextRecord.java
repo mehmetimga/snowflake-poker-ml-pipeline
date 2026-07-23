@@ -7,7 +7,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Narrow context projection returned by the PostgreSQL lookup table. */
+/** Narrow context projection returned by the governed user-context table. */
 public record UserContextRecord(
         String tenantId,
         String productId,
@@ -41,7 +41,7 @@ public record UserContextRecord(
     public UUID contextRecordId() {
         String eventName = String.join(
                 ":",
-                "postgres-user-context-v1",
+                "poker-user-context-v1",
                 tenantId,
                 productId,
                 userId,

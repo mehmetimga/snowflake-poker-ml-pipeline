@@ -73,6 +73,26 @@ final class JobConfigTest {
     }
 
     @Test
+    void parsesCanonicalSnowflakeServiceIdentityContext() {
+        ContextJobConfig config = ContextJobConfig.parse(
+                new String[] {"--context-source", "snowflake"},
+                Map.of());
+
+        assertEquals("snowflake", config.contextSource());
+        assertEquals(
+                "POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY",
+                config.contextJdbcTable());
+        assertEquals("", config.contextJdbcUrl());
+        assertEquals(15, config.contextJdbcConnectTimeoutSeconds());
+        assertEquals(20, config.contextJdbcQueryTimeoutSeconds());
+        assertEquals(5, config.contextJdbcValidationTimeoutSeconds());
+        assertFalse(
+                config.safeSummary().contains(
+                        "/snowflake/session/token"));
+        config.requireContextSource("snowflake");
+    }
+
+    @Test
     void parsesJdbcReliabilityAndFailureRateRestartLimits() {
         ContextJobConfig config = ContextJobConfig.parse(
                 new String[] {

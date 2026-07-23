@@ -27,7 +27,7 @@ public final class ContextEnrichmentJob {
     }
 
     public static void runActive(String[] arguments) throws Exception {
-        run(arguments, "jdbc");
+        run(arguments, "snowflake");
     }
 
     public static void runLegacy(String[] arguments) throws Exception {
@@ -40,7 +40,7 @@ public final class ContextEnrichmentJob {
         ContextJobConfig config =
                 ContextJobConfig.parse(arguments, System.getenv());
         config.requireContextSource(requiredContextSource);
-        boolean active = config.contextSource().equals("jdbc");
+        boolean active = !config.contextSource().equals("kafka");
         String uidPrefix =
                 active
                         ? "active-context-v2"
@@ -105,6 +105,7 @@ public final class ContextEnrichmentJob {
                             Types.POJO(ContextKey.class))
                     .process(
                             new JdbcContextEnrichmentFunction(
+                                    config.contextSource(),
                                     config.contextJdbcUrl(),
                                     config.contextJdbcTable(),
                                     config.contextJdbcQueryTimeoutSeconds(),
@@ -115,7 +116,9 @@ public final class ContextEnrichmentJob {
                                     config.contextRefreshMinutes(),
                                     config.handTopic()),
                             Types.STRING)
-                    .name("jdbc-active-user-context-lookup")
+                    .name(
+                            config.contextSource()
+                                    + "-active-user-context-lookup")
                     .uid("active-context-v2-jdbc-lookup");
             deadLetters = validHands
                     .getSideOutput(DeadLetters.TAG)

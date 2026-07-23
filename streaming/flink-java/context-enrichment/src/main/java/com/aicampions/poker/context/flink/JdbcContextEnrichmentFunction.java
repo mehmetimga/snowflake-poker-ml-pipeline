@@ -7,6 +7,8 @@ import com.aicampions.poker.context.adapter.jdbc.JdbcFailureClassifier;
 import com.aicampions.poker.context.adapter.jdbc.JdbcRepositoryObserver;
 import com.aicampions.poker.context.adapter.jdbc.JdbcUserContextRepository;
 import com.aicampions.poker.context.adapter.jdbc.UserContextLookupException;
+import com.aicampions.poker.context.adapter.snowflake.SnowflakeServiceCredentials;
+import com.aicampions.poker.context.adapter.snowflake.SnowflakeUserContextRepository;
 import com.aicampions.poker.context.contract.JdbcEnrichedEventV2;
 import com.aicampions.poker.context.domain.ActiveContextCacheEntry;
 import com.aicampions.poker.context.domain.ContextKey;
@@ -22,9 +24,10 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 
-/** Lazy synchronous JDBC enrichment with one TTL-managed cache entry per active player. */
+/** Lazy synchronous enrichment with one TTL-managed cache entry per active player. */
 public final class JdbcContextEnrichmentFunction
         extends KeyedProcessFunction<ContextKey, String, String> {
+    private final String contextSource;
     private final String jdbcUrl;
     private final String tableName;
     private final int queryTimeoutSeconds;
@@ -54,6 +57,7 @@ public final class JdbcContextEnrichmentFunction
     private transient AtomicLong latestLookupLatencyMs;
 
     public JdbcContextEnrichmentFunction(
+            String contextSource,
             String jdbcUrl,
             String tableName,
             int queryTimeoutSeconds,
@@ -63,6 +67,7 @@ public final class JdbcContextEnrichmentFunction
             long cacheTtlHours,
             long refreshMinutes,
             String handTopic) {
+        this.contextSource = contextSource;
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
@@ -99,16 +104,7 @@ public final class JdbcContextEnrichmentFunction
                         "context_lookup_latency_ms",
                         latestLookupLatencyMs::get);
         try {
-            JdbcCredentials credentials = JdbcCredentials.fromEnvironment(System.getenv());
-            repository = new JdbcUserContextRepository(
-                    jdbcUrl,
-                    credentials.username(),
-                    credentials.password(),
-                    tableName,
-                    queryTimeoutSeconds,
-                    connectTimeoutSeconds,
-                    validationTimeoutSeconds,
-                    retryMaximumJitterMs,
+            JdbcRepositoryObserver observer =
                     new JdbcRepositoryObserver() {
                         @Override
                         public void retry(
@@ -120,7 +116,31 @@ public final class JdbcContextEnrichmentFunction
                         public void reconnect() {
                             lookupReconnects.inc();
                         }
-                    });
+                    };
+            if (contextSource.equals("snowflake")) {
+                repository = new SnowflakeUserContextRepository(
+                        SnowflakeServiceCredentials.fromEnvironment(
+                                System.getenv()),
+                        tableName,
+                        queryTimeoutSeconds,
+                        connectTimeoutSeconds,
+                        validationTimeoutSeconds,
+                        retryMaximumJitterMs,
+                        observer);
+            } else {
+                JdbcCredentials credentials =
+                        JdbcCredentials.fromEnvironment(System.getenv());
+                repository = new JdbcUserContextRepository(
+                        jdbcUrl,
+                        credentials.username(),
+                        credentials.password(),
+                        tableName,
+                        queryTimeoutSeconds,
+                        connectTimeoutSeconds,
+                        validationTimeoutSeconds,
+                        retryMaximumJitterMs,
+                        observer);
+            }
         } catch (Exception error) {
             lookupFailures.inc();
             JdbcFailureClassifier.Failure failure = JdbcFailureClassifier.classify(error);
@@ -172,7 +192,8 @@ public final class JdbcContextEnrichmentFunction
                         DeadLetters.TAG,
                         EventJson.deadLetter(
                                 handTopic,
-                                "jdbc-user-context-not-found",
+                                contextSource
+                                        + "-user-context-not-found",
                                 "context-not-found",
                                 expandedHand));
                 return;
@@ -192,7 +213,9 @@ public final class JdbcContextEnrichmentFunction
             }
         }
 
-        output.collect(JdbcEnrichedEventV2.create(expandedHand, resolvedContext));
+        output.collect(
+                JdbcEnrichedEventV2.create(
+                        expandedHand, resolvedContext, contextSource));
     }
 
     @Override

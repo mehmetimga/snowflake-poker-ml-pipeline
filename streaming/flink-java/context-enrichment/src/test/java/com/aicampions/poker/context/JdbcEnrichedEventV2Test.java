@@ -70,6 +70,32 @@ final class JdbcEnrichedEventV2Test {
         assertFalse(payload.has("correction_window_ms"));
     }
 
+    @Test
+    void emitsInternalSnowflakeResolutionLineage() {
+        String expanded = EventJson.expandPlayer(
+                EventJson.parse(HAND),
+                EventJson.parse(HAND)
+                        .path("payload")
+                        .path("players")
+                        .get(0));
+        String event = JdbcEnrichedEventV2.create(
+                expanded,
+                ActiveContextCacheEntry.from(record(), 1_000L),
+                "snowflake");
+        JsonNode resolution = EventJson.parse(event)
+                .path("payload")
+                .path("context_resolution");
+
+        assertEquals(
+                "snowflake_point_in_time",
+                resolution.path("mode").asText());
+        assertEquals(
+                "snowflake-effective-at-v1",
+                resolution.path("policy_version").asText());
+        assertEquals(
+                "snowflake", resolution.path("source").asText());
+    }
+
     private static UserContextRecord record() {
         return new UserContextRecord(
                 "demo",

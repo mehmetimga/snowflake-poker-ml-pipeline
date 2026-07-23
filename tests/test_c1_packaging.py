@@ -56,9 +56,6 @@ def test_c1_specs_define_separate_private_services(monkeypatch, tmp_path: Path) 
         build_version="0123456789ab",
         model_run_id=deploy.DEFAULT_MODEL_RUN_ID,
         allowed_tenants="tenant-a,tenant-b",
-        user_context_jdbc_url=(
-            "jdbc:postgresql://context-db.example.com:5432/poker?sslmode=require"
-        ),
     )
 
     risk = yaml.safe_load((tmp_path / "risk.yaml").read_text())["spec"]

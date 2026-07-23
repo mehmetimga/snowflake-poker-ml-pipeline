@@ -10,9 +10,10 @@ import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.sql.Timestamp;
 import java.util.Optional;
 
-/** Synchronous, point-in-time PostgreSQL lookup used only on Flink cache misses. */
+/** Synchronous point-in-time JDBC lookup used only on Flink cache misses. */
 public final class JdbcUserContextRepository implements UserContextRepository {
     private final JdbcConnectionFactory connectionFactory;
     private final String lookupSql;
@@ -155,7 +156,6 @@ public final class JdbcUserContextRepository implements UserContextRepository {
         Connection opened = connectionFactory.open();
         PreparedStatement prepared = null;
         try {
-            opened.setReadOnly(true);
             prepared = opened.prepareStatement(lookupSql);
             prepared.setQueryTimeout(queryTimeoutSeconds);
             connection = opened;
@@ -245,7 +245,21 @@ public final class JdbcUserContextRepository implements UserContextRepository {
 
     private static Instant instant(ResultSet rows, String column)
             throws Exception {
-        return rows.getObject(column, OffsetDateTime.class).toInstant();
+        try {
+            OffsetDateTime value =
+                    rows.getObject(column, OffsetDateTime.class);
+            if (value != null) {
+                return value.toInstant();
+            }
+        } catch (Exception unsupportedConversion) {
+            Timestamp value = rows.getTimestamp(column);
+            if (value != null) {
+                return value.toInstant();
+            }
+            throw unsupportedConversion;
+        }
+        throw new IllegalArgumentException(
+                "context timestamp is null: " + column);
     }
 
     private static int positive(int value, String name) {

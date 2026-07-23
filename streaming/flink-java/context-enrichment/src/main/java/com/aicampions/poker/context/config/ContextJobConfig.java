@@ -60,9 +60,11 @@ public record ContextJobConfig(
                 "FLINK_CONTEXT_SOURCE",
                 "kafka")
                 .toLowerCase();
-        if (!contextSource.equals("kafka") && !contextSource.equals("jdbc")) {
+        if (!contextSource.equals("kafka")
+                && !contextSource.equals("jdbc")
+                && !contextSource.equals("snowflake")) {
             throw new IllegalArgumentException(
-                    "--context-source must be kafka or jdbc");
+                    "--context-source must be kafka, jdbc, or snowflake");
         }
         String contexts = value(
                 args,
@@ -70,7 +72,8 @@ public record ContextJobConfig(
                 "context-topic",
                 "KAFKA_USER_CONTEXT_TOPIC",
                 "poker.user-context.v1");
-        String output = contextSource.equals("jdbc")
+        boolean activeContext = !contextSource.equals("kafka");
+        String output = activeContext
                 ? value(
                         args,
                         environment,
@@ -89,7 +92,7 @@ public record ContextJobConfig(
                 "dead-letter-topic",
                 "KAFKA_DEAD_LETTER_TOPIC",
                 "poker.pipeline.dead-letter.v1");
-        String group = contextSource.equals("jdbc")
+        String group = activeContext
                 ? value(
                         args,
                         environment,
@@ -108,18 +111,25 @@ public record ContextJobConfig(
                 "context-jdbc-url",
                 "USER_CONTEXT_JDBC_URL",
                 "");
-        String contextJdbcTable = value(
-                args,
-                environment,
-                "context-jdbc-table",
-                "USER_CONTEXT_DB_TABLE",
-                "public.poker_user_context");
+        String contextJdbcTable = contextSource.equals("snowflake")
+                ? value(
+                        args,
+                        environment,
+                        "context-snowflake-table",
+                        "USER_CONTEXT_SNOWFLAKE_TABLE",
+                        "POKER_ML_DEMO.SPCS.POKER_USER_CONTEXT_HISTORY")
+                : value(
+                        args,
+                        environment,
+                        "context-jdbc-table",
+                        "USER_CONTEXT_DB_TABLE",
+                        "public.poker_user_context");
         int contextJdbcQueryTimeoutSeconds = Math.toIntExact(boundedLongValue(
                 args,
                 environment,
                 "context-jdbc-query-timeout-seconds",
                 "FLINK_CONTEXT_JDBC_QUERY_TIMEOUT_SECONDS",
-                1L,
+                contextSource.equals("snowflake") ? 20L : 1L,
                 1L,
                 60L));
         int contextJdbcConnectTimeoutSeconds = Math.toIntExact(boundedLongValue(
@@ -127,7 +137,7 @@ public record ContextJobConfig(
                 environment,
                 "context-jdbc-connect-timeout-seconds",
                 "FLINK_CONTEXT_JDBC_CONNECT_TIMEOUT_SECONDS",
-                3L,
+                contextSource.equals("snowflake") ? 15L : 3L,
                 1L,
                 60L));
         int contextJdbcValidationTimeoutSeconds = Math.toIntExact(boundedLongValue(
@@ -135,7 +145,7 @@ public record ContextJobConfig(
                 environment,
                 "context-jdbc-validation-timeout-seconds",
                 "FLINK_CONTEXT_JDBC_VALIDATION_TIMEOUT_SECONDS",
-                1L,
+                contextSource.equals("snowflake") ? 5L : 1L,
                 1L,
                 60L));
         long contextJdbcRetryMaximumJitterMs = boundedLongValue(
@@ -252,9 +262,11 @@ public record ContextJobConfig(
 
     public String safeSummary() {
         String contextDescription =
-                contextSource.equals("jdbc")
-                        ? "postgresql-point-in-time"
-                        : contextTopic;
+                switch (contextSource) {
+                    case "snowflake" -> "snowflake-service-identity-point-in-time";
+                    case "jdbc" -> "postgresql-point-in-time";
+                    default -> contextTopic;
+                };
         return String.format(
                 "{\"job\":\"context-enrichment\",\"hands\":\"%s\","
                         + "\"context_source\":\"%s\",\"contexts\":\"%s\","
@@ -297,10 +309,10 @@ public record ContextJobConfig(
     }
 
     private void validateContextSource() {
-        if (!contextSource.equals("jdbc")) {
+        if (contextSource.equals("kafka")) {
             return;
         }
-        if (contextJdbcUrl.isBlank()) {
+        if (contextSource.equals("jdbc") && contextJdbcUrl.isBlank()) {
             throw new IllegalArgumentException(
                     "USER_CONTEXT_JDBC_URL is required for JDBC context source");
         }
@@ -319,7 +331,7 @@ public record ContextJobConfig(
             requireExact(
                     "output",
                     outputTopic,
-                    contextSource.equals("jdbc")
+                    !contextSource.equals("kafka")
                             ? "poker.sim.hand-player-context.v2"
                             : "poker.sim.hand-player-context.v1");
             requireExact(
@@ -329,7 +341,7 @@ public record ContextJobConfig(
             requireExact(
                     "group",
                     groupId,
-                    contextSource.equals("jdbc")
+                    !contextSource.equals("kafka")
                             ? "flink-active-context-sim-v2"
                             : "flink-legacy-kafka-context-sim-v1");
             return;

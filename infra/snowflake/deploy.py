@@ -14,7 +14,6 @@ from pathlib import Path
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from urllib.parse import parse_qsl, urlsplit
 
 import yaml
 
@@ -39,12 +38,8 @@ DATABASE = "POKER_ML_DEMO"
 SCHEMA = "SPCS"
 ADAPTER_SIM_KAFKA_EAI = "POKER_ADAPTER_SIM_KAFKA_EAI"
 FLINK_KAFKA_EAI = "POKER_FLINK_KAFKA_EAI"
-FLINK_CONTEXT_DB_EAI = "POKER_FLINK_CONTEXT_DB_EAI"
-FLINK_CONTEXT_DB_RULE = "POKER_FLINK_CONTEXT_DB_EGRESS_RULE"
-CONTEXT_DB_SECRET = f"{DATABASE}.{SCHEMA}.CONTEXT_DB_CREDENTIALS"
 
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:[0-9]{2,5}$")
-_HOSTNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
 _IMAGE = re.compile(
     r"^/[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z_][A-Za-z0-9_$]*/"
     r"[A-Za-z_][A-Za-z0-9_$]*/[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$"
@@ -54,16 +49,6 @@ _SAVEPOINT_URI = re.compile(
     r"^file:/+opt/flink/state/savepoints/savepoint-[A-Za-z0-9_-]+$"
 )
 _SNOWFLAKE_ID = re.compile(r"^[A-Z][A-Z0-9_$]*$")
-_JDBC_URL_SAFE = re.compile(r"^[A-Za-z0-9:/?&=._%+-]+$")
-_SENSITIVE_JDBC_KEYS = {
-    "access_token",
-    "password",
-    "secret",
-    "sslpassword",
-    "token",
-    "user",
-    "username",
-}
 
 
 def _warehouse():
@@ -118,70 +103,6 @@ def _validate_snowflake_identifier(value: str, *, label: str) -> str:
     if not _SNOWFLAKE_ID.fullmatch(value):
         raise SystemExit(f"Invalid {label}: {value!r}")
     return value
-
-
-def _parse_postgres_jdbc_url(raw: str) -> tuple[str, str]:
-    """Validate a non-secret PostgreSQL JDBC URL and return its exact endpoint."""
-    if not raw or not _JDBC_URL_SAFE.fullmatch(raw):
-        raise SystemExit(
-            "USER_CONTEXT_JDBC_URL must be a plain PostgreSQL JDBC URL without "
-            "spaces, quotes, or credentials"
-        )
-    if not raw.startswith("jdbc:postgresql://"):
-        raise SystemExit("USER_CONTEXT_JDBC_URL must start with jdbc:postgresql://")
-    parsed = urlsplit(raw.removeprefix("jdbc:"))
-    if parsed.scheme != "postgresql" or parsed.fragment:
-        raise SystemExit("Invalid USER_CONTEXT_JDBC_URL")
-    if parsed.username is not None or parsed.password is not None:
-        raise SystemExit(
-            "USER_CONTEXT_JDBC_URL must not contain a username or password"
-        )
-    host = parsed.hostname
-    if not host or not _HOSTNAME.fullmatch(host):
-        raise SystemExit("USER_CONTEXT_JDBC_URL must contain a valid DNS host")
-    try:
-        port = parsed.port
-    except ValueError as error:
-        raise SystemExit(f"Invalid USER_CONTEXT_JDBC_URL port: {error}") from error
-    if port is None:
-        raise SystemExit("USER_CONTEXT_JDBC_URL must include an explicit port")
-    if port < 1 or port > 65535:
-        raise SystemExit("USER_CONTEXT_JDBC_URL port must be between 1 and 65535")
-    if not parsed.path or parsed.path == "/" or parsed.path.count("/") != 1:
-        raise SystemExit(
-            "USER_CONTEXT_JDBC_URL must include one database name in its path"
-        )
-    sensitive_keys = {
-        key.lower() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
-    } & _SENSITIVE_JDBC_KEYS
-    if sensitive_keys:
-        raise SystemExit(
-            "USER_CONTEXT_JDBC_URL query must not contain credentials: "
-            + ", ".join(sorted(sensitive_keys))
-        )
-    return raw, f"{host}:{port}"
-
-
-def _configured_context_db() -> tuple[str, str | None, str | None]:
-    return (
-        os.environ.get("USER_CONTEXT_JDBC_URL", ""),
-        os.environ.get("USER_CONTEXT_DB_USER"),
-        os.environ.get("USER_CONTEXT_DB_PASSWORD"),
-    )
-
-
-def context_db_access_plan(jdbc_url: str) -> dict[str, object]:
-    """Return the exact non-secret Snowflake objects needed by POKER_FLINK."""
-    validated_url, endpoint = _parse_postgres_jdbc_url(jdbc_url)
-    return {
-        "service": f"{DATABASE}.{SCHEMA}.POKER_FLINK",
-        "jdbc_url": validated_url,
-        "network_rule": f"{DATABASE}.{SCHEMA}.{FLINK_CONTEXT_DB_RULE}",
-        "network_endpoint": endpoint,
-        "secret": CONTEXT_DB_SECRET,
-        "external_access_integration": FLINK_CONTEXT_DB_EAI,
-        "secret_container": "taskmanager",
-    }
 
 
 def _configured_kafka() -> tuple[str, str | None, str | None]:
@@ -267,59 +188,6 @@ def configure_kafka() -> None:
             "[snowflake] Kafka egress and secret configured for: " + ", ".join(brokers)
         )
         print("[snowflake] Kafka bootstrap servers: " + ", ".join(bootstrap_brokers))
-    finally:
-        wh.close()
-
-
-def configure_flink_context_db() -> None:
-    jdbc_url, username, password = _configured_context_db()
-    plan = context_db_access_plan(jdbc_url)
-    if bool(username) != bool(password):
-        raise SystemExit(
-            "Set both USER_CONTEXT_DB_USER and USER_CONTEXT_DB_PASSWORD"
-        )
-    if not username or not password:
-        raise SystemExit(
-            "Set USER_CONTEXT_DB_USER and USER_CONTEXT_DB_PASSWORD in the shell. "
-            "They are stored as a Snowflake Secret and never written to a spec file."
-        )
-
-    endpoint = str(plan["network_endpoint"])
-    wh = _warehouse()
-    try:
-        statements = [
-            "USE ROLE SYSADMIN",
-            f"USE DATABASE {DATABASE}",
-            f"USE SCHEMA {SCHEMA}",
-            (
-                f"CREATE OR REPLACE NETWORK RULE {FLINK_CONTEXT_DB_RULE} "
-                "MODE = EGRESS TYPE = HOST_PORT "
-                f"VALUE_LIST = ({_sql_string(endpoint)})"
-            ),
-            (
-                "CREATE OR REPLACE SECRET CONTEXT_DB_CREDENTIALS TYPE = PASSWORD "
-                f"USERNAME = {_sql_string(username)} PASSWORD = {_sql_string(password)}"
-            ),
-            "USE ROLE ACCOUNTADMIN",
-            (
-                f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION "
-                f"{FLINK_CONTEXT_DB_EAI} ALLOWED_NETWORK_RULES = "
-                f"({DATABASE}.{SCHEMA}.{FLINK_CONTEXT_DB_RULE}) ENABLED = TRUE"
-            ),
-            (
-                f"GRANT USAGE ON INTEGRATION {FLINK_CONTEXT_DB_EAI} "
-                "TO ROLE SYSADMIN"
-            ),
-            "USE ROLE SYSADMIN",
-            f"GRANT READ ON SECRET {CONTEXT_DB_SECRET} TO ROLE SYSADMIN",
-        ]
-        for statement in statements:
-            wh.execute(statement)
-        print(
-            "[snowflake] Flink PostgreSQL access configured "
-            f"endpoint={endpoint} secret={CONTEXT_DB_SECRET} "
-            f"eai={FLINK_CONTEXT_DB_EAI}"
-        )
     finally:
         wh.close()
 
@@ -601,7 +469,6 @@ def render_specs(
     adapter_allowed_tenants: str = "demo",
     flink_context_savepoint_path: str = "",
     flink_pair_savepoint_path: str = "",
-    user_context_jdbc_url: str | None = None,
 ) -> None:
     image_paths = {
         "application": image_path,
@@ -652,11 +519,6 @@ def render_specs(
                 f"Invalid {label}: expected a savepoint below "
                 "file:///opt/flink/state/savepoints"
             )
-    if user_context_jdbc_url:
-        user_context_jdbc_url, _ = _parse_postgres_jdbc_url(
-            user_context_jdbc_url
-        )
-
     replacements = {
         "__IMAGE_PATH__": image_path,
         "__RISK_IMAGE_PATH__": risk_image_path,
@@ -675,8 +537,6 @@ def render_specs(
         "__FLINK_CONTEXT_SAVEPOINT_PATH__": flink_context_savepoint_path,
         "__FLINK_PAIR_SAVEPOINT_PATH__": flink_pair_savepoint_path,
     }
-    if user_context_jdbc_url:
-        replacements["__USER_CONTEXT_JDBC_URL__"] = user_context_jdbc_url
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
     for template_path in sorted(SPECS_DIR.glob("*.yaml.template")):
         output = RENDERED_DIR / template_path.name.removesuffix(".template")
@@ -690,13 +550,6 @@ def render_specs(
                 continue
             brokers = _parse_brokers(kafka_bootstrap_servers)
             text = text.replace("__KAFKA_BOOTSTRAP_SERVERS__", ",".join(brokers))
-        if "__USER_CONTEXT_JDBC_URL__" in text:
-            output.unlink(missing_ok=True)
-            print(
-                f"[render] skipped {template_path.name}: "
-                "USER_CONTEXT_JDBC_URL not set"
-            )
-            continue
         if "__" in text:
             raise SystemExit(f"Unresolved placeholder in {template_path}")
         output.write_text(text)
@@ -974,11 +827,6 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("bootstrap")
     sub.add_parser("configure-kafka")
-    sub.add_parser("configure-flink-context-db")
-    context_plan = sub.add_parser("plan-flink-context-db")
-    context_plan.add_argument(
-        "--jdbc-url", default=os.environ.get("USER_CONTEXT_JDBC_URL")
-    )
     adapter_kafka = sub.add_parser("configure-adapter-sim-kafka")
     adapter_kafka.add_argument("--allow-shared-credentials", action="store_true")
 
@@ -1052,11 +900,6 @@ def main() -> None:
         "--flink-pair-savepoint-path",
         default=os.environ.get("SPCS_FLINK_PAIR_SAVEPOINT_PATH", ""),
     )
-    render.add_argument(
-        "--user-context-jdbc-url",
-        default=os.environ.get("USER_CONTEXT_JDBC_URL"),
-    )
-
     sub.add_parser("validate-catalog")
     inspect = sub.add_parser("inspect-services")
     inspect.add_argument(
@@ -1087,12 +930,6 @@ def main() -> None:
         bootstrap()
     elif args.command == "configure-kafka":
         configure_kafka()
-    elif args.command == "configure-flink-context-db":
-        configure_flink_context_db()
-    elif args.command == "plan-flink-context-db":
-        if not args.jdbc_url:
-            raise SystemExit("Set USER_CONTEXT_JDBC_URL or pass --jdbc-url")
-        print(json.dumps(context_db_access_plan(args.jdbc_url), indent=2))
     elif args.command == "configure-adapter-sim-kafka":
         configure_adapter_sim_kafka(
             allow_shared_credentials=args.allow_shared_credentials
@@ -1122,7 +959,6 @@ def main() -> None:
             adapter_allowed_tenants=args.adapter_allowed_tenants,
             flink_context_savepoint_path=args.flink_context_savepoint_path,
             flink_pair_savepoint_path=args.flink_pair_savepoint_path,
-            user_context_jdbc_url=args.user_context_jdbc_url,
         )
     elif args.command == "validate-catalog":
         validate_rendered_catalog()
@@ -1150,10 +986,7 @@ def main() -> None:
         deploy_service(
             "POKER_FLINK",
             "flink.yaml",
-            external_access_integrations=(
-                FLINK_KAFKA_EAI,
-                FLINK_CONTEXT_DB_EAI,
-            ),
+            external_access_integrations=(FLINK_KAFKA_EAI,),
         )
     elif args.command == "deploy-adapter-sim":
         deploy_service(
