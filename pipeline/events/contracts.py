@@ -1,4 +1,4 @@
-"""Canonical version-one contracts for direct Kafka publishing.
+"""Versioned canonical contracts for direct Kafka publishing.
 
 Inference events deliberately exclude synthetic truth. Private label contracts
 live in this module so their boundary is explicit, but labels are never accepted
@@ -20,6 +20,7 @@ SESSION_STARTED = "poker.session.started"
 ACCOUNT_LINK_UPDATED = "poker.account-link.updated"
 PLAYER_HAND_CONTEXT_ENRICHED = "poker.hand-player-context.enriched"
 PLAYER_HAND_CONTEXT_TOPIC = "poker.hand-player-context.v1"
+PLAYER_HAND_CONTEXT_V2_TOPIC = "poker.hand-player-context.v2"
 PAIR_FEATURES_COMPUTED = "poker.pair-features.computed"
 PAIR_FEATURES_TOPIC = "poker.pair-features.v1"
 PAIR_FEATURE_DEFINITION_VERSION = "pair-features-v1"
@@ -293,6 +294,75 @@ class PlayerHandContextEvent(_ContractModel):
 
     @model_validator(mode="after")
     def validate_times(self) -> "PlayerHandContextEvent":
+        if self.occurred_at.tzinfo is None or self.emitted_at.tzinfo is None:
+            raise ValueError("event timestamps must include timezone information")
+        if self.occurred_at != self.payload.played_at:
+            raise ValueError("derived occurred_at must equal hand played_at")
+        return self
+
+
+class ContextResolutionV2(_ContractModel):
+    """Stable PostgreSQL lineage; cache/latency details remain runtime metrics."""
+
+    mode: Literal["postgresql_point_in_time"] = "postgresql_point_in_time"
+    policy_version: Literal["jdbc-effective-at-v1"] = "jdbc-effective-at-v1"
+    source: Literal["postgresql"] = "postgresql"
+    context_record_id: uuid.UUID
+    context_version: int = Field(ge=1)
+    context_effective_at: datetime
+
+
+class PlayerHandContextPayloadV2(_ContractModel):
+    """One deterministic player-hand row resolved from PostgreSQL."""
+
+    hand_id: str = Field(min_length=1)
+    table_id: str = Field(min_length=1)
+    played_at: datetime
+    player: HandPlayer
+    actions: list[HandAction]
+    board: list[str]
+    small_blind: float = Field(gt=0)
+    big_blind: float = Field(gt=0)
+    num_players: int = Field(ge=2)
+    pot_size: float = Field(ge=0)
+    source_hand_event_id: uuid.UUID
+    context_status: Literal["matched"] = "matched"
+    context: UserContextPayload
+    revision: Literal[1] = 1
+    context_resolution: ContextResolutionV2
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "PlayerHandContextPayloadV2":
+        if self.context.user_id != self.player.player_id:
+            raise ValueError("context user_id must match player_id")
+        if self.context.context_version != self.context_resolution.context_version:
+            raise ValueError("resolution context_version must match context")
+        if self.context.effective_at != self.context_resolution.context_effective_at:
+            raise ValueError("resolution effective time must match context")
+        if self.context.effective_at > self.played_at:
+            raise ValueError("future context cannot enrich a historical hand")
+        return self
+
+
+class PlayerHandContextEventV2(_ContractModel):
+    """Schema-v2 JDBC lineage event; deliberately incompatible with v1."""
+
+    event_id: uuid.UUID
+    event_type: Literal["poker.hand-player-context.enriched"] = (
+        PLAYER_HAND_CONTEXT_ENRICHED
+    )
+    schema_version: Literal[2] = 2
+    tenant_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    dataset_id: str = Field(min_length=1)
+    dataset_split: str = Field(min_length=1)
+    occurred_at: datetime
+    emitted_at: datetime
+    trace_id: uuid.UUID
+    payload: PlayerHandContextPayloadV2
+
+    @model_validator(mode="after")
+    def validate_times(self) -> "PlayerHandContextEventV2":
         if self.occurred_at.tzinfo is None or self.emitted_at.tzinfo is None:
             raise ValueError("event timestamps must include timezone information")
         if self.occurred_at != self.payload.played_at:
@@ -1119,6 +1189,8 @@ def contract_schema_bundle() -> dict[str, Any]:
         },
         "derived_events": {
             PLAYER_HAND_CONTEXT_ENRICHED: PlayerHandContextEvent.model_json_schema(),
+            PLAYER_HAND_CONTEXT_ENRICHED
+            + "@2": PlayerHandContextEventV2.model_json_schema(),
             PAIR_FEATURES_COMPUTED: PairFeatureEvent.model_json_schema(),
             RISK_SCORE_COMPUTED: RiskScoreEvent.model_json_schema(),
             RISK_ALERT_CREATED: RiskAlertEvent.model_json_schema(),
@@ -1128,6 +1200,8 @@ def contract_schema_bundle() -> dict[str, Any]:
         "topics": dict(sorted(TOPIC_BY_EVENT_TYPE.items())),
         "derived_topics": {
             PLAYER_HAND_CONTEXT_ENRICHED: PLAYER_HAND_CONTEXT_TOPIC,
+            PLAYER_HAND_CONTEXT_ENRICHED
+            + "@2": PLAYER_HAND_CONTEXT_V2_TOPIC,
             PAIR_FEATURES_COMPUTED: PAIR_FEATURES_TOPIC,
             RISK_SCORE_COMPUTED: RISK_SCORES_TOPIC,
             RISK_ALERT_CREATED: RISK_ALERTS_TOPIC,

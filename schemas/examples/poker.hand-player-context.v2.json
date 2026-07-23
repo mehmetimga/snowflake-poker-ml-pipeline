@@ -1,0 +1,66 @@
+{
+  "event_id": "22222222-2222-5222-8222-222222222222",
+  "event_type": "poker.hand-player-context.enriched",
+  "schema_version": 2,
+  "tenant_id": "demo",
+  "product_id": "poker",
+  "dataset_id": "synthetic-context-v2",
+  "dataset_split": "live",
+  "occurred_at": "2026-07-23T12:00:00Z",
+  "emitted_at": "2026-07-23T12:00:00Z",
+  "trace_id": "33333333-3333-4333-8333-333333333333",
+  "payload": {
+    "hand_id": "HAND-1",
+    "table_id": "TABLE-1",
+    "played_at": "2026-07-23T12:00:00Z",
+    "player": {
+      "player_id": "player-a",
+      "name": "Player A",
+      "position": "SB",
+      "stack_start": 100,
+      "hole_cards": "As Kd",
+      "won_amount": 4
+    },
+    "actions": [
+      {
+        "sequence_no": 0,
+        "player_id": "player-a",
+        "street": "preflop",
+        "action_type": "raise",
+        "amount": 4
+      }
+    ],
+    "board": [],
+    "small_blind": 1,
+    "big_blind": 2,
+    "num_players": 2,
+    "pot_size": 4,
+    "source_hand_event_id": "11111111-1111-5111-8111-111111111111",
+    "context_status": "matched",
+    "context": {
+      "user_id": "player-a",
+      "context_version": 1,
+      "effective_at": "2026-07-23T11:00:00Z",
+      "account_created_at": "2025-07-23T11:00:00Z",
+      "country_bucket": "TR",
+      "timezone": "Europe/Istanbul",
+      "acquisition_channel": "organic",
+      "kyc_level": "verified",
+      "account_status": "active",
+      "bankroll_bucket": "medium",
+      "preferred_stake_bucket": "low",
+      "skill_rating": 0.5,
+      "device_id": "device-a",
+      "network_cluster_id": "network-a"
+    },
+    "revision": 1,
+    "context_resolution": {
+      "mode": "postgresql_point_in_time",
+      "policy_version": "jdbc-effective-at-v1",
+      "source": "postgresql",
+      "context_record_id": "44444444-4444-5444-8444-444444444444",
+      "context_version": 1,
+      "context_effective_at": "2026-07-23T11:00:00Z"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Active-user context and Flink architectural refactoring plan
 
-Status: approved architecture direction; implementation pending  
+Status: F1 complete; F2 in progress
 Last reviewed: 2026-07-23
 
 ## 1. Outcome
@@ -251,15 +251,16 @@ context_resolution {
   source: "postgresql",
   context_record_id,
   context_version,
-  context_effective_at,
-  context_loaded_at,
-  cache_result: "hit" | "miss" | "refresh",
-  lookup_age_ms
+  context_effective_at
 }
 ```
 
 The context row is a database snapshot, not a synthetic Kafka event. Retain
 source hand event IDs and dataset/run lineage independently.
+
+Do not put `context_loaded_at`, cache hit/miss, or lookup latency in this
+contract. Those values depend on the particular execution and belong in
+metrics. Excluding them keeps deterministic replay byte-stable.
 
 ### 6.3 Failure semantics
 
@@ -481,18 +482,38 @@ evidence is on `poker.synthetic.hand-player-context.f1.v1`; its paired
 
 ### F2 — Contract and package separation
 
-Status: next.
+Status: in progress locally on 2026-07-23.
 
-1. Define enriched player-context v2 and its compatibility policy.
-2. Replace synthetic Kafka context envelopes with explicit JDBC lineage.
-3. Create the target domain/port/adapter package boundaries.
-4. Extract configuration parsing from topology construction.
-5. Create `ActiveContextEnrichmentJob`.
-6. Move the Kafka temporal join behind `LegacyKafkaTemporalContextJob`.
-7. Give canonical and legacy operators separate UIDs, groups, and outputs.
+- [x] Define enriched player-context v2 and its compatibility policy.
+- [x] Replace synthetic Kafka context envelopes with explicit JDBC lineage.
+- [ ] Create the remaining target domain/port/adapter package boundaries.
+- [ ] Extract configuration parsing from topology construction.
+- [x] Create `ActiveContextEnrichmentJob`.
+- [x] Move the Kafka temporal join behind `LegacyKafkaTemporalContextJob`.
+- [x] Give canonical and legacy operators separate UIDs, groups, and outputs.
+- [x] Add an explicit v1/v2 adapter to the pair-feature job and offline oracle.
 
 Exit gate: the canonical job has no context Kafka source, and its domain tests
 run without Flink or PostgreSQL.
+
+Validation evidence:
+
+- schema-v2 Pydantic and JSON Schema fixtures reject legacy temporal-join
+  fields and inconsistent PostgreSQL lineage;
+- the canonical JDBC event builder is deterministic across different cache
+  load times;
+- Java unit/package tests and the targeted Python v1/v2 contract tests pass;
+- a bounded local hand -> JDBC context-v2 run emitted exactly six matched
+  player rows with no duplicates;
+- the schema-v2 pair adapter emitted exactly 15 feature snapshots for the
+  six-player hand and matched the independent Python offline oracle; and
+- `poker.synthetic.pipeline.dead-letter.f2.v1` remained at zero offsets on
+  all three partitions.
+
+The isolated accepted evidence topics are
+`poker.synthetic.hand-player-context.v2` and
+`poker.synthetic.pair-features.context-v2.v1`. They were retained for audit.
+No SPCS service was changed.
 
 ### F3 — Robust synchronous repository
 
@@ -651,17 +672,11 @@ Do not include these in the current refactor:
 
 ## 15. Immediate implementation slice
 
-Start with F2 in this order:
-
-1. freeze the v2 JDBC lineage and compatibility contract;
-2. create a fresh v2 output topic and schema fixtures;
-3. extract the canonical `ActiveContextEnrichmentJob` entrypoint;
-4. isolate the Kafka temporal join in a rollback-only legacy entrypoint;
-5. move config, domain, repository port, JDBC adapter, Flink operator, and
-   event contracts into explicit packages;
-6. assign separate canonical and legacy operator UIDs and consumer groups;
-   and
-7. run v1/v2 contract comparison and bounded recovery tests.
+Finish F2 by moving configuration, domain records, repository ports, JDBC
+adapters, Flink operators, and event-contract builders into explicit packages.
+Keep the compatibility dispatcher only until deployment and runbook callers
+use the two explicit entrypoints. Re-run the same bounded v2 evidence after
+the move, then begin F3 repository reconnect/retry work.
 
 Do not start SPCS mutation until F1–F5 local and rendered-spec gates pass.
 

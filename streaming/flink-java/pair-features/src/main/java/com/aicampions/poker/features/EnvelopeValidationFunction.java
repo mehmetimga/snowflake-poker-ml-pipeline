@@ -6,16 +6,19 @@ import org.apache.flink.util.Collector;
 final class EnvelopeValidationFunction extends ProcessFunction<String, String> {
     private final String sourceTopic;
     private final boolean simulationMode;
+    private final int inputSchemaVersion;
 
-    EnvelopeValidationFunction(String sourceTopic, boolean simulationMode) {
+    EnvelopeValidationFunction(
+            String sourceTopic, boolean simulationMode, int inputSchemaVersion) {
         this.sourceTopic = sourceTopic;
         this.simulationMode = simulationMode;
+        this.inputSchemaVersion = inputSchemaVersion;
     }
 
     @Override
     public void processElement(String value, Context context, Collector<String> output) {
         try {
-            PairEventJson.validateEnriched(value);
+            PairEventJson.validateEnriched(value, inputSchemaVersion);
             if (simulationMode
                     && !PairEventJson.requireText(PairEventJson.parse(value), "dataset_id")
                             .startsWith("sim-")) {

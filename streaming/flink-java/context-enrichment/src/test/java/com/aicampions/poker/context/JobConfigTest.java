@@ -52,6 +52,8 @@ final class JobConfigTest {
                         "USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db.example/poker"));
 
         assertEquals("jdbc", config.contextSource());
+        assertEquals("poker.hand-player-context.v2", config.outputTopic());
+        assertEquals("flink-active-context-v2", config.groupId());
         assertEquals(36L, config.contextCacheTtlHours());
         assertEquals(60L, config.contextRefreshMinutes());
         assertFalse(config.safeSummary().contains("db.example"));
@@ -90,7 +92,7 @@ final class JobConfigTest {
                         "KAFKA_USER_CONTEXT_TOPIC", "poker.sim.user-context.v1",
                         "KAFKA_PLAYER_CONTEXT_TOPIC", "poker.sim.hand-player-context.v1",
                         "KAFKA_DEAD_LETTER_TOPIC", "poker.sim.pipeline.dead-letter.v1",
-                        "FLINK_CONTEXT_GROUP_ID", "flink-context-enrichment-sim-v1",
+                        "FLINK_CONTEXT_GROUP_ID", "flink-legacy-kafka-context-sim-v1",
                         "FLINK_CONTEXT_IDLE_SOURCE_TIMEOUT_MS", "5000"));
         assertEquals(true, config.simulationMode());
         assertEquals(5_000L, config.idleSourceTimeoutMs());
@@ -105,5 +107,23 @@ final class JobConfigTest {
                 () -> ContextEnrichmentJob.JobConfig.parse(
                         new String[0],
                         Map.of("KAFKA_WORLD_HANDS_TOPIC", "poker.sim.hands.raw.v1")));
+    }
+
+    @Test
+    void jdbcSimulationUsesItsOwnV2TopicAndGroup() {
+        ContextEnrichmentJob.JobConfig config = ContextEnrichmentJob.JobConfig.parse(
+                new String[] {"--simulation-mode"},
+                Map.of(
+                        "FLINK_CONTEXT_SOURCE", "jdbc",
+                        "USER_CONTEXT_JDBC_URL", "jdbc:postgresql://db/poker",
+                        "KAFKA_WORLD_HANDS_TOPIC", "poker.sim.hands.raw.v1",
+                        "KAFKA_PLAYER_CONTEXT_V2_TOPIC",
+                                "poker.sim.hand-player-context.v2",
+                        "KAFKA_DEAD_LETTER_TOPIC", "poker.sim.pipeline.dead-letter.v1",
+                        "FLINK_ACTIVE_CONTEXT_GROUP_ID",
+                                "flink-active-context-sim-v2"));
+
+        assertEquals("poker.sim.hand-player-context.v2", config.outputTopic());
+        assertEquals("flink-active-context-sim-v2", config.groupId());
     }
 }

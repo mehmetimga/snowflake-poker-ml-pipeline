@@ -172,8 +172,8 @@ final class PairFeatureMath {
         payload.put("source_revision_b", payloadB.path("revision").asInt());
         payload.put("context_status_a", PairEventJson.requireText(payloadA, "context_status"));
         payload.put("context_status_b", PairEventJson.requireText(payloadB, "context_status"));
-        copyNullableInteger(payloadA, payload, "context_version", "context_version_a");
-        copyNullableInteger(payloadB, payload, "context_version", "context_version_b");
+        payload.put("context_version_a", PairEventJson.contextVersion(payloadA));
+        payload.put("context_version_b", PairEventJson.contextVersion(payloadB));
         payload.put("snapshot_revision", observation.path("snapshot_revision").asInt());
         payload.put("feature_definition_version", PairEventJson.FEATURE_VERSION);
         payload.set("current_hand", currentHand(payloadA, payloadB));

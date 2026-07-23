@@ -3,19 +3,25 @@ package com.aicampions.poker.context;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/** JSON representation stored in Flink ValueState for one active player. */
+/** Versioned PostgreSQL snapshot stored in Flink ValueState for one active player. */
 final class CachedUserContext {
     private CachedUserContext() {}
 
-    static String create(String contextEvent, long loadedAtMs) {
+    static String create(UserContextRecord record, long loadedAtMs) {
         ObjectNode cached = EventJson.MAPPER.createObjectNode();
+        cached.put("cache_schema_version", 2);
         cached.put("loaded_at_ms", loadedAtMs);
-        cached.set("event", EventJson.parse(contextEvent));
+        cached.put("context_record_id", record.contextRecordId().toString());
+        cached.set("context", record.toPayload());
         return EventJson.compact(cached);
     }
 
-    static String event(String cached) {
-        return EventJson.compact(EventJson.parse(cached).path("event"));
+    static JsonNode context(String cached) {
+        return EventJson.parse(cached).path("context");
+    }
+
+    static String contextRecordId(String cached) {
+        return EventJson.requireText(EventJson.parse(cached), "context_record_id");
     }
 
     static boolean isFresh(String cached, long nowMs, long refreshAfterMs) {
@@ -24,7 +30,7 @@ final class CachedUserContext {
     }
 
     static boolean isEffectiveFor(String cached, long playedAtMs) {
-        JsonNode payload = EventJson.parse(cached).path("event").path("payload");
+        JsonNode payload = context(cached);
         return EventJson.parseInstant(EventJson.requireText(payload, "effective_at")) <= playedAtMs;
     }
 }

@@ -8,7 +8,11 @@ import time
 from collections import Counter
 
 from pipeline.config import get_settings
-from pipeline.events import PlayerHandContextEvent, remember_deterministic_event
+from pipeline.events import (
+    PlayerHandContextEvent,
+    PlayerHandContextEventV2,
+    remember_deterministic_event,
+)
 from pipeline.kafka.config import kafka_client_kwargs
 
 
@@ -49,7 +53,7 @@ def main() -> None:
     consumer.assign(assignments)
     consumer.seek_to_beginning(*assignments)
 
-    records: dict[str, PlayerHandContextEvent] = {}
+    records: dict[str, PlayerHandContextEvent | PlayerHandContextEventV2] = {}
     statuses: Counter[str] = Counter()
     raw_records = 0
     deadline = time.monotonic() + args.timeout_ms / 1_000
@@ -60,7 +64,20 @@ def main() -> None:
             received = False
             for messages in batches.values():
                 for message in messages:
-                    event = PlayerHandContextEvent.model_validate(message.value)
+                    schema_version = message.value.get("schema_version")
+                    if schema_version == 2:
+                        event = PlayerHandContextEventV2.model_validate(message.value)
+                        context_effective_at = (
+                            event.payload.context_resolution.context_effective_at
+                        )
+                    elif schema_version == 1:
+                        event = PlayerHandContextEvent.model_validate(message.value)
+                        context_effective_at = event.payload.context_effective_at
+                    else:
+                        raise ValueError(
+                            "unsupported player-context "
+                            f"schema_version={schema_version!r}"
+                        )
                     if args.dataset_id and event.dataset_id != args.dataset_id:
                         continue
                     raw_records += 1
@@ -68,8 +85,8 @@ def main() -> None:
                     if message.key != expected_key:
                         raise ValueError(f"incorrect player key for event {event.event_id}")
                     if (
-                        event.payload.context_effective_at is not None
-                        and event.payload.context_effective_at > event.payload.played_at
+                        context_effective_at is not None
+                        and context_effective_at > event.payload.played_at
                     ):
                         raise ValueError(f"future context leaked into event {event.event_id}")
                     if remember_deterministic_event(

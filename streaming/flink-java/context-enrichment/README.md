@@ -5,8 +5,8 @@ one record per player, and lazily looks up only active players in PostgreSQL.
 The result is retained in Flink keyed state with a sliding inactivity TTL.
 
 The previous Kafka context-stream join remains available temporarily through
-`FLINK_CONTEXT_SOURCE=kafka` for rollback. The canonical target is
-`FLINK_CONTEXT_SOURCE=jdbc`.
+the separate `LegacyKafkaTemporalContextJob` entrypoint. The canonical
+`ActiveContextEnrichmentJob` requires `FLINK_CONTEXT_SOURCE=jdbc`.
 
 For a beginner-oriented explanation of streams, keyed state, event time,
 watermarks, timers, both Java jobs, and the downstream model vector, read
@@ -31,8 +31,12 @@ watermarks, timers, both Java jobs, and the downstream model vector, read
   hand, hole cards, or database error message.
 - Stable operator UIDs and UUIDv5 output IDs keep downstream upserts safe.
 
-The output contract is `poker.hand-player-context.enriched` schema v1 on
-`poker.hand-player-context.v1`, keyed by player ID.
+The canonical output contract is `poker.hand-player-context.enriched` schema
+v2 on `poker.hand-player-context.v2`, keyed by player ID. Its
+`context_resolution` object identifies PostgreSQL point-in-time resolution,
+the policy version, context record ID, context version, and effective time.
+Cache hit/miss and lookup latency are runtime metrics rather than event
+fields, so replaying the same source data produces the same event bytes.
 
 ## Build and test
 
@@ -56,21 +60,22 @@ source .env
 set +a
 
 $FLINK_HOME/bin/flink run \
-  -c com.aicampions.poker.context.ContextEnrichmentJob \
+  -c com.aicampions.poker.context.app.ActiveContextEnrichmentJob \
   streaming/flink-java/context-enrichment/target/context-enrichment-0.1.0.jar \
-  --group-id flink-context-enrichment-v1 \
+  --context-source jdbc \
+  --group-id flink-active-context-v2 \
   --parallelism 2
 ```
 
-Use `--from-beginning --bounded` for a deterministic finite audit. Bounded
-mode snapshots each topic's end offsets when the job starts, drains both
-inputs, advances the final watermark, and exits.
+Use `--from-beginning --bounded` for a deterministic finite audit. The
+canonical job snapshots the hand topic's end offsets when it starts, drains
+that input, and exits.
 
 Important options:
 
 | Option | Default |
 |---|---:|
-| `--context-source` | `kafka` during migration; target `jdbc` |
+| `--context-source` | required `jdbc` for the canonical entrypoint |
 | `--context-jdbc-table` | `public.poker_user_context` |
 | `--context-jdbc-query-timeout-seconds` | `1` |
 | `--context-cache-ttl-hours` | `36` |
@@ -88,6 +93,20 @@ TaskManager also requires `USER_CONTEXT_DB_USER` and
 `USER_CONTEXT_DB_PASSWORD` from its runtime Secret. Username/password command
 line arguments are rejected, and neither credential is stored in the
 serializable job configuration or process-function fields.
+
+The rollback-only temporal join must be submitted explicitly:
+
+```bash
+$FLINK_HOME/bin/flink run \
+  -c com.aicampions.poker.context.app.LegacyKafkaTemporalContextJob \
+  streaming/flink-java/context-enrichment/target/context-enrichment-0.1.0.jar \
+  --context-source kafka \
+  --group-id flink-legacy-kafka-context-v1
+```
+
+It retains the schema-v1 topic and has a separate consumer group, job name,
+and operator UID namespace. Do not restore its savepoint into the canonical
+JDBC topology.
 
 The tenant/product migration is
 `infra/simulation/postgres/init/004_scope_user_context.sql`. It is forward-only

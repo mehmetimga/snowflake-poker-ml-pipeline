@@ -28,6 +28,7 @@ class JobConfigTest {
 
         assertEquals("enriched.test", config.inputTopic());
         assertEquals("features.test", config.outputTopic());
+        assertEquals(2, config.inputSchemaVersion());
         assertTrue(config.fromBeginning());
         assertTrue(config.bounded());
         assertEquals(0, config.checkpointIntervalMs());
@@ -56,10 +57,31 @@ class JobConfigTest {
     }
 
     @Test
+    void schemaTwoUsesSeparateInputOutputAndConsumerGroup() {
+        PairFeaturesJob.JobConfig config = PairFeaturesJob.JobConfig.parse(
+                new String[] {"--input-schema-version", "2"},
+                Map.of());
+
+        assertEquals(2, config.inputSchemaVersion());
+        assertEquals("poker.hand-player-context.v2", config.inputTopic());
+        assertEquals("poker.pair-features.context-v2.v1", config.outputTopic());
+        assertEquals("flink-pair-features-context-v2", config.groupId());
+    }
+
+    @Test
+    void unsupportedInputSchemaIsRejected() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PairFeaturesJob.JobConfig.parse(
+                        new String[] {"--input-schema-version", "3"}, Map.of()));
+    }
+
+    @Test
     void simulationModeRequiresExactIsolatedBoundary() {
         PairFeaturesJob.JobConfig config = PairFeaturesJob.JobConfig.parse(
                 new String[] {"--simulation-mode"},
                 Map.of(
+                        "FLINK_PLAYER_CONTEXT_SCHEMA_VERSION", "1",
                         "KAFKA_PLAYER_CONTEXT_TOPIC", "poker.sim.hand-player-context.v1",
                         "KAFKA_PAIR_FEATURES_TOPIC", "poker.sim.pair-features.v1",
                         "KAFKA_DEAD_LETTER_TOPIC", "poker.sim.pipeline.dead-letter.v1",
@@ -71,12 +93,12 @@ class JobConfigTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PairFeaturesJob.JobConfig.parse(
-                        new String[] {"--simulation-mode"},
+                        new String[] {"--simulation-mode", "--input-schema-version", "1"},
                         Map.of("KAFKA_PAIR_FEATURES_TOPIC", "poker.pair-features.v1")));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PairFeaturesJob.JobConfig.parse(
-                        new String[0],
+                        new String[] {"--input-schema-version", "1"},
                         Map.of("KAFKA_PAIR_FEATURES_TOPIC", "poker.sim.pair-features.v1")));
     }
 }

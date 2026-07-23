@@ -12,6 +12,7 @@ from pipeline.config import get_settings
 from pipeline.events import (
     PairFeatureEvent,
     PlayerHandContextEvent,
+    PlayerHandContextEventV2,
     remember_deterministic_event,
 )
 from pipeline.features import PairFeatureCore
@@ -153,9 +154,19 @@ def main() -> None:
             settle_ms=args.settle_ms,
             dataset_id=args.dataset_id,
         )
-        enriched: dict[str, PlayerHandContextEvent] = {}
+        enriched: dict[
+            str, PlayerHandContextEvent | PlayerHandContextEventV2
+        ] = {}
         for key, raw in raw_input:
-            event = PlayerHandContextEvent.model_validate(raw)
+            schema_version = raw.get("schema_version")
+            if schema_version == 1:
+                event = PlayerHandContextEvent.model_validate(raw)
+            elif schema_version == 2:
+                event = PlayerHandContextEventV2.model_validate(raw)
+            else:
+                raise ValueError(
+                    f"unsupported player-context schema_version={schema_version!r}"
+                )
             if key != event.payload.player.player_id.encode("utf-8"):
                 raise ValueError(f"incorrect player key for source event {event.event_id}")
             remember_deterministic_event(

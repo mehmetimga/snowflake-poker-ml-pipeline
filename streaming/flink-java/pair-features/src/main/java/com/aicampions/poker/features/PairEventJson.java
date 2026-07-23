@@ -43,13 +43,20 @@ final class PairEventJson {
     }
 
     static void validateEnriched(String value) {
+        validateEnriched(value, 1);
+    }
+
+    static void validateEnriched(String value, int expectedSchemaVersion) {
         JsonNode root = parse(value);
         parseUuid(requireText(root, "event_id"));
         if (!ENRICHED.equals(requireText(root, "event_type"))) {
             throw new IllegalArgumentException("unexpected event_type");
         }
-        if (root.path("schema_version").asInt(-1) != 1) {
-            throw new IllegalArgumentException("schema_version must be 1");
+        int schemaVersion = root.path("schema_version").asInt(-1);
+        if (schemaVersion != expectedSchemaVersion
+                || (schemaVersion != 1 && schemaVersion != 2)) {
+            throw new IllegalArgumentException(
+                    "schema_version must match configured input contract");
         }
         requireText(root, "tenant_id");
         requireText(root, "product_id");
@@ -71,7 +78,51 @@ final class PairEventJson {
         if (!payload.path("actions").isArray()) {
             throw new IllegalArgumentException("actions must be an array");
         }
+        if (schemaVersion == 2) {
+            validateJdbcV2(payload);
+        }
         rejectForbiddenFields(payload);
+    }
+
+    private static void validateJdbcV2(JsonNode payload) {
+        if (!"matched".equals(requireText(payload, "context_status"))
+                || payload.path("revision").asInt(-1) != 1) {
+            throw new IllegalArgumentException(
+                    "JDBC v2 requires matched revision-one context");
+        }
+        JsonNode context = payload.path("context");
+        String playerId = requireText(payload.path("player"), "player_id");
+        if (!playerId.equals(requireText(context, "user_id"))) {
+            throw new IllegalArgumentException("context user must match player");
+        }
+        int version = context.path("context_version").asInt(0);
+        Instant effectiveAt = parseInstant(requireText(context, "effective_at"));
+        Instant playedAt = parseInstant(requireText(payload, "played_at"));
+        if (version < 1 || effectiveAt.isAfter(playedAt)) {
+            throw new IllegalArgumentException("invalid JDBC context version or effective time");
+        }
+        JsonNode resolution = payload.path("context_resolution");
+        if (!"postgresql_point_in_time".equals(requireText(resolution, "mode"))
+                || !"jdbc-effective-at-v1".equals(requireText(resolution, "policy_version"))
+                || !"postgresql".equals(requireText(resolution, "source"))) {
+            throw new IllegalArgumentException("invalid JDBC context resolution policy");
+        }
+        parseUuid(requireText(resolution, "context_record_id"));
+        if (resolution.path("context_version").asInt(0) != version
+                || !requireText(resolution, "context_effective_at")
+                        .equals(requireText(context, "effective_at"))) {
+            throw new IllegalArgumentException("resolution does not match context snapshot");
+        }
+        for (String legacyField : List.of(
+                "source_context_event_id",
+                "allowed_lateness_ms",
+                "correction_window_ms",
+                "join_policy_version")) {
+            if (payload.has(legacyField)) {
+                throw new IllegalArgumentException(
+                        "JDBC v2 rejects legacy field " + legacyField);
+            }
+        }
     }
 
     static String requireText(JsonNode node, String field) {
@@ -96,6 +147,18 @@ final class PairEventJson {
 
     static String handId(String value) {
         return requireText(parse(value).path("payload"), "hand_id");
+    }
+
+    static int contextVersion(JsonNode payload) {
+        JsonNode legacy = payload.path("context_version");
+        if (legacy.isIntegralNumber()) {
+            return legacy.asInt();
+        }
+        int version = payload.path("context_resolution").path("context_version").asInt(0);
+        if (version < 1) {
+            throw new IllegalArgumentException("context_version is missing");
+        }
+        return version;
     }
 
     static String pairKey(String value) {

@@ -25,7 +25,10 @@ verify_main_class() {
 
 verify_main_class \
   /opt/flink/usrlib/context-enrichment.jar \
-  com.aicampions.poker.context.ContextEnrichmentJob
+  com.aicampions.poker.context.app.ActiveContextEnrichmentJob
+verify_main_class \
+  /opt/flink/usrlib/context-enrichment.jar \
+  com.aicampions.poker.context.app.LegacyKafkaTemporalContextJob
 verify_main_class \
   /opt/flink/usrlib/pair-features.jar \
   com.aicampions.poker.features.PairFeaturesJob

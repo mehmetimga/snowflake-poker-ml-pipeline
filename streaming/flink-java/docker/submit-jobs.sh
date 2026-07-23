@@ -6,8 +6,8 @@ startup_timeout_seconds="${FLINK_STARTUP_TIMEOUT_SECONDS:-180}"
 poll_seconds="${FLINK_HEALTH_POLL_SECONDS:-30}"
 context_jar="/opt/flink/usrlib/context-enrichment.jar"
 pair_jar="/opt/flink/usrlib/pair-features.jar"
-context_name="poker-event-time-context-enrichment-v1"
-pair_name="poker-pair-features-v1"
+context_name="poker-active-context-enrichment-v2"
+pair_name="poker-pair-features-v1-from-context-v2"
 
 deadline=$((SECONDS + startup_timeout_seconds))
 until curl --silent --show-error --fail "${rest_url}/overview" >/dev/null; do

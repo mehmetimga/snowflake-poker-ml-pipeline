@@ -23,8 +23,11 @@ from pipeline.events import (
     PairFeaturePayload,
     PairHistoryFeatures,
     PlayerHandContextEvent,
+    PlayerHandContextEventV2,
     UserHistoryFeatures,
 )
+
+PlayerContextEvent = PlayerHandContextEvent | PlayerHandContextEventV2
 
 
 _POSITION_INDEX = {"UTG": 0, "MP": 1, "CO": 2, "BTN": 3, "SB": 4, "BB": 5}
@@ -38,6 +41,12 @@ def _q(value: float) -> float:
     return round(float(value), 9)
 
 
+def _context_version(event: PlayerContextEvent) -> int | None:
+    if isinstance(event, PlayerHandContextEventV2):
+        return event.payload.context_resolution.context_version
+    return event.payload.context_version
+
+
 def canonical_pair(player_left: str, player_right: str) -> tuple[str, str, str]:
     player_a, player_b = sorted((str(player_left), str(player_right)))
     if player_a == player_b:
@@ -45,12 +54,12 @@ def canonical_pair(player_left: str, player_right: str) -> tuple[str, str, str]:
     return player_a, player_b, f"{player_a}:{player_b}"
 
 
-def _player_actions(event: PlayerHandContextEvent) -> list[object]:
+def _player_actions(event: PlayerContextEvent) -> list[object]:
     player_id = event.payload.player.player_id
     return [action for action in event.payload.actions if action.player_id == player_id]
 
 
-def _action_summary(event: PlayerHandContextEvent) -> dict[str, float | int | bool]:
+def _action_summary(event: PlayerContextEvent) -> dict[str, float | int | bool]:
     actions = _player_actions(event)
     return {
         "invested": float(sum(action.amount for action in actions)),
@@ -82,7 +91,7 @@ class _UserAggregate:
             saw_flop_rate=_q(self.saw_flop_hands / divisor),
         )
 
-    def update(self, event: PlayerHandContextEvent) -> None:
+    def update(self, event: PlayerContextEvent) -> None:
         played_at = event.payload.played_at
         if self.last_played_at is not None and played_at < self.last_played_at:
             raise ValueError("new player hands must be processed in event-time order")
@@ -130,8 +139,8 @@ class _PairAggregate:
 
     def update(
         self,
-        event_a: PlayerHandContextEvent,
-        event_b: PlayerHandContextEvent,
+        event_a: PlayerContextEvent,
+        event_b: PlayerContextEvent,
     ) -> None:
         played_at = event_a.payload.played_at
         if self.last_played_at is not None and played_at < self.last_played_at:
@@ -153,8 +162,8 @@ class _PairAggregate:
 
 
 def _current_hand_features(
-    event_a: PlayerHandContextEvent,
-    event_b: PlayerHandContextEvent,
+    event_a: PlayerContextEvent,
+    event_b: PlayerContextEvent,
 ) -> CurrentHandPairFeatures:
     summary_a = _action_summary(event_a)
     summary_b = _action_summary(event_b)
@@ -192,8 +201,8 @@ def _current_hand_features(
 
 
 def _context_features(
-    event_a: PlayerHandContextEvent,
-    event_b: PlayerHandContextEvent,
+    event_a: PlayerContextEvent,
+    event_b: PlayerContextEvent,
 ) -> PairContextFeatures:
     played_at = event_a.payload.played_at
     context_a = event_a.payload.context
@@ -239,8 +248,8 @@ def _context_features(
 
 
 def _event_id(
-    event_a: PlayerHandContextEvent,
-    event_b: PlayerHandContextEvent,
+    event_a: PlayerContextEvent,
+    event_b: PlayerContextEvent,
     pair_key: str,
 ) -> uuid.UUID:
     return uuid.uuid5(
@@ -266,20 +275,26 @@ class PairFeatureCore:
     def __init__(self) -> None:
         self._users: dict[str, _UserAggregate] = {}
         self._user_hand_history: dict[tuple[str, str], UserHistoryFeatures] = {}
-        self._hands: dict[str, dict[str, PlayerHandContextEvent]] = {}
+        self._hands: dict[str, dict[str, PlayerContextEvent]] = {}
         self._pair_signatures: dict[tuple[str, str], tuple[uuid.UUID, uuid.UUID]] = {}
         self._pair_revisions: Counter[tuple[str, str]] = Counter()
         self._pairs: dict[str, _PairAggregate] = {}
         self._pair_hand_history: dict[tuple[str, str], PairHistoryFeatures] = {}
 
     def process(
-        self, raw_event: PlayerHandContextEvent | Mapping[str, object]
+        self, raw_event: PlayerContextEvent | Mapping[str, object]
     ) -> list[PairFeatureEvent]:
-        event = (
-            raw_event
-            if isinstance(raw_event, PlayerHandContextEvent)
-            else PlayerHandContextEvent.model_validate(raw_event)
-        )
+        if isinstance(raw_event, (PlayerHandContextEvent, PlayerHandContextEventV2)):
+            event = raw_event
+        elif raw_event.get("schema_version") == 2:
+            event = PlayerHandContextEventV2.model_validate(raw_event)
+        elif raw_event.get("schema_version") == 1:
+            event = PlayerHandContextEvent.model_validate(raw_event)
+        else:
+            raise ValueError(
+                "unsupported player-context "
+                f"schema_version={raw_event.get('schema_version')!r}"
+            )
         payload = event.payload
         player_id = payload.player.player_id
         hand_id = payload.hand_id
@@ -325,12 +340,12 @@ class PairFeatureCore:
         return output
 
     def process_many(
-        self, events: Iterable[PlayerHandContextEvent | Mapping[str, object]]
+        self, events: Iterable[PlayerContextEvent | Mapping[str, object]]
     ) -> list[PairFeatureEvent]:
         return [output for event in events for output in self.process(event)]
 
     @staticmethod
-    def _validate_complete_hand(events: Iterable[PlayerHandContextEvent]) -> None:
+    def _validate_complete_hand(events: Iterable[PlayerContextEvent]) -> None:
         values = list(events)
         first = values[0]
         expected = (
@@ -357,8 +372,8 @@ class PairFeatureCore:
 
     def _build_pair_event(
         self,
-        event_a: PlayerHandContextEvent,
-        event_b: PlayerHandContextEvent,
+        event_a: PlayerContextEvent,
+        event_b: PlayerContextEvent,
         pair_key: str,
         snapshot_revision: int,
     ) -> PairFeatureEvent:
@@ -387,8 +402,8 @@ class PairFeatureCore:
             source_revision_b=payload_b.revision,
             context_status_a=payload_a.context_status,
             context_status_b=payload_b.context_status,
-            context_version_a=payload_a.context_version,
-            context_version_b=payload_b.context_version,
+            context_version_a=_context_version(event_a),
+            context_version_b=_context_version(event_b),
             snapshot_revision=snapshot_revision,
             current_hand=_current_hand_features(event_a, event_b),
             context=_context_features(event_a, event_b),

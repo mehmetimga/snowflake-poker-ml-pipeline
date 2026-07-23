@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicampions.com/schemas/events/poker.hand-player-context.v2.schema.json",
+  "title": "Poker hand-player context enriched v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "tenant_id",
+    "product_id",
+    "dataset_id",
+    "dataset_split",
+    "occurred_at",
+    "emitted_at",
+    "trace_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"const": "poker.hand-player-context.enriched"},
+    "schema_version": {"const": 2},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "dataset_split": {"type": "string", "minLength": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "trace_id": {"type": "string", "format": "uuid"},
+    "payload": {"$ref": "#/$defs/payload"}
+  },
+  "$defs": {
+    "player": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "player_id",
+        "name",
+        "position",
+        "stack_start",
+        "hole_cards",
+        "won_amount"
+      ],
+      "properties": {
+        "player_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "position": {"enum": ["SB", "BB", "UTG", "MP", "CO", "BTN"]},
+        "stack_start": {"type": "number", "exclusiveMinimum": 0},
+        "hole_cards": {"type": "string", "minLength": 5},
+        "won_amount": {"type": "number", "minimum": 0}
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence_no", "player_id", "street", "action_type", "amount"],
+      "properties": {
+        "sequence_no": {"type": "integer", "minimum": 0},
+        "player_id": {"type": "string", "minLength": 1},
+        "street": {"enum": ["preflop", "flop", "turn", "river"]},
+        "action_type": {"enum": ["fold", "check", "call", "bet", "raise"]},
+        "amount": {"type": "number", "minimum": 0}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id",
+        "context_version",
+        "effective_at",
+        "account_created_at",
+        "country_bucket",
+        "timezone",
+        "acquisition_channel",
+        "kyc_level",
+        "account_status",
+        "bankroll_bucket",
+        "preferred_stake_bucket",
+        "skill_rating",
+        "device_id",
+        "network_cluster_id"
+      ],
+      "properties": {
+        "user_id": {"type": "string", "minLength": 1},
+        "context_version": {"type": "integer", "minimum": 1},
+        "effective_at": {"type": "string", "format": "date-time"},
+        "account_created_at": {"type": "string", "format": "date-time"},
+        "country_bucket": {"type": "string", "minLength": 2},
+        "timezone": {"type": "string", "minLength": 1},
+        "acquisition_channel": {
+          "enum": ["organic", "affiliate", "paid", "referral"]
+        },
+        "kyc_level": {"enum": ["pending", "basic", "verified"]},
+        "account_status": {"enum": ["active", "restricted", "suspended"]},
+        "bankroll_bucket": {"enum": ["low", "medium", "high"]},
+        "preferred_stake_bucket": {"enum": ["micro", "low", "medium", "high"]},
+        "skill_rating": {"type": "number", "minimum": 0, "maximum": 1},
+        "device_id": {"type": "string", "minLength": 1},
+        "network_cluster_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "policy_version",
+        "source",
+        "context_record_id",
+        "context_version",
+        "context_effective_at"
+      ],
+      "properties": {
+        "mode": {"const": "postgresql_point_in_time"},
+        "policy_version": {"const": "jdbc-effective-at-v1"},
+        "source": {"const": "postgresql"},
+        "context_record_id": {"type": "string", "format": "uuid"},
+        "context_version": {"type": "integer", "minimum": 1},
+        "context_effective_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hand_id",
+        "table_id",
+        "played_at",
+        "player",
+        "actions",
+        "board",
+        "small_blind",
+        "big_blind",
+        "num_players",
+        "pot_size",
+        "source_hand_event_id",
+        "context_status",
+        "context",
+        "revision",
+        "context_resolution"
+      ],
+      "properties": {
+        "hand_id": {"type": "string", "minLength": 1},
+        "table_id": {"type": "string", "minLength": 1},
+        "played_at": {"type": "string", "format": "date-time"},
+        "player": {"$ref": "#/$defs/player"},
+        "actions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/action"}
+        },
+        "board": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "small_blind": {"type": "number", "exclusiveMinimum": 0},
+        "big_blind": {"type": "number", "exclusiveMinimum": 0},
+        "num_players": {"type": "integer", "minimum": 2},
+        "pot_size": {"type": "number", "minimum": 0},
+        "source_hand_event_id": {"type": "string", "format": "uuid"},
+        "context_status": {"const": "matched"},
+        "context": {"$ref": "#/$defs/context"},
+        "revision": {"const": 1},
+        "context_resolution": {"$ref": "#/$defs/resolution"}
+      }
+    }
+  }
+}

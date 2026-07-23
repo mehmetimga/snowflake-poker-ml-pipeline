@@ -87,6 +87,31 @@ class PairFeatureMathTest {
         assertEquals(60.0, next.path("last_seen_age_seconds").asDouble());
     }
 
+    @Test
+    void schemaTwoJdbcInputAdaptsToTheSamePairFeatureVersion() {
+        ObjectNode eventA = jdbcV2(enriched("p1", "BTN", 30.0, 0.6, "device-a", 365));
+        ObjectNode eventB = jdbcV2(enriched("p2", "BB", 0.0, 0.4, "device-b", 730));
+        PairEventJson.validateEnriched(PairEventJson.compact(eventA), 2);
+        PairEventJson.validateEnriched(PairEventJson.compact(eventB), 2);
+        JsonNode userHistory = PairFeatureMath.userSnapshot(PairFeatureMath.emptyUserState());
+        eventA.set("user_history", userHistory.deepCopy());
+        eventB.set("user_history", userHistory.deepCopy());
+        JsonNode observation = PairEventJson.parse(PairEventJson.pairObservation(
+                "p1:p2",
+                1,
+                PairEventJson.compact(eventA),
+                PairEventJson.compact(eventB)));
+
+        JsonNode output = PairEventJson.parse(PairFeatureMath.buildPairFeatureEvent(
+                observation, PairFeatureMath.emptyPairState()));
+
+        assertEquals(1, output.path("payload").path("context_version_a").asInt());
+        assertEquals(1, output.path("payload").path("context_version_b").asInt());
+        assertEquals(
+                PairEventJson.FEATURE_VERSION,
+                output.path("payload").path("feature_definition_version").asText());
+    }
+
     private static ObjectNode enriched(
             String playerId,
             String position,
@@ -161,6 +186,30 @@ class PairFeatureMathTest {
         addAction(actions, 3, "p2", "flop", "call", 5.0);
         addAction(actions, 4, "p2", "river", "fold", 0.0);
         return actions;
+    }
+
+    private static ObjectNode jdbcV2(ObjectNode root) {
+        root.put("schema_version", 2);
+        ObjectNode payload = (ObjectNode) root.path("payload");
+        payload.remove("context_version");
+        payload.remove("context_effective_at");
+        payload.remove("source_context_event_id");
+        payload.remove("allowed_lateness_ms");
+        payload.remove("correction_window_ms");
+        payload.remove("join_policy_version");
+        ObjectNode resolution = payload.putObject("context_resolution");
+        resolution.put("mode", "postgresql_point_in_time");
+        resolution.put("policy_version", "jdbc-effective-at-v1");
+        resolution.put("source", "postgresql");
+        resolution.put(
+                "context_record_id",
+                UUID.nameUUIDFromBytes(
+                                ("context-" + payload.path("player").path("player_id").asText())
+                                        .getBytes())
+                        .toString());
+        resolution.put("context_version", 1);
+        resolution.put("context_effective_at", "2025-01-01T00:00:00Z");
+        return root;
     }
 
     private static void addAction(

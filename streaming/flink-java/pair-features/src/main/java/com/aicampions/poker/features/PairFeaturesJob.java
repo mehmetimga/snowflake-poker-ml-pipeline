@@ -22,6 +22,7 @@ public final class PairFeaturesJob {
 
     public static void main(String[] arguments) throws Exception {
         JobConfig config = JobConfig.parse(arguments, System.getenv());
+        String uidPrefix = "pair-features-context-v" + config.inputSchemaVersion();
         StreamExecutionEnvironment environment =
                 StreamExecutionEnvironment.getExecutionEnvironment();
         environment.setParallelism(config.parallelism());
@@ -32,11 +33,13 @@ public final class PairFeaturesJob {
         KafkaSource<String> source = source(config);
         SingleOutputStreamOperator<String> valid = environment
                 .fromSource(source, WatermarkStrategy.noWatermarks(), "enriched-player-hand-source")
-                .uid("enriched-player-hand-source-v1")
+                .uid(uidPrefix + "-source")
                 .process(new EnvelopeValidationFunction(
-                        config.inputTopic(), config.simulationMode()), Types.STRING)
+                        config.inputTopic(),
+                        config.simulationMode(),
+                        config.inputSchemaVersion()), Types.STRING)
                 .name("validate-enriched-player-hands")
-                .uid("validate-enriched-player-hands-v1");
+                .uid(uidPrefix + "-validate");
 
         WatermarkStrategy<String> eventTime = WatermarkStrategy
                 .<String>forBoundedOutOfOrderness(
@@ -48,13 +51,13 @@ public final class PairFeaturesJob {
         SingleOutputStreamOperator<String> userHistory = valid
                 .assignTimestampsAndWatermarks(eventTime)
                 .name("pair-feature-event-time")
-                .uid("pair-feature-event-time-v1")
+                .uid(uidPrefix + "-event-time")
                 .keyBy(PairEventJson::playerId, Types.STRING)
                 .process(
                         new UserRollingFunction(config.stateTtlHours(), config.inputTopic()),
                         Types.STRING)
                 .name("rolling-user-history")
-                .uid("rolling-user-history-v1");
+                .uid(uidPrefix + "-user-history");
 
         SingleOutputStreamOperator<String> pairObservations = userHistory
                 .keyBy(PairEventJson::handId, Types.STRING)
@@ -62,7 +65,7 @@ public final class PairFeaturesJob {
                         new HandPairAssemblyFunction(config.stateTtlHours(), config.inputTopic()),
                         Types.STRING)
                 .name("assemble-hand-and-expand-pairs")
-                .uid("assemble-hand-and-expand-pairs-v1");
+                .uid(uidPrefix + "-hand-pairs");
 
         SingleOutputStreamOperator<String> pairFeatures = pairObservations
                 .keyBy(PairEventJson::pairKey, Types.STRING)
@@ -70,7 +73,7 @@ public final class PairFeaturesJob {
                         new PairRollingFunction(config.stateTtlHours(), config.inputTopic()),
                         Types.STRING)
                 .name("rolling-pair-features")
-                .uid("rolling-pair-features-v1");
+                .uid(uidPrefix + "-pair-history");
 
         StatefulFoldRuleEngine.Config statefulRuleConfig = new StatefulFoldRuleEngine.Config(
                 Math.multiplyExact(config.statefulRuleWindowHours(), 3_600_000L),
@@ -89,7 +92,7 @@ public final class PairFeaturesJob {
                                 config.statefulRuleEnabled()),
                         Types.STRING)
                 .name("stateful-pair-rules")
-                .uid("stateful-pair-rules-v1");
+                .uid(uidPrefix + "-stateful-rules");
 
         KafkaSink<String> outputSink = KafkaSink.<String>builder()
                 .setBootstrapServers(config.bootstrapServers())
@@ -99,7 +102,7 @@ public final class PairFeaturesJob {
                 .build();
         scoringPairs.sinkTo(outputSink)
                 .name("pair-feature-sink")
-                .uid("pair-feature-sink-v1");
+                .uid(uidPrefix + "-sink");
 
         DataStream<String> deadLetters = valid.getSideOutput(DeadLetters.TAG)
                 .union(
@@ -115,10 +118,11 @@ public final class PairFeaturesJob {
                 .build();
         deadLetters.sinkTo(deadLetterSink)
                 .name("pair-feature-dead-letter-sink")
-                .uid("pair-feature-dead-letter-sink-v1");
+                .uid(uidPrefix + "-dead-letter-sink");
 
         System.out.println(config.safeSummary());
-        environment.execute("poker-pair-features-v1");
+        environment.execute("poker-pair-features-v1-from-context-v"
+                + config.inputSchemaVersion());
     }
 
     private static KafkaSource<String> source(JobConfig config) {
@@ -144,6 +148,7 @@ public final class PairFeaturesJob {
             String outputTopic,
             String deadLetterTopic,
             String groupId,
+            int inputSchemaVersion,
             boolean fromBeginning,
             boolean bounded,
             long outOfOrdernessMs,
@@ -164,16 +169,60 @@ public final class PairFeaturesJob {
 
         static JobConfig parse(String[] arguments, Map<String, String> environment) {
             Map<String, String> args = parseArguments(arguments);
+            int inputSchemaVersion = Math.toIntExact(longValue(
+                    args,
+                    environment,
+                    "input-schema-version",
+                    "FLINK_PLAYER_CONTEXT_SCHEMA_VERSION",
+                    2L,
+                    1L));
+            if (inputSchemaVersion != 1 && inputSchemaVersion != 2) {
+                throw new IllegalArgumentException(
+                        "--input-schema-version must be 1 or 2");
+            }
             String bootstrap = value(args, environment, "bootstrap-servers",
                     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092");
-            String input = value(args, environment, "input-topic",
-                    "KAFKA_PLAYER_CONTEXT_TOPIC", "poker.hand-player-context.v1");
-            String output = value(args, environment, "output-topic",
-                    "KAFKA_PAIR_FEATURES_TOPIC", "poker.pair-features.v1");
+            String input = inputSchemaVersion == 2
+                    ? value(
+                            args,
+                            environment,
+                            "input-topic",
+                            "KAFKA_PLAYER_CONTEXT_V2_TOPIC",
+                            "poker.hand-player-context.v2")
+                    : value(
+                            args,
+                            environment,
+                            "input-topic",
+                            "KAFKA_PLAYER_CONTEXT_TOPIC",
+                            "poker.hand-player-context.v1");
+            String output = inputSchemaVersion == 2
+                    ? value(
+                            args,
+                            environment,
+                            "output-topic",
+                            "KAFKA_PAIR_FEATURES_V2_TOPIC",
+                            "poker.pair-features.context-v2.v1")
+                    : value(
+                            args,
+                            environment,
+                            "output-topic",
+                            "KAFKA_PAIR_FEATURES_TOPIC",
+                            "poker.pair-features.v1");
             String dlq = value(args, environment, "dead-letter-topic",
                     "KAFKA_DEAD_LETTER_TOPIC", "poker.pipeline.dead-letter.v1");
-            String group = value(args, environment, "group-id",
-                    "FLINK_PAIR_FEATURES_GROUP_ID", "flink-pair-features-v1");
+            String group = inputSchemaVersion == 2
+                    ? value(
+                            args,
+                            environment,
+                            "group-id",
+                            "FLINK_PAIR_FEATURES_V2_GROUP_ID",
+                            "flink-pair-features-context-v2")
+                    : value(
+                            args,
+                            environment,
+                            "group-id",
+                            "FLINK_PAIR_FEATURES_GROUP_ID",
+                            "flink-pair-features-v1");
             boolean fromBeginning = args.containsKey("from-beginning");
             boolean bounded = args.containsKey("bounded");
             long outOfOrderness = longValue(args, "out-of-orderness-ms", 30_000L, 0L);
@@ -201,7 +250,8 @@ public final class PairFeaturesJob {
             boolean simulation = booleanValue(
                     args, environment, "simulation-mode", "FLINK_SIMULATION_MODE", false);
             JobConfig config = new JobConfig(
-                    bootstrap, input, output, dlq, group, fromBeginning, bounded,
+                    bootstrap, input, output, dlq, group, inputSchemaVersion,
+                    fromBeginning, bounded,
                     outOfOrderness, idle, ttl,
                     ruleWindow, ruleMinimumHands, ruleMinimumDirectional, ruleRate,
                     ruleLateness, correctionHorizon, ruleTtl,
@@ -216,20 +266,37 @@ public final class PairFeaturesJob {
         String safeSummary() {
             return String.format(
                     "{\"job\":\"pair-features\",\"input\":\"%s\","
+                            + "\"input_schema_version\":%d,"
                             + "\"output\":\"%s\",\"feature_version\":\"%s\","
                             + "\"stateful_rule\":\"%s\",\"stateful_rule_enabled\":%s,"
                             + "\"simulation\":%s}",
-                    inputTopic, outputTopic, PairEventJson.FEATURE_VERSION,
+                    inputTopic, inputSchemaVersion, outputTopic,
+                    PairEventJson.FEATURE_VERSION,
                     StatefulFoldRuleEngine.RULE_ID, statefulRuleEnabled, simulationMode);
         }
 
         private void validateTopicBoundary() {
             if (simulationMode) {
-                requireExact("input", inputTopic, "poker.sim.hand-player-context.v1");
-                requireExact("output", outputTopic, "poker.sim.pair-features.v1");
+                requireExact(
+                        "input",
+                        inputTopic,
+                        inputSchemaVersion == 2
+                                ? "poker.sim.hand-player-context.v2"
+                                : "poker.sim.hand-player-context.v1");
+                requireExact(
+                        "output",
+                        outputTopic,
+                        inputSchemaVersion == 2
+                                ? "poker.sim.pair-features.context-v2.v1"
+                                : "poker.sim.pair-features.v1");
                 requireExact("dead-letter", deadLetterTopic,
                         "poker.sim.pipeline.dead-letter.v1");
-                requireExact("group", groupId, "flink-pair-features-sim-v1");
+                requireExact(
+                        "group",
+                        groupId,
+                        inputSchemaVersion == 2
+                                ? "flink-pair-features-context-sim-v2"
+                                : "flink-pair-features-sim-v1");
                 return;
             }
             for (String topic : new String[] {inputTopic, outputTopic, deadLetterTopic}) {

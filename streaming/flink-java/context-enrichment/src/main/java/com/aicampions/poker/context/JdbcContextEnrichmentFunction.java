@@ -57,7 +57,7 @@ final class JdbcContextEnrichmentFunction
                 .cleanupInRocksdbCompactFilter(1_000L)
                 .build();
         ValueStateDescriptor<String> descriptor =
-                new ValueStateDescriptor<>("active-user-context-jdbc-v1", Types.STRING);
+                new ValueStateDescriptor<>("active-user-context-jdbc-v2", Types.STRING);
         descriptor.enableTimeToLive(ttl);
         cachedContext = getRuntimeContext().getState(descriptor);
         cacheHits = counter("context_cache_hits");
@@ -95,13 +95,13 @@ final class JdbcContextEnrichmentFunction
                 EventJson.parse(expandedHand).path("hand").path("payload"), "played_at"));
         ContextKey contextKey = EventJson.contextKeyFromExpandedHand(expandedHand);
         String cached = cachedContext.value();
-        String contextEvent;
+        String resolvedContext;
 
         if (cached != null
                 && CachedUserContext.isFresh(cached, nowMs, refreshAfterMs)
                 && CachedUserContext.isEffectiveFor(cached, playedAtMs)) {
             cacheHits.inc();
-            contextEvent = CachedUserContext.event(cached);
+            resolvedContext = cached;
         } else {
             if (cached == null) {
                 cacheMisses.inc();
@@ -129,20 +129,17 @@ final class JdbcContextEnrichmentFunction
                                 expandedHand));
                 return;
             }
-            contextEvent = loaded.orElseThrow().toCanonicalEvent(expandedHand);
-            cachedContext.update(CachedUserContext.create(contextEvent, nowMs));
+            UserContextRecord record = loaded.orElseThrow();
+            ContextKey loadedKey =
+                    new ContextKey(record.tenantId(), record.productId(), record.userId());
+            if (!contextKey.equals(loadedKey)) {
+                throw new IllegalArgumentException("loaded context scope does not match state key");
+            }
+            resolvedContext = CachedUserContext.create(record, nowMs);
+            cachedContext.update(resolvedContext);
         }
 
-        String handState = TemporalJoinLogic.newPlayerHandState(
-                expandedHand, 1L, 0L, 0L, nowMs, false);
-        output.collect(TemporalJoinLogic.enrich(
-                handState,
-                TemporalJoinLogic.wrapContext(contextEvent, 1L),
-                "matched",
-                1,
-                0L,
-                0L,
-                nowMs));
+        output.collect(JdbcEnrichedEventV2.create(expandedHand, resolvedContext));
     }
 
     @Override

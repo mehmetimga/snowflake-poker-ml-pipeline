@@ -1,6 +1,5 @@
 package com.aicampions.poker.context;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.UUID;
@@ -36,22 +35,19 @@ record UserContextRecord(
         }
     }
 
-    String toCanonicalEvent(String expandedHand) {
-        JsonNode hand = EventJson.parse(expandedHand).path("hand");
-        ContextKey handKey = EventJson.contextKeyFromExpandedHand(expandedHand);
-        ContextKey recordKey = new ContextKey(tenantId, productId, userId);
-        if (!recordKey.equals(handKey)) {
-            throw new IllegalArgumentException("context scope does not match the hand scope");
-        }
+    UUID contextRecordId() {
         String eventName = String.join(
                 ":",
-                "jdbc-user-context-v1",
+                "postgres-user-context-v1",
                 tenantId,
                 productId,
                 userId,
                 Integer.toString(contextVersion),
                 effectiveAt.toString());
+        return TemporalJoinLogic.uuid5(URL_NAMESPACE, eventName);
+    }
 
+    ObjectNode toPayload() {
         ObjectNode payload = EventJson.MAPPER.createObjectNode();
         payload.put("user_id", userId);
         payload.put("context_version", contextVersion);
@@ -67,29 +63,6 @@ record UserContextRecord(
         payload.put("skill_rating", skillRating);
         payload.put("device_id", deviceId);
         payload.put("network_cluster_id", networkClusterId);
-
-        ObjectNode event = EventJson.MAPPER.createObjectNode();
-        event.put("event_id", TemporalJoinLogic.uuid5(URL_NAMESPACE, eventName).toString());
-        event.put("event_type", EventJson.USER_CONTEXT_UPDATED);
-        event.put("schema_version", 1);
-        copy(event, hand, "tenant_id");
-        copy(event, hand, "product_id");
-        copy(event, hand, "dataset_id");
-        copy(event, hand, "dataset_split");
-        event.put("occurred_at", effectiveAt.toString());
-        event.put("emitted_at", effectiveAt.toString());
-        copy(event, hand, "trace_id");
-        event.set("payload", payload);
-        String result = EventJson.compact(event);
-        EventJson.validateEnvelope(result, EventJson.USER_CONTEXT_UPDATED);
-        return result;
-    }
-
-    private static void copy(ObjectNode target, JsonNode source, String field) {
-        JsonNode value = source.get(field);
-        if (value == null) {
-            throw new IllegalArgumentException("hand envelope is missing " + field);
-        }
-        target.set(field, value.deepCopy());
+        return payload;
     }
 }

@@ -67,6 +67,12 @@ checkpoint, model, stage artifact, block snapshot, or Snowflake table.
 - [x] Context refactoring F1 completed locally: tenant/product/player
   isolation, TaskManager-only JDBC credentials, classified failures,
   minimized diagnostics, and bounded shaded-JAR validation.
+- [x] Context refactoring F2 contract slice completed locally: explicit
+  PostgreSQL lineage in `poker.hand-player-context.v2`, isolated canonical and
+  legacy entrypoints, and a schema-v2 pair-feature compatibility adapter.
+- [x] A bounded v2 run emitted six context rows and fifteen pair snapshots,
+  passed offline/online parity, and produced zero F2 DLQ records.
+- [ ] F2 package/config extraction remains before F3 starts.
 - [ ] A multi-hand running-job test proves cache-hit metrics, refresh, and TTL
   expiry.
 - [ ] SPCS PostgreSQL network rule, EAI, Secret, and rendered spec exist.
@@ -131,7 +137,7 @@ persistent applications.
                                   POKER_FLINK (Java/Flink)
                               active-player context TTL state
                                                 |
-                              poker.synthetic.pair-features.v1
+                      poker.synthetic.pair-features.context-v2.v1
                                                 |
                                   POKER_RISK (Go + Triton)
                                   model + rules + policy
@@ -159,8 +165,8 @@ context is loaded lazily from an SPCS-reachable PostgreSQL context projection.
 |---|---|
 | Raw Debezium outbox | `poker.synthetic.cdc-hand-outbox.v1` |
 | Canonical completed hands | `poker.synthetic.hands.raw.v1` |
-| Enriched player-hand context | `poker.synthetic.hand-player-context.v1` |
-| Pair features | `poker.synthetic.pair-features.v1` |
+| Enriched player-hand context | `poker.synthetic.hand-player-context.v2` |
+| Pair features | `poker.synthetic.pair-features.context-v2.v1` |
 | Risk scores | `poker.synthetic.risk-scores.v1` |
 | Rule evidence | `poker.synthetic.rule-evidence.v1` |
 | Review decisions | `poker.synthetic.review-decisions.v1` |
@@ -170,8 +176,8 @@ context is loaded lazily from an SPCS-reachable PostgreSQL context projection.
 Recommended synthetic consumer groups:
 
 - `poker-adapter-synthetic-v1`;
-- `flink-context-enrichment-synthetic-v1` for hands only;
-- `flink-pair-features-synthetic-v1`;
+- `flink-active-context-synthetic-v2` for hands only;
+- `flink-pair-features-context-synthetic-v2`;
 - `poker-risk-scorer-synthetic-v1`; and
 - `poker-sink-synthetic-v1`.
 

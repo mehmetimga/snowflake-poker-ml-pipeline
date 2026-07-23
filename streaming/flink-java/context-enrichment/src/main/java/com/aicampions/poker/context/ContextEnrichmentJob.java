@@ -16,12 +16,27 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
-/** Native Flink event-time context enrichment job. */
+/** Compatibility dispatcher; deployments use one of the source-specific entrypoints. */
 public final class ContextEnrichmentJob {
     private ContextEnrichmentJob() {}
 
     public static void main(String[] arguments) throws Exception {
+        run(arguments, null);
+    }
+
+    public static void runActive(String[] arguments) throws Exception {
+        run(arguments, "jdbc");
+    }
+
+    public static void runLegacy(String[] arguments) throws Exception {
+        run(arguments, "kafka");
+    }
+
+    private static void run(String[] arguments, String requiredContextSource) throws Exception {
         JobConfig config = JobConfig.parse(arguments, System.getenv());
+        config.requireContextSource(requiredContextSource);
+        boolean active = config.contextSource().equals("jdbc");
+        String uidPrefix = active ? "active-context-v2" : "legacy-kafka-context-v1";
         StreamExecutionEnvironment environment =
                 StreamExecutionEnvironment.getExecutionEnvironment();
         environment.setParallelism(config.parallelism());
@@ -37,12 +52,12 @@ public final class ContextEnrichmentJob {
                         handSource,
                         WatermarkStrategy.noWatermarks(),
                         "canonical-hands-source")
-                .uid("canonical-hands-source-v1")
+                .uid(uidPrefix + "-hands-source")
                 .process(new EnvelopeValidationFunction(
                         config.handTopic(), EventJson.HAND_COMPLETED,
                         config.simulationMode()), Types.STRING)
                 .name("validate-hand-envelopes")
-                .uid("validate-hand-envelopes-v1");
+                .uid(uidPrefix + "-validate-hands");
         WatermarkStrategy<String> eventTime = WatermarkStrategy
                 .<String>forMonotonousTimestamps()
                 .withTimestampAssigner(
@@ -52,10 +67,10 @@ public final class ContextEnrichmentJob {
         DataStream<String> handPlayers = validHands
                 .assignTimestampsAndWatermarks(eventTime)
                 .name("hand-event-time")
-                .uid("hand-event-time-v1")
+                .uid(uidPrefix + "-hand-event-time")
                 .flatMap(new HandPlayerExpander(), Types.STRING)
                 .name("expand-hand-players")
-                .uid("expand-hand-players-v1");
+                .uid(uidPrefix + "-expand-hand-players");
         SingleOutputStreamOperator<String> enriched;
         DataStream<String> deadLetters;
         if (config.contextSource().equals("jdbc")) {
@@ -73,7 +88,7 @@ public final class ContextEnrichmentJob {
                                     config.handTopic()),
                             Types.STRING)
                     .name("jdbc-active-user-context-lookup")
-                    .uid("jdbc-active-user-context-lookup-v2");
+                    .uid("active-context-v2-jdbc-lookup");
             deadLetters = validHands.getSideOutput(DeadLetters.TAG)
                     .union(enriched.getSideOutput(DeadLetters.TAG));
         } else {
@@ -84,16 +99,16 @@ public final class ContextEnrichmentJob {
                             contextSource,
                             WatermarkStrategy.noWatermarks(),
                             "user-context-source")
-                    .uid("user-context-source-v1")
+                    .uid("legacy-kafka-context-v1-context-source")
                     .process(new EnvelopeValidationFunction(
                             config.contextTopic(), EventJson.USER_CONTEXT_UPDATED,
                             config.simulationMode()), Types.STRING)
                     .name("validate-context-envelopes")
-                    .uid("validate-context-envelopes-v1");
+                    .uid("legacy-kafka-context-v1-validate-contexts");
             DataStream<String> contexts = validContexts
                     .assignTimestampsAndWatermarks(eventTime)
                     .name("context-event-time")
-                    .uid("context-event-time-v1");
+                    .uid("legacy-kafka-context-v1-context-event-time");
             enriched = handPlayers
                     .keyBy(
                             EventJson::contextKeyFromExpandedHand,
@@ -110,7 +125,7 @@ public final class ContextEnrichmentJob {
                                     config.contextTopic()),
                             Types.STRING)
                     .name("event-time-user-context-join")
-                    .uid("event-time-user-context-join-v2");
+                    .uid("legacy-kafka-context-v1-temporal-join");
             deadLetters = validHands.getSideOutput(DeadLetters.TAG)
                     .union(
                             validContexts.getSideOutput(DeadLetters.TAG),
@@ -125,7 +140,7 @@ public final class ContextEnrichmentJob {
                 .build();
         enriched.sinkTo(enrichedSink)
                 .name("enriched-player-hand-sink")
-                .uid("enriched-player-hand-sink-v1");
+                .uid(uidPrefix + "-enriched-sink");
 
         KafkaSink<String> deadLetterSink = KafkaSink.<String>builder()
                 .setBootstrapServers(config.bootstrapServers())
@@ -135,10 +150,12 @@ public final class ContextEnrichmentJob {
                 .build();
         deadLetters.sinkTo(deadLetterSink)
                 .name("context-enrichment-dead-letter-sink")
-                .uid("context-enrichment-dead-letter-sink-v1");
+                .uid(uidPrefix + "-dead-letter-sink");
 
         System.out.println(config.safeSummary());
-        environment.execute("poker-event-time-context-enrichment-v1");
+        environment.execute(active
+                ? "poker-active-context-enrichment-v2"
+                : "poker-legacy-kafka-temporal-context-v1");
     }
 
     private static KafkaSource<String> source(
@@ -192,14 +209,6 @@ public final class ContextEnrichmentJob {
                     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092");
             String hands = value(args, environment, "hand-topic",
                     "KAFKA_WORLD_HANDS_TOPIC", "poker.hands.raw.v1");
-            String contexts = value(args, environment, "context-topic",
-                    "KAFKA_USER_CONTEXT_TOPIC", "poker.user-context.v1");
-            String output = value(args, environment, "output-topic",
-                    "KAFKA_PLAYER_CONTEXT_TOPIC", "poker.hand-player-context.v1");
-            String dlq = value(args, environment, "dead-letter-topic",
-                    "KAFKA_DEAD_LETTER_TOPIC", "poker.pipeline.dead-letter.v1");
-            String group = value(args, environment, "group-id",
-                    "FLINK_CONTEXT_GROUP_ID", "flink-context-enrichment-v1");
             String contextSource = value(
                     args, environment, "context-source", "FLINK_CONTEXT_SOURCE", "kafka")
                     .toLowerCase();
@@ -207,6 +216,36 @@ public final class ContextEnrichmentJob {
                 throw new IllegalArgumentException(
                         "--context-source must be kafka or jdbc");
             }
+            String contexts = value(args, environment, "context-topic",
+                    "KAFKA_USER_CONTEXT_TOPIC", "poker.user-context.v1");
+            String output = contextSource.equals("jdbc")
+                    ? value(
+                            args,
+                            environment,
+                            "output-topic",
+                            "KAFKA_PLAYER_CONTEXT_V2_TOPIC",
+                            "poker.hand-player-context.v2")
+                    : value(
+                            args,
+                            environment,
+                            "output-topic",
+                            "KAFKA_PLAYER_CONTEXT_TOPIC",
+                            "poker.hand-player-context.v1");
+            String dlq = value(args, environment, "dead-letter-topic",
+                    "KAFKA_DEAD_LETTER_TOPIC", "poker.pipeline.dead-letter.v1");
+            String group = contextSource.equals("jdbc")
+                    ? value(
+                            args,
+                            environment,
+                            "group-id",
+                            "FLINK_ACTIVE_CONTEXT_GROUP_ID",
+                            "flink-active-context-v2")
+                    : value(
+                            args,
+                            environment,
+                            "group-id",
+                            "FLINK_CONTEXT_GROUP_ID",
+                            "flink-legacy-kafka-context-v1");
             String contextJdbcUrl = value(
                     args, environment, "context-jdbc-url", "USER_CONTEXT_JDBC_URL", "");
             String contextJdbcTable = value(
@@ -282,6 +321,8 @@ public final class ContextEnrichmentJob {
         }
 
         String safeSummary() {
+            String contextDescription =
+                    contextSource.equals("jdbc") ? "postgresql-point-in-time" : contextTopic;
             return String.format(
                     "{\"job\":\"context-enrichment\",\"hands\":\"%s\","
                             + "\"context_source\":\"%s\",\"contexts\":\"%s\","
@@ -289,9 +330,17 @@ public final class ContextEnrichmentJob {
                             + "\"allowed_lateness_ms\":%d,\"correction_window_ms\":%d,"
                             + "\"context_cache_ttl_hours\":%d,"
                             + "\"context_refresh_minutes\":%d,\"simulation\":%s}",
-                    handTopic, contextSource, contextTopic, outputTopic, allowedLatenessMs,
+                    handTopic, contextSource, contextDescription, outputTopic, allowedLatenessMs,
                     correctionWindowMs, contextCacheTtlHours, contextRefreshMinutes,
                     simulationMode);
+        }
+
+        private void requireContextSource(String requiredContextSource) {
+            if (requiredContextSource != null
+                    && !requiredContextSource.equals(contextSource)) {
+                throw new IllegalArgumentException(
+                        "entrypoint requires context source " + requiredContextSource);
+            }
         }
 
         private void validateContextSource() {
@@ -311,10 +360,20 @@ public final class ContextEnrichmentJob {
                 if (contextSource.equals("kafka")) {
                     requireExact("context", contextTopic, "poker.sim.user-context.v1");
                 }
-                requireExact("output", outputTopic, "poker.sim.hand-player-context.v1");
+                requireExact(
+                        "output",
+                        outputTopic,
+                        contextSource.equals("jdbc")
+                                ? "poker.sim.hand-player-context.v2"
+                                : "poker.sim.hand-player-context.v1");
                 requireExact("dead-letter", deadLetterTopic,
                         "poker.sim.pipeline.dead-letter.v1");
-                requireExact("group", groupId, "flink-context-enrichment-sim-v1");
+                requireExact(
+                        "group",
+                        groupId,
+                        contextSource.equals("jdbc")
+                                ? "flink-active-context-sim-v2"
+                                : "flink-legacy-kafka-context-sim-v1");
                 return;
             }
             String[] topics = contextSource.equals("kafka")
