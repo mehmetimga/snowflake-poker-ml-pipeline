@@ -551,7 +551,9 @@ Live evidence, 2026-07-24:
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: ready; not started.
+Status: in progress; read-only preflight, bounded replay, parity, and rollback
+evidence tooling is implemented locally. Live evidence is pending a clean
+commit.
 
 1. Dual-run legacy and canonical paths on the same bounded synthetic dataset.
 2. Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
@@ -563,6 +565,14 @@ Status: ready; not started.
 6. Test rollback using the exact immutable legacy image/spec.
 7. Obtain explicit approval, then drop `POKER_REALTIME`.
 8. Retain its evidence and rollback manifest for the agreed retention window.
+
+The executable gates, evidence chain, comparison semantics, suspension
+monitoring, and destructive-action boundary are defined in
+[`poker-realtime-retirement.md`](poker-realtime-retirement.md). Legacy
+per-player ensemble scores and canonical per-hand CatBoost decisions are
+different contracts; R6 requires exact input and processing coverage plus
+independent canonical acceptance, and records their output distributions
+without asserting false numeric equality.
 
 Target persistent count after R6 and `POKER_SINK`:
 

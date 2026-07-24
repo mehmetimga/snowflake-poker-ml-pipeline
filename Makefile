@@ -9,6 +9,7 @@
 .PHONY: f5-package-test phase-f5-check canonical-scoring-topics
 .PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local multitable-alert-spcs-test multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify multitable-alert-replay-spcs
 .PHONY: r5-sink-test r5-sink-render r5-sink-build r5-sink-image-smoke r5-sink-release-check r5-sink-push r5-sink-bootstrap r5-sink-deploy r5-sink-verify r5-admin-build r5-admin-image-smoke r5-admin-push r5-admin-deploy phase-r5-check
+.PHONY: r6-test r6-preflight r6-legacy-replay r6-parity-verify r6-bounded-e2e phase-r6-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -49,6 +50,13 @@ ALERT_ACCEPTANCE_SPCS_RUN_DIR ?= data/runs/alert-acceptance-spcs-$(shell date -u
 ALERT_ACCEPTANCE_SPCS_MANIFEST ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/replay-manifest.json
 ALERT_ACCEPTANCE_SPCS_REPORT ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/verification-report.json
 ALERT_ACCEPTANCE_SINK_REPORT ?= $(ALERT_ACCEPTANCE_SPCS_RUN_DIR)/sink-verification-report.json
+R6_RUN_DIR ?= /private/tmp/poker-r6-realtime-retirement
+R6_D7_MANIFEST ?= /private/tmp/poker-alert-acceptance-d7-spcs/replay-manifest.json
+R6_D7_SPCS_REPORT ?= /private/tmp/poker-alert-acceptance-d7-spcs/verification-report.json
+R6_D7_SINK_REPORT ?= /private/tmp/poker-alert-acceptance-d7-spcs/sink-verification-report.json
+R6_PREFLIGHT_REPORT ?= $(R6_RUN_DIR)/preflight-report.json
+R6_LEGACY_REPLAY_REPORT ?= $(R6_RUN_DIR)/legacy-replay-report.json
+R6_PARITY_REPORT ?= $(R6_RUN_DIR)/parity-report.json
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -236,6 +244,9 @@ help:
 	@echo "  go-hand-adapter-kafka-check Verify adapter Kafka authentication only"
 	@echo "  phase-c2-runtime-check Run the complete offline C2 runtime gate"
 	@echo "  phase-c2-packaging-check Verify the isolated simulation adapter image/spec"
+	@echo "  phase-r6-check Verify legacy-retirement contracts and operational entrypoints"
+	@echo "  r6-preflight Capture read-only legacy dependency and rollback evidence"
+	@echo "  r6-bounded-e2e Replay sealed D7 payloads to legacy and verify replacement parity"
 	@echo "  cdc-sim-up   Start local PostgreSQL, Kafka, and Debezium containers"
 	@echo "  cdc-sim-migrate Apply idempotent schema updates to a retained local volume"
 	@echo "  cdc-sim-e2e  Run the PostgreSQL -> Debezium -> Kafka -> Go smoke test"
@@ -1470,6 +1481,40 @@ r5-sink-verify:
 phase-r5-check: r5-sink-test
 	KAFKA_BOOTSTRAP_SERVERS=broker.r5.invalid:9092 $(MAKE) r5-sink-render
 	$(PY) infra/snowflake/deploy.py validate-catalog
+
+r6-test:
+	$(PY) -m pytest -q tests/test_r6_realtime_retirement.py
+
+r6-preflight:
+	$(PY) scripts/audit_r6_realtime_dependencies.py \
+		--report $(R6_PREFLIGHT_REPORT)
+
+r6-legacy-replay:
+	$(PY) scripts/replay_r6_legacy.py \
+		--manifest $(R6_D7_MANIFEST) \
+		--spcs-report $(R6_D7_SPCS_REPORT) \
+		--sink-report $(R6_D7_SINK_REPORT) \
+		--report $(R6_LEGACY_REPLAY_REPORT)
+
+r6-parity-verify:
+	WAREHOUSE_BACKEND=snowflake \
+		$(PY) scripts/verify_r6_realtime_parity.py \
+		--manifest $(R6_D7_MANIFEST) \
+		--spcs-report $(R6_D7_SPCS_REPORT) \
+		--sink-report $(R6_D7_SINK_REPORT) \
+		--preflight-report $(R6_PREFLIGHT_REPORT) \
+		--replay-report $(R6_LEGACY_REPLAY_REPORT) \
+		--report $(R6_PARITY_REPORT)
+
+r6-bounded-e2e:
+	$(MAKE) r6-preflight
+	$(MAKE) r6-legacy-replay
+	$(MAKE) r6-parity-verify
+
+phase-r6-check: r6-test
+	$(PY) scripts/audit_r6_realtime_dependencies.py --help >/dev/null
+	$(PY) scripts/replay_r6_legacy.py --help >/dev/null
+	$(PY) scripts/verify_r6_realtime_parity.py --help >/dev/null
 
 c2-adapter-package-test:
 	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py \
