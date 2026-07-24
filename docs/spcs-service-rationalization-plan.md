@@ -493,9 +493,8 @@ Five persistent objects remain before `POKER_SINK` is added.
 
 ### R5 — Add `POKER_SINK` and migrate admin
 
-Status: implementation and local release gate complete; immutable image
-publish, Snowflake bootstrap, SPCS deployment, D7 persistence reconciliation,
-and admin deployment remain `not_run`.
+Status: implementation and local release gate complete; live deployment is
+paused on a verified replay-hash repair before D7 reconciliation.
 
 1. [x] Define event-native Snowflake tables for canonical lineage, player
    context, pair revisions, scores, rule evidence, decisions, alerts, and DLQ
@@ -519,6 +518,22 @@ Implementation details and failure semantics are in
 [`poker-sink.md`](poker-sink.md).
 
 Exit gate remains open until items 8–10 pass.
+
+Live evidence, 2026-07-24:
+
+- commit `0ae4a9b00930` sink and admin images were published as
+  `sha256:bea33e...a5be` and `sha256:9911c6...de23`;
+- all sink tables and canonical views were created successfully;
+- `POKER_SINK` pulled the expected digest and both containers became ready;
+- replay halted without committing the blocked record when the same
+  deterministic hand event appeared with identical compact JSON but different
+  whitespace/raw Kafka bytes;
+- the service was suspended without skipping an offset;
+- the repair now uses compact-JSON SHA-256 for immutable event identity and
+  retains raw Kafka SHA-256 separately for byte-level lineage; and
+- the repair passes the full R5 gate and full Python suite, but must be
+  committed, published under the new Git SHA, and redeployed before item 8 can
+  close.
 
 ### R6 — Retire `POKER_REALTIME`
 

@@ -190,8 +190,6 @@ def validate_request(payload: Any) -> dict[str, Any]:
     event_hash = _require_hash(payload, "event_sha256")
     build_version = _require_safe_string(payload, "service_build_version")
     kafka = _validate_kafka(payload.get("kafka"))
-    if event_hash != kafka["value_sha256"]:
-        raise ValueError("event and Kafka value hashes must match")
 
     normalized = dict(payload)
     normalized["event_id"] = event_id
@@ -201,6 +199,8 @@ def validate_request(payload: Any) -> dict[str, Any]:
     if mode == "dead_letter":
         if kind != "dead_letter" or "event" in payload:
             raise ValueError("dead-letter requests cannot contain a raw event")
+        if event_hash != kafka["value_sha256"]:
+            raise ValueError("dead-letter and Kafka value hashes must match")
         code = _require_string(payload, "error_code", maximum=64)
         if not ERROR_CODE.fullmatch(code):
             raise ValueError("invalid dead-letter error code")

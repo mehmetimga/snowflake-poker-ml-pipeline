@@ -213,7 +213,11 @@ func (processor *Processor) Handle(ctx context.Context, record stream.InputRecor
 	if code != "" {
 		return processor.persistDeadLetter(ctx, record, code)
 	}
-	request := processor.eventRequest(route, record, event)
+	request, err := processor.eventRequest(route, record, event)
+	if err != nil {
+		processor.updateMetrics(func(metrics *RuntimeMetrics) { metrics.PersistenceErrors++ })
+		return stream.ProcessResult{}, err
+	}
 	result, err := processor.persister.Persist(ctx, request)
 	if err != nil {
 		processor.updateMetrics(func(metrics *RuntimeMetrics) { metrics.PersistenceErrors++ })
@@ -335,17 +339,29 @@ func validatePayloadIdentity(kind string, raw json.RawMessage) error {
 	return nil
 }
 
-func (processor *Processor) eventRequest(route Route, record stream.InputRecord, event envelope) PersistRequest {
-	valueDigest := sha256.Sum256(record.Value)
+func (processor *Processor) eventRequest(
+	route Route,
+	record stream.InputRecord,
+	event envelope,
+) (PersistRequest, error) {
+	// Kafka preserves producer serialization, so semantically identical JSON
+	// can have a different raw-byte hash when only whitespace changes. Use the
+	// compact JSON representation for immutable event collision detection while
+	// retaining the original Kafka value hash in KafkaPosition.
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, record.Value); err != nil {
+		return PersistRequest{}, fmt.Errorf("compact validated event: %w", err)
+	}
+	eventDigest := sha256.Sum256(compact.Bytes())
 	return PersistRequest{
 		Mode: "event", Kind: route.Kind, EventID: event.EventID,
 		EventType: event.EventType, SchemaVersion: event.SchemaVersion,
 		TenantID: event.TenantID, ProductID: event.ProductID,
 		DatasetID: event.DatasetID, DatasetSplit: event.DatasetSplit,
 		OccurredAt: event.OccurredAt, EmittedAt: event.EmittedAt, TraceID: event.TraceID,
-		EventSHA256: hex.EncodeToString(valueDigest[:]), Event: json.RawMessage(record.Value),
+		EventSHA256: hex.EncodeToString(eventDigest[:]), Event: json.RawMessage(record.Value),
 		ServiceBuildVersion: processor.buildVersion, Kafka: kafkaPosition(record),
-	}
+	}, nil
 }
 
 func (processor *Processor) persistDeadLetter(

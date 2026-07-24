@@ -60,8 +60,10 @@ The transport guarantee is at least once. The durable behavior is effectively
 once per immutable event ID:
 
 1. Go validates the topic-specific event type and schema version.
-2. Go sends the event ID, original-record SHA-256, Kafka coordinates, and event
-   JSON to the writer.
+2. Go sends the event ID, compact-JSON event SHA-256, raw Kafka-record SHA-256,
+   Kafka coordinates, and event JSON to the writer. Removing insignificant
+   whitespace prevents formatting-only replays from becoming false immutable
+   collisions; the raw hash preserves byte-level lineage.
 3. The writer checks `POKER_EVENT_ENVELOPES`.
 4. A missing ID inserts the ledger row and matching typed row in one
    transaction.

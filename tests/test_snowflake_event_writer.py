@@ -214,3 +214,26 @@ def test_writer_rejects_metadata_confusion_before_snowflake() -> None:
     request["event"]["dataset_id"] = "other-dataset"
     with pytest.raises(ValueError, match="does not match"):
         writer.validate_request(request)
+
+
+def test_event_hash_can_differ_from_raw_kafka_serialization_hash() -> None:
+    request = valid_request()
+    request["event_sha256"] = "c" * 64
+
+    assert writer.validate_request(request)["event_sha256"] == "c" * 64
+
+
+def test_dead_letter_hash_must_match_raw_kafka_value() -> None:
+    request = valid_request()
+    dead_letter = {
+        "mode": "dead_letter",
+        "kind": "dead_letter",
+        "event_id": "0123456789abcdef0123456789abcdef",
+        "event_sha256": "c" * 64,
+        "error_code": "invalid_json_or_envelope",
+        "service_build_version": request["service_build_version"],
+        "kafka": request["kafka"],
+    }
+
+    with pytest.raises(ValueError, match="hashes must match"):
+        writer.validate_request(dead_letter)

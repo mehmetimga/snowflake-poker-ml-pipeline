@@ -1,7 +1,9 @@
 package sink
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -120,6 +122,40 @@ func TestDuplicateStillCommits(t *testing.T) {
 	}
 	if result.Status != "duplicate" || len(committer.calls) != 1 {
 		t.Fatalf("duplicate did not advance its offset: result=%+v commits=%v", result, committer.calls)
+	}
+}
+
+func TestEventHashIgnoresInsignificantJSONWhitespace(t *testing.T) {
+	persister := &fakePersister{result: PersistResult{Status: "inserted"}}
+	committer := &fakeCommitter{}
+	processor := newTestProcessor(t, persister, committer)
+	formatted := validRiskRecord()
+	compact := formatted
+	compact.Offset++
+	var compactValue bytes.Buffer
+	if err := json.Compact(&compactValue, formatted.Value); err != nil {
+		t.Fatal(err)
+	}
+	compact.Value = compactValue.Bytes()
+
+	if _, err := processor.Handle(context.Background(), formatted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := processor.Handle(context.Background(), compact); err != nil {
+		t.Fatal(err)
+	}
+	first, second := persister.requests[0], persister.requests[1]
+	if first.EventSHA256 != second.EventSHA256 {
+		t.Fatalf(
+			"whitespace changed immutable event hash: %s != %s",
+			first.EventSHA256, second.EventSHA256,
+		)
+	}
+	if first.Kafka.ValueSHA256 == second.Kafka.ValueSHA256 {
+		t.Fatal("raw Kafka hashes must preserve byte-level serialization changes")
+	}
+	if second.EventSHA256 != second.Kafka.ValueSHA256 {
+		t.Fatal("an already compact event must retain its existing identity hash")
 	}
 }
 
