@@ -242,7 +242,7 @@ def _canonical_snapshot(dataset_id: str) -> dict[str, Any]:
     try:
         admin = warehouse.fetch_df(
             """
-            SELECT COUNT(*) AS rows, MAX(ingested_at) AS latest_ingested_at
+            SELECT COUNT(*) AS row_count, MAX(ingested_at) AS latest_ingested_at
             FROM POKER_ML_DEMO.SPCS.POKER_ALERT_REVIEW_V
             WHERE dataset_id = %s
             """,
@@ -250,19 +250,19 @@ def _canonical_snapshot(dataset_id: str) -> dict[str, Any]:
         ).iloc[0]
         dead_letters = warehouse.fetch_df(
             """
-            SELECT COUNT(*) AS rows, MAX(ingested_at) AS latest_ingested_at
+            SELECT COUNT(*) AS row_count, MAX(ingested_at) AS latest_ingested_at
             FROM POKER_ML_DEMO.SPCS.POKER_SINK_DEAD_LETTERS
             """
         ).iloc[0]
         return {
             "dataset_id": dataset_id,
-            "admin_rows": int(admin["rows"]),
+            "admin_rows": int(admin["row_count"]),
             "admin_latest_ingested_at": (
                 None
                 if pd.isna(admin["latest_ingested_at"])
                 else str(admin["latest_ingested_at"])
             ),
-            "sink_dead_letter_rows": int(dead_letters["rows"]),
+            "sink_dead_letter_rows": int(dead_letters["row_count"]),
             "sink_dead_letter_latest_ingested_at": (
                 None
                 if pd.isna(dead_letters["latest_ingested_at"])

@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import scripts.manage_r6_realtime_suspension as suspension_controller
 from pipeline.events import HAND_COMPLETED, HandCompletedPayload, build_event
 from pipeline.ops.realtime_retirement import (
     LEGACY_ALERTS_TOPIC,
@@ -493,6 +494,42 @@ def test_suspension_health_helpers_require_ready_and_monotonic_offsets() -> None
         expected,
     )
     assert not _offsets_cover({"offsets": []}, expected)
+
+
+def test_canonical_snapshot_uses_snowflake_safe_count_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queries: list[str] = []
+
+    class Warehouse:
+        def fetch_df(self, sql: str, params: tuple | None = None) -> pd.DataFrame:
+            queries.append(sql)
+            return pd.DataFrame(
+                [
+                    {
+                        "row_count": 14 if params else 3,
+                        "latest_ingested_at": pd.Timestamp(
+                            "2026-07-24T10:00:00Z"
+                        ),
+                    }
+                ]
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        suspension_controller,
+        "get_warehouse",
+        lambda: Warehouse(),
+    )
+
+    result = suspension_controller._canonical_snapshot("r6-dataset")
+
+    assert result["admin_rows"] == 14
+    assert result["sink_dead_letter_rows"] == 3
+    assert all("AS row_count" in query for query in queries)
+    assert all("AS rows" not in query for query in queries)
 
 
 def test_r6_operational_entrypoints_are_packaged() -> None:
