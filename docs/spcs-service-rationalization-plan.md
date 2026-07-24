@@ -493,8 +493,7 @@ Five persistent objects remain before `POKER_SINK` is added.
 
 ### R5 — Add `POKER_SINK` and migrate admin
 
-Status: implementation and local release gate complete; live deployment is
-paused on a verified replay-hash repair before D7 reconciliation.
+Status: complete; live exit gate passed on 2026-07-24.
 
 1. [x] Define event-native Snowflake tables for canonical lineage, player
    context, pair revisions, scores, rule evidence, decisions, alerts, and DLQ
@@ -508,36 +507,51 @@ paused on a verified replay-hash repair before D7 reconciliation.
    schema version, poison sanitization, and the full Go suite.
 6. [x] Update `POKER_ADMIN` to read `POKER_ALERT_REVIEW_V`.
 7. [x] Keep the legacy reader behind `ADMIN_DATA_MODE=legacy`.
-8. [ ] Commit the verified source, publish the Git-SHA image, apply
+8. [x] Commit the verified source, publish the Git-SHA image, apply
    `infra/snowflake/sql/sink.sql`, and deploy `POKER_SINK`.
-9. [ ] Reconcile the D7 dataset with `make r5-sink-verify` and deploy the
+9. [x] Reconcile the D7 dataset with `make r5-sink-verify` and deploy the
    canonical admin image.
-10. [ ] Prove admin freshness while `POKER_REALTIME` is suspended.
+10. [x] Prove admin freshness while `POKER_REALTIME` is suspended.
 
 Implementation details and failure semantics are in
 [`poker-sink.md`](poker-sink.md).
 
-Exit gate remains open until items 8–10 pass.
+Exit gate passed.
 
 Live evidence, 2026-07-24:
 
-- commit `0ae4a9b00930` sink and admin images were published as
+- initial commit `0ae4a9b00930` sink and admin images were published as
   `sha256:bea33e...a5be` and `sha256:9911c6...de23`;
 - all sink tables and canonical views were created successfully;
-- `POKER_SINK` pulled the expected digest and both containers became ready;
+- the compact-JSON identity repair was committed as `904903c5e49d`, published
+  as sink digest `sha256:65d7f6...306cf5`, and deployed with spec digest
+  `d6c44c6b...f842`;
+- `POKER_SINK` pulled the repaired digest and both containers became ready;
 - replay halted without committing the blocked record when the same
   deterministic hand event appeared with identical compact JSON but different
   whitespace/raw Kafka bytes;
-- the service was suspended without skipping an offset;
+- the service was suspended without skipping an offset, then resumed from that
+  exact record after the repair;
 - the repair now uses compact-JSON SHA-256 for immutable event identity and
   retains raw Kafka SHA-256 separately for byte-level lineage; and
-- the repair passes the full R5 gate and full Python suite, but must be
-  committed, published under the new Git SHA, and redeployed before item 8 can
-  close.
+- sink lag reached zero on all eight topics without an offset reset;
+- sealed dataset `multitable-alert-acceptance-v1` passed with exactly 16 hands,
+  96 player contexts, 240 pair features, 16 scores, 176 evidence rows, 16
+  decisions, 14 alerts, all required consumer commits, and zero target D7 dead
+  letters;
+- the sink verifier now treats the passed upstream SPCS
+  `schema_v2_lineage` IDs as the runtime handoff contract instead of comparing
+  them with older offline pre-enrichment projections;
+- `POKER_ADMIN` was deployed in canonical mode with immutable image digest
+  `sha256:9911c6...de23` and spec digest `c13529fc...211f`; and
+- with `POKER_REALTIME` fully suspended, the admin remained running, returned
+  all 14 exact runtime alert IDs, and retained zero sink lag. The legacy service
+  was restored to its original running spec `2941d733...249d` with a ready
+  container and zero restarts.
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: blocked on R5.
+Status: ready; not started.
 
 1. Dual-run legacy and canonical paths on the same bounded synthetic dataset.
 2. Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and

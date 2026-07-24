@@ -27,24 +27,22 @@ TABLES = {
 SINK_GROUP_ID = "poker-snowflake-sink-synthetic-v1"
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
+def expected_admin_ids(spcs_report: dict[str, Any]) -> set[str]:
+    """Return alert IDs accepted at the upstream SPCS verification boundary.
 
+    The runtime schema-v2 pipeline derives score and alert IDs from enriched
+    Kafka records. Those IDs can intentionally differ from the offline oracle's
+    pre-enrichment projections, so the sink must reconcile against the passed
+    SPCS report rather than re-derive an older expectation.
+    """
 
-def expected_admin_ids(manifest: dict[str, Any]) -> set[str]:
-    rows = _read_jsonl(
-        Path(manifest["acceptance_pack"])
-        / "private_oracle"
-        / "score_expectations.jsonl"
-    )
+    lineage = spcs_report.get("schema_v2_lineage")
+    if not isinstance(lineage, dict):
+        raise ValueError("D7 SPCS report is missing schema_v2_lineage")
     return {
-        str(row["expected_admin_row_id"])
-        for row in rows
-        if row["expected_admin_visible"]
+        str(row["risk_alert_event_id"])
+        for row in lineage.values()
+        if isinstance(row, dict) and row.get("risk_alert_event_id") is not None
     }
 
 
@@ -102,13 +100,14 @@ def wait_for_sink_rows(
     warehouse: Warehouse,
     manifest: dict[str, Any],
     *,
+    expected_admin_alert_ids: set[str],
     timeout_seconds: float,
 ) -> dict[str, Any]:
     expected = {
         name: int(manifest["expected_counts"][name]) for name in TABLES
     }
     expected["hands"] = int(manifest["expected_counts"]["hands"])
-    expected_ids = expected_admin_ids(manifest)
+    expected_ids = expected_admin_alert_ids
     deadline = time.monotonic() + timeout_seconds
     observed: dict[str, int] = {}
     observed_ids: set[str] = set()
@@ -190,11 +189,21 @@ def main() -> None:
         or spcs_report.get("target_dead_letters") != 0
     ):
         raise SystemExit("a passed target-DLQ-free D7 SPCS report is required")
+    expected_ids = expected_admin_ids(spcs_report)
+    expected_alert_count = int(manifest["expected_counts"]["risk_alerts"])
+    if len(expected_ids) != expected_alert_count:
+        raise SystemExit(
+            "D7 SPCS lineage alert count does not match the sealed manifest: "
+            f"expected={expected_alert_count} observed={len(expected_ids)}"
+        )
 
     warehouse = get_warehouse()
     try:
         result = wait_for_sink_rows(
-            warehouse, manifest, timeout_seconds=args.timeout_seconds
+            warehouse,
+            manifest,
+            expected_admin_alert_ids=expected_ids,
+            timeout_seconds=args.timeout_seconds,
         )
         required_offsets = read_required_offsets(
             warehouse, manifest["dataset_id"]

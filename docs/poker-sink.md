@@ -1,9 +1,8 @@
 # POKER_SINK: Kafka-to-Snowflake persistence
 
-Status: implemented and locally verified; Snowflake/SPCS deployment and D7
-reconciliation are pending
+Status: deployed and accepted on the sealed D7 replay
 
-Last reviewed: 2026-07-23
+Last reviewed: 2026-07-24
 
 ## Purpose
 
@@ -138,5 +137,26 @@ make r5-sink-verify \
 
 The last command requires exact counts for 16 hands, 96 contexts, 240 pair
 features, 176 evidence events, 16 scores, 16 decisions, and 14 alerts. It also
-requires the exact sealed alert IDs in the admin view and verifies that the
-sink consumer group committed beyond every persisted source offset.
+requires the exact alert IDs accepted in the passed upstream SPCS
+`schema_v2_lineage` report and verifies that the sink consumer group committed
+beyond every persisted source offset. Runtime schema-v2 IDs are the handoff
+contract here: they are derived after enrichment and can differ from the
+offline oracle's pre-enrichment projections.
+
+## Accepted D7 deployment
+
+The 2026-07-24 acceptance run used:
+
+- sink source/tag `904903c5e49d`, registry digest
+  `sha256:65d7f6f8a92e361ac89078bfb8e6becdc2f513a06a328ceddd76deb44c306cf5`;
+- canonical admin tag `0ae4a9b00930`, registry digest
+  `sha256:9911c6b455e2d64a7338da136cf14ec7023568bf2a034c2cc7b0ad316ae8de23`;
+- sink consumer group `poker-snowflake-sink-synthetic-v1`; and
+- dataset `multitable-alert-acceptance-v1`.
+
+The sink reconciled all eight topics to zero lag and the verifier passed the
+exact table counts, 14 runtime lineage alert IDs, and all required committed
+offsets. With legacy `POKER_REALTIME` fully suspended, `POKER_ADMIN` remained
+running in canonical mode and returned the same 14 alerts while sink lag
+remained zero. The legacy service was then restored to its original running
+spec.

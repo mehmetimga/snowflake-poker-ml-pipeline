@@ -79,6 +79,15 @@ def manifest(tmp_path: Path) -> dict:
     }
 
 
+def spcs_report() -> dict:
+    return {
+        "schema_v2_lineage": {
+            "hand-1": {"risk_alert_event_id": "runtime-alert-1"},
+            "hand-2": {"risk_alert_event_id": None},
+        }
+    }
+
+
 def test_sink_reconciliation_requires_exact_counts_and_admin_ids(
     tmp_path: Path,
 ) -> None:
@@ -87,14 +96,19 @@ def test_sink_reconciliation_requires_exact_counts_and_admin_ids(
         name: int(value["expected_counts"][name]) for name in TABLES
     }
     expected["hands"] = 16
-    warehouse = FakeWarehouse(expected, {"alert-1"})
+    warehouse = FakeWarehouse(expected, {"runtime-alert-1"})
 
-    result = wait_for_sink_rows(warehouse, value, timeout_seconds=0.1)
+    result = wait_for_sink_rows(
+        warehouse,
+        value,
+        expected_admin_alert_ids=expected_admin_ids(spcs_report()),
+        timeout_seconds=0.1,
+    )
 
     assert result["status"] == "passed"
     assert result["counts"] == expected
-    assert result["admin_alert_ids"] == ["alert-1"]
-    assert expected_admin_ids(value) == {"alert-1"}
+    assert result["admin_alert_ids"] == ["runtime-alert-1"]
+    assert expected_admin_ids(spcs_report()) == {"runtime-alert-1"}
 
 
 def test_sink_progress_uses_persisted_source_offsets(tmp_path: Path) -> None:
@@ -103,7 +117,7 @@ def test_sink_progress_uses_persisted_source_offsets(tmp_path: Path) -> None:
         name: int(value["expected_counts"][name]) for name in TABLES
     }
     expected["hands"] = 16
-    warehouse = FakeWarehouse(expected, {"alert-1"})
+    warehouse = FakeWarehouse(expected, {"runtime-alert-1"})
 
     assert read_required_offsets(warehouse, value["dataset_id"]) == {
         ("poker.synthetic.risk-scores.v1", 1): 42
