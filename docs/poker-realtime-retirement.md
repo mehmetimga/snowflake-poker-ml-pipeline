@@ -1,7 +1,7 @@
 # POKER_REALTIME retirement runbook
 
-Status: R6 tooling implemented locally; live preflight, bounded replay, and
-24-hour suspension evidence are pending
+Status: live preflight and bounded parity passed; controlled 24-hour suspension
+is the next gate
 
 Last reviewed: 2026-07-24
 
@@ -56,7 +56,13 @@ It contains:
 - `legacy-replay-report.json`: exact D7 hand IDs and acknowledged legacy Kafka
   offsets; and
 - `parity-report.json`: raw input identity, row coverage, output comparison,
-  target DLQ result, commits, lag, and latency observations.
+  target DLQ result, commits, lag, and latency observations;
+- `suspension-start-report.json`: hash-bound start/minimum-end timestamps,
+  before/after health, legacy dependencies, and rollback contract;
+- timestamped `suspension-check-*.json` files: immutable health observations;
+  and
+- `rollback-report.json`: restored service identity, consumer membership,
+  committed offsets, and lag.
 
 Every live command refuses to overwrite an existing report. Use a new
 `R6_RUN_DIR` for a new attempt so failed and accepted evidence cannot be
@@ -145,11 +151,17 @@ both pass. The start record must include:
 - sink group offsets and zero-lag baseline; and
 - the current statuses of `POKER_SINK`, `POKER_ADMIN`, and `POKER_REALTIME`.
 
-Suspend only the exact service:
+Start the controller only from a clean, pushed commit:
 
-```sql
-ALTER SERVICE POKER_ML_DEMO.SPCS.POKER_REALTIME SUSPEND;
+```bash
+make r6-suspension-start
 ```
+
+It validates the accepted evidence chain and live identities, suspends only
+`POKER_ML_DEMO.SPCS.POKER_REALTIME`, waits for the service and its Kafka
+consumer to become inactive, and checks the canonical path immediately. If an
+immediate post-suspension gate fails, it automatically resumes the retained
+service and waits for it to become ready and caught up.
 
 During the window, verify:
 
@@ -160,15 +172,34 @@ During the window, verify:
 - target DLQ growth is zero; and
 - no active dependency appears on `hands.raw` or `alerts.out`.
 
+Create an immutable observation at any time with:
+
+```bash
+make r6-suspension-check
+```
+
+The default filename includes the current UTC timestamp so repeated checks do
+not overwrite prior evidence. A passed check reports
+`observation_in_progress` before the minimum end timestamp and
+`observation_window_complete` after it.
+
 No deletion occurs at the end of 24 hours.
 
 ## Rollback drill
 
-Resume the exact retained object:
+After 24 hours, seal the final health observation and then resume the exact
+retained object:
 
-```sql
-ALTER SERVICE POKER_ML_DEMO.SPCS.POKER_REALTIME RESUME;
+```bash
+make r6-suspension-final-check
+make r6-rollback
 ```
+
+The controller blocks this drill before the minimum end timestamp and requires
+the hash-bound final check to have status `observation_window_complete`. An
+emergency early rollback is intentionally not exposed through the Make target;
+an operator may run the controller's `rollback --allow-early` command when
+service recovery is required.
 
 The rollback passes only when:
 
@@ -180,6 +211,25 @@ The rollback passes only when:
 
 After the drill, the service may be suspended again for cost control only under
 an explicit operational decision.
+
+## Accepted live evidence
+
+On 2026-07-24:
+
+- R6 preflight commit `ef012e8257dc` passed with `POKER_REALTIME` as the only
+  service using `hands.raw`/`alerts.out` and `realtime-processor` as the only
+  active legacy consumer;
+- exactly 16 sealed D7 hands were published to `hands.raw` offsets 83 through
+  98 and committed through offset 99;
+- bounded legacy persistence passed with 16 hands, 96 players, 247 actions, 96
+  features, and 96 rule rows;
+- the canonical accepted counts remained unchanged at 16 hands, 96 contexts,
+  240 pair features, 16 scores, 176 evidence rows, 16 decisions, and 14 alerts;
+- target D7 dead letters remained zero and both the legacy and canonical sink
+  lag were zero; and
+- the single legacy thresholded alert and 14 canonical policy alerts were
+  recorded as different output contracts, not compared as numerically equal
+  scores.
 
 ## Final retirement boundary
 

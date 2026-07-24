@@ -551,20 +551,20 @@ Live evidence, 2026-07-24:
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: in progress; read-only preflight, bounded replay, parity, and rollback
-evidence tooling is implemented locally. Live evidence is pending a clean
-commit.
+Status: in progress; live preflight and bounded replacement parity passed.
+The controlled 24-hour suspension is the next gate.
 
-1. Dual-run legacy and canonical paths on the same bounded synthetic dataset.
-2. Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
+1. [x] Dual-run legacy and canonical paths on the same bounded synthetic dataset.
+2. [x] Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
    latency.
-3. Confirm no active producer or consumer depends only on `hands.raw` or
+3. [x] Confirm no active producer or consumer depends only on `hands.raw` or
    `alerts.out`.
-4. Suspend `POKER_REALTIME` for 24 hours in the POC.
-5. Verify admin freshness and canonical lag.
-6. Test rollback using the exact immutable legacy image/spec.
-7. Obtain explicit approval, then drop `POKER_REALTIME`.
-8. Retain its evidence and rollback manifest for the agreed retention window.
+4. [ ] Suspend `POKER_REALTIME` for 24 hours in the POC.
+5. [ ] Verify admin freshness and canonical lag.
+6. [ ] Test rollback using the exact immutable legacy image/spec and committed
+   Kafka offsets.
+7. [ ] Obtain explicit approval, then drop `POKER_REALTIME`.
+8. [ ] Retain its evidence and rollback manifest for the agreed retention window.
 
 The executable gates, evidence chain, comparison semantics, suspension
 monitoring, and destructive-action boundary are defined in
@@ -573,6 +573,16 @@ per-player ensemble scores and canonical per-hand CatBoost decisions are
 different contracts; R6 requires exact input and processing coverage plus
 independent canonical acceptance, and records their output distributions
 without asserting false numeric equality.
+
+Accepted 2026-07-24 evidence is bound to commit `ef012e8257dc`. Preflight
+confirmed the single expected legacy service/group dependency. The bounded
+replay published 16 sealed D7 hands at `hands.raw` offsets 83–98 and the legacy
+group committed offset 99 with zero lag. Exact legacy persistence was 16 hands,
+96 players, 247 actions, 96 features, and 96 rule rows. The canonical D7
+acceptance remained 16 hands, 96 contexts, 240 pair features, 16 scores, 176
+evidence rows, 16 decisions, 14 alerts, zero target dead letters, and zero sink
+lag. See the immutable reports under
+`/private/tmp/poker-r6-realtime-retirement/`.
 
 Target persistent count after R6 and `POKER_SINK`:
 

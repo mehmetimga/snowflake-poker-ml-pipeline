@@ -22,6 +22,13 @@ from pipeline.ops.realtime_retirement import (
     output_contract_comparison,
     validate_replay_manifest,
 )
+from scripts.manage_r6_realtime_suspension import (
+    _validate_completed_check,
+    _load_chain,
+    _offsets_cover,
+    _ready,
+    _validate_start_report,
+)
 
 
 def _payload() -> dict:
@@ -364,6 +371,130 @@ def test_output_comparison_records_non_equivalent_model_contracts() -> None:
     assert result["canonical"]["full_score_rows_persisted"] is True
 
 
+def test_suspension_chain_and_start_report_are_hash_bound(
+    tmp_path: Path,
+) -> None:
+    manifest = {
+        "dataset_id": "r6-dataset",
+        "topics": {"hands": "poker.synthetic.hands.raw.v1"},
+    }
+    preflight = {
+        "schema_version": 1,
+        "run_type": R6_RUN_TYPE,
+        "phase": "preflight",
+        "status": "passed",
+        "source_commit": "a" * 40,
+    }
+    parity = {
+        "schema_version": 1,
+        "run_type": R6_RUN_TYPE,
+        "phase": "bounded_parity",
+        "status": "passed",
+        "dataset_id": "r6-dataset",
+        "source_commit": "a" * 40,
+    }
+    manifest_path = tmp_path / "manifest.json"
+    preflight_path = tmp_path / "preflight.json"
+    parity_path = tmp_path / "parity.json"
+    manifest_path.write_text(json.dumps(manifest))
+    preflight_path.write_text(json.dumps(preflight))
+    parity_path.write_text(json.dumps(parity))
+
+    assert _load_chain(
+        preflight_path,
+        parity_path,
+        manifest_path,
+    ) == (preflight, parity, manifest)
+
+    start_report = {
+        "schema_version": 1,
+        "run_type": R6_RUN_TYPE,
+        "phase": "suspension_start",
+        "status": "observation_started",
+        "dataset_id": "r6-dataset",
+        "minimum_end_at": "2026-07-25T10:00:00Z",
+        "source_reports": {
+            "preflight": {
+                "path": str(preflight_path.resolve()),
+                "sha256": hashlib.sha256(
+                    preflight_path.read_bytes()
+                ).hexdigest(),
+            },
+            "parity": {
+                "path": str(parity_path.resolve()),
+                "sha256": hashlib.sha256(
+                    parity_path.read_bytes()
+                ).hexdigest(),
+            },
+            "d7_manifest": {
+                "path": str(manifest_path.resolve()),
+                "sha256": hashlib.sha256(
+                    manifest_path.read_bytes()
+                ).hexdigest(),
+            }
+        },
+    }
+    start_path = tmp_path / "start.json"
+    start_path.write_text(json.dumps(start_report))
+    assert _validate_start_report(start_path) == (start_report, manifest)
+
+    completed_check = {
+        "schema_version": 1,
+        "run_type": R6_RUN_TYPE,
+        "phase": "suspension_check",
+        "status": "observation_window_complete",
+        "start_report": {
+            "sha256": hashlib.sha256(start_path.read_bytes()).hexdigest()
+        },
+    }
+    completed_path = tmp_path / "completed.json"
+    completed_path.write_text(json.dumps(completed_check))
+    assert _validate_completed_check(
+        completed_path,
+        start_path,
+    ) == completed_check
+
+    manifest["dataset_id"] = "changed"
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="d7_manifest"):
+        _validate_start_report(start_path)
+
+
+def test_suspension_health_helpers_require_ready_and_monotonic_offsets() -> None:
+    assert _ready(
+        {
+            "status": "RUNNING",
+            "containers": [{"status": "READY"}],
+        },
+        1,
+    )
+    assert not _ready(
+        {
+            "status": "RUNNING",
+            "containers": [{"status": "PENDING"}],
+        },
+        1,
+    )
+    expected = {
+        "offsets": [
+            {"topic": LEGACY_HANDS_TOPIC, "partition": 0, "committed": 99}
+        ]
+    }
+    assert _offsets_cover(
+        {
+            "offsets": [
+                {
+                    "topic": LEGACY_HANDS_TOPIC,
+                    "partition": 0,
+                    "committed": 100,
+                }
+            ]
+        },
+        expected,
+    )
+    assert not _offsets_cover({"offsets": []}, expected)
+
+
 def test_r6_operational_entrypoints_are_packaged() -> None:
     root = Path(__file__).resolve().parent.parent
     makefile = (root / "Makefile").read_text()
@@ -372,6 +503,10 @@ def test_r6_operational_entrypoints_are_packaged() -> None:
         "r6-legacy-replay:",
         "r6-parity-verify:",
         "r6-bounded-e2e:",
+        "r6-suspension-start:",
+        "r6-suspension-check:",
+        "r6-suspension-final-check:",
+        "r6-rollback:",
         "phase-r6-check:",
     ):
         assert target in makefile
@@ -379,6 +514,7 @@ def test_r6_operational_entrypoints_are_packaged() -> None:
         "scripts/audit_r6_realtime_dependencies.py",
         "scripts/replay_r6_legacy.py",
         "scripts/verify_r6_realtime_parity.py",
+        "scripts/manage_r6_realtime_suspension.py",
         "docs/poker-realtime-retirement.md",
     ):
         assert (root / relative).is_file()
