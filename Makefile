@@ -1,4 +1,4 @@
-.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset multitable-data-smoke multitable-data-test multitable-benchmarks multitable-benchmarks-check multitable-benchmarks-test multitable-alert-acceptance multitable-alert-acceptance-check multitable-alert-acceptance-test pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics canonical-flink-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-seed-user-context snow-validate-catalog snow-inspect-flink snow-render snow-build snow-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
+.PHONY: help install install-flink check-kafka check-flink services flink-services down migrate dataset world-dataset multitable-data-smoke multitable-data-test multitable-benchmarks multitable-benchmarks-check multitable-benchmarks-test multitable-alert-acceptance multitable-alert-acceptance-check multitable-alert-acceptance-test pair-dataset pair-dataset-check pair-labels pair-train pair-model-check pair-challengers-test pair-challengers-train pair-challengers-check pair-history-dataset pair-history-dataset-check pair-history-test pair-history-train pair-history-check pair-graph-baseline pair-graph-dataset pair-graph-dataset-check pair-graph-test pair-graph-train pair-graph-check pair-ensemble-test pair-ensemble-train pair-ensemble-check model-stability-test model-stability model-stability-check model-seed-stability-test model-seed-stability model-seed-stability-check model-scenario-holdout-test model-scenario-holdout model-scenario-holdout-check model-card-test model-card model-card-check phase12-model-card model-drift model-registry-test model-registry model-registry-check phase12-operational phase12-check phase12 rule-evidence-test pair-rules-test stateful-rules-test review-policy-test rule-governance-test rule-evaluation rule-evaluation-check phase-b1-check phase-b2-check phase-b3-check phase-b4-check phase-b5-check go-risk-test go-risk-race go-risk-benchmark go-risk-check go-risk-run go-risk-kafka-check go-risk-kafka risk-scores-check world-topics enrichment-topics scoring-topics canonical-flink-topics world-replay world-replay-dry world-verify world-ingest pair-features-check pair-features-ingest load-dataset generate replay-challenge evaluate-challenge consume realtime flink-realtime flink-pair-memory flink-action-patterns flink-context-build flink-context-test flink-pair-features-build flink-pair-features-test features train train-full cpu-validate dl-export dl-train-local dgx-sync dgx-train-dl dgx-fetch-dl dgx-pair-challengers-sync dgx-pair-challengers-train dgx-pair-challengers-fetch dgx-pair-history-sync dgx-pair-history-train dgx-pair-history-fetch dgx-pair-graph-sync dgx-pair-graph-train dgx-pair-graph-fetch dgx-triton-sync dgx-triton-start dgx-triton-status dgx-triton-tunnel seed-qdrant admin demo demo-realtime test clean build-byoc push-byoc tf-init tf-plan tf-apply snow-bootstrap snow-mfa-login snow-configure-kafka snow-seed-user-context snow-validate-catalog snow-inspect-flink snow-render snow-build snow-push snow-legacy-realtime-build snow-legacy-realtime-push snow-deploy-admin snow-suspend-admin snow-resume-admin snow-deploy-realtime snow-train snow-status
 .PHONY: rule-monitoring-test rule-monitor-window rule-monitoring rule-monitoring-check phase-b6-check
 .PHONY: c1-package-test c1-risk-bundle c1-render c1-build-risk c1-build-flink c1-build c1-image-smoke c1-release-check c1-push c1-mirror-triton c1-upload-model c1-deploy-risk c1-deploy-flink c1-deploy phase-c1-check
 .PHONY: cdc-contract-test cdc-fixture-check phase-c2-readiness-check
@@ -10,6 +10,7 @@
 .PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local multitable-alert-spcs-test multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify multitable-alert-replay-spcs
 .PHONY: r5-sink-test r5-sink-render r5-sink-build r5-sink-image-smoke r5-sink-release-check r5-sink-push r5-sink-bootstrap r5-sink-deploy r5-sink-verify r5-admin-build r5-admin-image-smoke r5-admin-push r5-admin-deploy phase-r5-check
 .PHONY: r6-test r6-preflight r6-legacy-replay r6-parity-verify r6-bounded-e2e r6-suspension-start r6-suspension-check r6-suspension-final-check r6-rollback r6-observation-recover r6-recovery-rollback phase-r6-check
+.PHONY: r7-package-test r7-role-audit r7-render r7-admin-build r7-train-build r7-build r7-image-smoke r7-release-check r7-sbom r7-vulnerability-scan r7-security-scan r7-push r7-deploy-admin r7-train-run phase-r7-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -260,6 +261,13 @@ help:
 	@echo "  r6-rollback Resume and verify the exact retained legacy service and offsets"
 	@echo "  r6-observation-recover Recover purged R6 evidence from authoritative live state"
 	@echo "  r6-recovery-rollback Run guarded rollback from the durable recovery report"
+	@echo "  phase-r7-check Verify dedicated image roles, lifecycle, specs, and packaging"
+	@echo "  r7-build Build dedicated linux/amd64 admin and training images"
+	@echo "  r7-image-smoke Run role-specific non-root image smoke checks"
+	@echo "  r7-security-scan Generate SBOMs and fail on fixable high/critical CVEs"
+	@echo "  r7-push Push clean-commit admin and training images to Snowflake"
+	@echo "  r7-deploy-admin Deploy the dedicated on-demand admin image"
+	@echo "  r7-train-run Submit the dedicated ephemeral training job"
 	@echo "  cdc-sim-up   Start local PostgreSQL, Kafka, and Debezium containers"
 	@echo "  cdc-sim-migrate Apply idempotent schema updates to a retained local volume"
 	@echo "  cdc-sim-e2e  Run the PostgreSQL -> Debezium -> Kafka -> Go smoke test"
@@ -343,13 +351,15 @@ help:
 	@echo "  snow-validate-catalog Compare rendered specs with the service catalog"
 	@echo "  snow-inspect-flink Read-only compare live POKER_FLINK with the catalog"
 	@echo "  phase-f5-check Test and render the internal Snowflake-context deployment"
-	@echo "  snow-build   Build the linux/amd64 SPCS application image"
-	@echo "  snow-push    Tag and push the image to Snowflake (login first)"
-	@echo "  snow-deploy-admin Deploy Streamlit admin to SPCS"
+	@echo "  snow-build   Build the dedicated R7 admin and training images"
+	@echo "  snow-push    Push clean-commit R7 images to Snowflake (login first)"
+	@echo "  snow-legacy-realtime-build Build retained realtime rollback image only"
+	@echo "  snow-legacy-realtime-push Push retained realtime rollback image only"
+	@echo "  snow-deploy-admin Deploy the dedicated Streamlit admin image to SPCS"
 	@echo "  snow-suspend-admin Suspend Streamlit and allow the compute pool to stop"
 	@echo "  snow-resume-admin Resume the Streamlit service"
-	@echo "  snow-deploy-realtime Deploy remote-Kafka scorer to SPCS"
-	@echo "  snow-train   Submit the containerized CPU training job"
+	@echo "  snow-deploy-realtime Roll back the retained legacy scorer only"
+	@echo "  snow-train   Submit the dedicated ephemeral CPU training job"
 	@echo "  snow-status  Show Snowflake container deployment status"
 
 install:
@@ -1284,10 +1294,16 @@ C2_ADAPTER_GROUP_ID ?= poker-go-hand-adapter-sim-v1
 R5_SINK_IMAGE_TAG ?= $(C1_IMAGE_TAG)
 R5_SINK_IMAGE ?= poker-sink:$(R5_SINK_IMAGE_TAG)
 R5_REMOTE_SINK_IMAGE ?= $(SNOW_REPO_URL)/poker-sink:$(R5_SINK_IMAGE_TAG)
-R5_ADMIN_IMAGE ?= poker-pipeline:$(R5_SINK_IMAGE_TAG)
-R5_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-pipeline:$(R5_SINK_IMAGE_TAG)
+R5_ADMIN_IMAGE ?= poker-admin:$(R5_SINK_IMAGE_TAG)
+R5_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-admin:$(R5_SINK_IMAGE_TAG)
 R5_SINK_ALLOWED_TENANTS ?= demo
 R5_SINK_GROUP_ID ?= poker-snowflake-sink-synthetic-v1
+R7_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+R7_ADMIN_IMAGE ?= poker-admin:$(R7_IMAGE_TAG)
+R7_TRAIN_IMAGE ?= poker-train:$(R7_IMAGE_TAG)
+R7_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-admin:$(R7_IMAGE_TAG)
+R7_REMOTE_TRAIN_IMAGE ?= $(SNOW_REPO_URL)/poker-train:$(R7_IMAGE_TAG)
+R7_SECURITY_DIR ?= build/r7/security
 
 snow-bootstrap:
 	$(PY) infra/snowflake/deploy.py bootstrap
@@ -1311,16 +1327,19 @@ snow-inspect-flink:
 snow-render:
 	$(PY) infra/snowflake/deploy.py render
 
-snow-build:
+snow-build: r7-build
+
+snow-push: r7-push
+
+snow-legacy-realtime-build:
 	docker buildx build --platform linux/amd64 --load \
 		-f Dockerfile.spcs -t $(SNOW_IMAGE) .
 
-snow-push:
+snow-legacy-realtime-push:
 	docker tag $(SNOW_IMAGE) $(SNOW_REMOTE_IMAGE)
 	docker push $(SNOW_REMOTE_IMAGE)
 
-snow-deploy-admin:
-	$(PY) infra/snowflake/deploy.py deploy-admin
+snow-deploy-admin: r7-deploy-admin
 
 snow-suspend-admin:
 	$(PY) infra/snowflake/deploy.py suspend-admin
@@ -1331,8 +1350,7 @@ snow-resume-admin:
 snow-deploy-realtime:
 	$(PY) infra/snowflake/deploy.py deploy-realtime
 
-snow-train:
-	$(PY) infra/snowflake/deploy.py run-training-job
+snow-train: r7-train-run
 
 snow-status:
 	$(PY) infra/snowflake/deploy.py status
@@ -1437,7 +1455,9 @@ r5-sink-test:
 
 r5-sink-render:
 	SPCS_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:$(R5_SINK_IMAGE_TAG) \
+	SPCS_ADMIN_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-admin:$(R5_SINK_IMAGE_TAG) \
 	SPCS_SINK_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-sink:$(R5_SINK_IMAGE_TAG) \
+	SPCS_ADMIN_BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
 	SPCS_SINK_BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
 	SPCS_SINK_ALLOWED_TENANTS=$(R5_SINK_ALLOWED_TENANTS) \
 	SPCS_SINK_GROUP_ID=$(R5_SINK_GROUP_ID) \
@@ -1464,7 +1484,7 @@ r5-sink-push: r5-sink-release-check
 r5-admin-build:
 	docker buildx build --platform linux/amd64 --load \
 		--build-arg BUILD_VERSION=$(R5_SINK_IMAGE_TAG) \
-		-f Dockerfile.spcs -t $(R5_ADMIN_IMAGE) .
+		-f Dockerfile.admin -t $(R5_ADMIN_IMAGE) .
 
 r5-admin-image-smoke:
 	docker run --rm --platform linux/amd64 -e ADMIN_DATA_MODE=canonical \
@@ -1568,6 +1588,77 @@ phase-r6-check: r6-test
 	$(PY) scripts/verify_r6_realtime_parity.py --help >/dev/null
 	$(PY) scripts/manage_r6_realtime_suspension.py --help >/dev/null
 	$(PY) scripts/recover_r6_realtime_observation.py --help >/dev/null
+
+r7-package-test:
+	$(PY) -m pytest -q tests/test_r7_image_roles.py \
+		tests/test_snowflake_deploy.py tests/test_r5_sink_packaging.py
+
+r7-role-audit:
+	$(PY) scripts/check_r7_image_roles.py
+
+r7-render:
+	SPCS_ADMIN_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-admin:$(R7_IMAGE_TAG) \
+	SPCS_TRAIN_IMAGE_PATH=/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-train:$(R7_IMAGE_TAG) \
+	SPCS_ADMIN_BUILD_VERSION=$(R7_IMAGE_TAG) \
+	SPCS_TRAIN_BUILD_VERSION=$(R7_IMAGE_TAG) \
+		$(PY) infra/snowflake/deploy.py render
+
+r7-admin-build:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(R7_IMAGE_TAG) \
+		-f Dockerfile.admin -t $(R7_ADMIN_IMAGE) .
+
+r7-train-build:
+	docker buildx build --platform linux/amd64 --load \
+		--build-arg BUILD_VERSION=$(R7_IMAGE_TAG) \
+		-f Dockerfile.train -t $(R7_TRAIN_IMAGE) .
+
+r7-build: r7-admin-build r7-train-build
+
+r7-image-smoke:
+	docker run --rm --platform linux/amd64 --user 65532:65532 \
+		-e ADMIN_DATA_MODE=canonical --entrypoint python \
+		$(R7_ADMIN_IMAGE) -c "from admin import data_access; assert data_access.data_mode() == 'canonical'"
+	docker run --rm --platform linux/amd64 --user 65532:65532 \
+		--entrypoint python $(R7_TRAIN_IMAGE) \
+		-c "from pipeline.ml.train import ALL_MODELS; assert len(ALL_MODELS) == 3"
+
+r7-release-check:
+	$(PY) scripts/check_c1_release.py --phase R7 --tag $(R7_IMAGE_TAG)
+
+r7-sbom:
+	command -v syft >/dev/null
+	mkdir -p $(R7_SECURITY_DIR)
+	syft $(R7_ADMIN_IMAGE) -o cyclonedx-json=$(R7_SECURITY_DIR)/poker-admin.cdx.json
+	syft $(R7_TRAIN_IMAGE) -o cyclonedx-json=$(R7_SECURITY_DIR)/poker-train.cdx.json
+
+r7-vulnerability-scan:
+	command -v trivy >/dev/null
+	mkdir -p $(R7_SECURITY_DIR)
+	trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+		--format json --output $(R7_SECURITY_DIR)/poker-admin.trivy.json \
+		$(R7_ADMIN_IMAGE)
+	trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+		--format json --output $(R7_SECURITY_DIR)/poker-train.trivy.json \
+		$(R7_TRAIN_IMAGE)
+
+r7-security-scan: r7-sbom r7-vulnerability-scan
+
+r7-push: r7-release-check
+	docker tag $(R7_ADMIN_IMAGE) $(R7_REMOTE_ADMIN_IMAGE)
+	docker tag $(R7_TRAIN_IMAGE) $(R7_REMOTE_TRAIN_IMAGE)
+	docker push $(R7_REMOTE_ADMIN_IMAGE)
+	docker push $(R7_REMOTE_TRAIN_IMAGE)
+
+r7-deploy-admin: r7-release-check r7-render
+	$(PY) infra/snowflake/deploy.py deploy-admin
+
+r7-train-run: r7-release-check r7-render
+	$(PY) infra/snowflake/deploy.py run-training-job
+
+phase-r7-check: r7-package-test r7-role-audit
+	KAFKA_BOOTSTRAP_SERVERS=broker.r7.invalid:9092 $(MAKE) r7-render
+	$(PY) infra/snowflake/deploy.py validate-catalog
 
 c2-adapter-package-test:
 	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py \

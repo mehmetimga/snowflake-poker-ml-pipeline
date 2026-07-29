@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.11-slim@sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-admin" \
+      org.opencontainers.image.description="Read-only poker risk review administration UI" \
+      org.opencontainers.image.revision="${BUILD_VERSION}" \
+      io.aicampions.poker.role="admin" \
+      io.aicampions.poker.lifecycle="on-demand-service"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/tmp \
+    ADMIN_BUILD_VERSION=${BUILD_VERSION}
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 poker \
+    && useradd --system --uid 65532 --gid 65532 --no-create-home poker
+
+COPY requirements.admin.txt /tmp/requirements.admin.txt
+RUN python -m pip install --requirement /tmp/requirements.admin.txt \
+    && rm /tmp/requirements.admin.txt
+
+COPY --chown=65532:65532 pipeline/ ./pipeline/
+COPY --chown=65532:65532 admin/ ./admin/
+
+USER 65532:65532
+
+EXPOSE 8501
+ENTRYPOINT ["streamlit", "run", "admin/Home.py"]
+CMD ["--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]

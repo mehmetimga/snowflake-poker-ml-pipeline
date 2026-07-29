@@ -1,0 +1,77 @@
+version: 1
+
+images:
+  poker-adapter:
+    role: adapter
+    lifecycle: persistent-service
+    dockerfile: Dockerfile.adapter
+    runtime_user: "65532:65532"
+    specs:
+      - adapter-sim.yaml.template
+    build_version_env: CDC_SERVICE_BUILD_VERSION
+
+  poker-flink:
+    role: stream-processing
+    lifecycle: persistent-service-and-ephemeral-savepoint-job
+    dockerfile: Dockerfile.flink
+    runtime_user: flink
+    specs:
+      - flink.yaml.template
+      - flink-sim.yaml.template
+    ephemeral_controller: scripts/spcs_flink_savepoints.py
+    build_version_env: POKER_FLINK_BUILD_VERSION
+
+  poker-risk:
+    role: real-time-scoring
+    lifecycle: persistent-service
+    dockerfile: Dockerfile.risk
+    runtime_user: "65532:65532"
+    specs:
+      - risk.yaml.template
+      - risk-sim.yaml.template
+    build_version_env: RISK_SERVICE_BUILD_VERSION
+
+  poker-sink:
+    role: canonical-persistence
+    lifecycle: persistent-service
+    dockerfile: Dockerfile.sink
+    runtime_user: "65532:65532"
+    specs:
+      - sink.yaml.template
+    build_version_env: SINK_SERVICE_BUILD_VERSION
+
+  poker-admin:
+    role: administration
+    lifecycle: on-demand-service
+    dockerfile: Dockerfile.admin
+    runtime_user: "65532:65532"
+    specs:
+      - admin.yaml.template
+    requirements: requirements.admin.txt
+    build_version_env: ADMIN_BUILD_VERSION
+
+  poker-train:
+    role: classical-ml-training
+    lifecycle: ephemeral-job
+    dockerfile: Dockerfile.train
+    runtime_user: "65532:65532"
+    job_specs:
+      - train-job.yaml.template
+    requirements: requirements.train.txt
+    build_version_env: TRAIN_BUILD_VERSION
+
+  poker-pipeline:
+    role: retained-legacy-realtime-rollback
+    lifecycle: retained-suspended-service
+    dockerfile: Dockerfile.spcs
+    runtime_user_exception: retained immutable legacy image
+    specs:
+      - realtime.yaml.template
+
+external_images:
+  tritonserver:
+    role: model-server-sidecar
+    lifecycle: persistent-sidecar
+    source: nvcr.io/nvidia/tritonserver:25.12-py3
+    mirrored_repository: tritonserver
+    exception: upstream image; digest and role are governed at mirror time

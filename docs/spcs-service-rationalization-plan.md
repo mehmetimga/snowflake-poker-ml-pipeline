@@ -627,16 +627,41 @@ on-demand.
 
 ### R7 — Separate generic image roles and batch lifecycle
 
-Status: pending.
+Status: local implementation complete; image and SPCS rollout pending.
 
-1. Stop using the generic legacy `poker-pipeline` image for unrelated roles.
-2. Maintain separate immutable images for adapter, Flink, risk, sink, admin,
-   and training.
-3. Run training and savepoint controllers only as ephemeral jobs.
-4. Give every image a non-root runtime, minimal dependencies, SBOM,
-   vulnerability scan, immutable tag, build identity, and role-specific smoke
-   test.
-5. Remove `snow-deploy-realtime` only after R6.
+- [x] Stop using the generic legacy `poker-pipeline` image for admin and
+  training.
+- [x] Govern adapter, Flink, risk, sink, admin, training, and retained legacy
+  image ownership in `infra/snowflake/image-roles.yaml`.
+- [x] Add dedicated minimal `poker-admin` and `poker-train` Dockerfiles and
+  dependency locks.
+- [x] Run training as an ephemeral job; prevent the persistent admin process
+  from starting training.
+- [x] Run Flink as its non-root `flink` user after image setup.
+- [x] Route the default build, push, admin deployment, and training targets to
+  the dedicated R7 images.
+- [x] Preserve explicitly named legacy build/push and realtime rollback
+  commands only for the retained suspended service.
+- [x] Add fail-closed role ownership, lifecycle, spec, dependency, non-root,
+  immutable-build, and Make-target checks.
+- [x] Add local package, render, and catalog gates.
+- [ ] Build both dedicated images from a committed revision and pass their
+  non-root role-specific smoke tests.
+- [ ] Generate CycloneDX SBOMs and pass the fixable high/critical
+  vulnerability gate.
+- [ ] Push the clean-commit images to the Snowflake image repository.
+- [ ] Deploy and verify the on-demand admin image.
+- [ ] Execute one bounded training job, verify model artifact upload, and
+  confirm that the job terminates.
+
+The complete role matrix, lifecycle rules, commands, and rollout/rollback
+procedure are in
+[`r7-image-role-lifecycle.md`](r7-image-role-lifecycle.md).
+
+`POKER_REALTIME` remains suspended and retained. Its deployment command is an
+explicit rollback path, not a normal R7 deployment path. Removing that command
+or dropping the service belongs to the separately approved physical-retirement
+decision.
 
 ## 11. Service catalog
 
@@ -713,15 +738,22 @@ the cleanup action restoring the previous limit.
 - [ ] `POKER_REALTIME` completes its suspension and rollback gates.
 - [ ] every service has an owner, lifecycle, data plane, pool, expected state,
   and runbook.
+- [x] every in-repository runtime image has a governed role and lifecycle.
+- [x] admin and training no longer consume the generic legacy image.
+- [x] training is isolated as an ephemeral job.
+- [ ] committed admin and training images pass non-root runtime, SBOM, and
+  vulnerability gates.
 
 ## 14. Recommended next slice
 
-1. Implement F2 from the
-   [active-user context refactoring plan](active-user-context-refactoring-plan.md):
-   versioned JDBC lineage/output contract, canonical/legacy entrypoints, and
-   package boundaries.
-2. Complete R0 inventory after MFA.
-3. Implement R1 historical job evidence export and dry-run cleanup.
-4. Continue R2 naming/topic/guard changes locally.
-5. Execute R3 only after the context plan's F1–F5 local and rendered-spec
-   gates pass.
+1. Commit and push the R7 role/lifecycle contract after `make phase-r7-check`
+   and the full Python suite pass.
+2. Build the dedicated admin and training images from that clean commit and
+   run `make r7-image-smoke`.
+3. Run `make r7-security-scan`, preserving the SBOM and vulnerability reports
+   as release evidence.
+4. Push immutable SHA-tagged images only after the release gate passes.
+5. Deploy `POKER_ADMIN`, submit one bounded `POKER_TRAIN_JOB`, verify the
+   build identities and artifacts, and confirm that the training job exits.
+6. Keep `POKER_REALTIME` suspended; physical deletion still requires a
+   separate explicit approval.

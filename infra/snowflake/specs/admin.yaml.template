@@ -1,7 +1,7 @@
 spec:
   containers:
   - name: admin
-    image: __IMAGE_PATH__
+    image: __ADMIN_IMAGE_PATH__
     command:
     - streamlit
     args:
@@ -11,6 +11,7 @@ spec:
     - --server.port=8501
     - --server.headless=true
     env:
+      ADMIN_BUILD_VERSION: __ADMIN_BUILD_VERSION__
       WAREHOUSE_BACKEND: snowflake
       ADMIN_DATA_MODE: canonical
       SNOWFLAKE_WAREHOUSE: DEMO_WH

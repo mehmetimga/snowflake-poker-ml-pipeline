@@ -59,8 +59,13 @@ RUN chmod 0755 \
       /opt/context-proxy/server.py \
       /opt/flink/bin/submit-poker-jobs \
       /opt/flink/bin/check-poker-image \
-    && chown -R flink:flink /opt/flink/usrlib
+    && chown -R flink:flink \
+      /opt/context-proxy \
+      /opt/flink/usrlib \
+      /opt/flink/state
 
 ENV POKER_FLINK_BUILD_VERSION=${BUILD_VERSION}
+
+USER flink
 
 EXPOSE 8081 8090 9249 9250

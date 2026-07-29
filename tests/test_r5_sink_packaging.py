@@ -106,10 +106,12 @@ def test_sink_dockerfile_pins_runtime_and_contains_both_processes() -> None:
 
 
 def test_admin_image_is_revisioned_and_base_digest_pinned() -> None:
-    dockerfile = (ROOT / "Dockerfile.spcs").read_text()
+    dockerfile = (ROOT / "Dockerfile.admin").read_text()
     assert "FROM python:3.11-slim@sha256:" in dockerfile
     assert "ARG BUILD_VERSION=dev" in dockerfile
     assert 'org.opencontainers.image.revision="${BUILD_VERSION}"' in dockerfile
+    assert 'org.opencontainers.image.title="poker-admin"' in dockerfile
+    assert "USER 65532:65532" in dockerfile
 
 
 def test_bootstrap_sink_executes_only_sink_ddl(monkeypatch) -> None:

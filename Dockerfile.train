@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.11-slim@sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.title="poker-train" \
+      org.opencontainers.image.description="Ephemeral CPU classical-ML training and governed artifact export" \
+      org.opencontainers.image.revision="${BUILD_VERSION}" \
+      io.aicampions.poker.role="training" \
+      io.aicampions.poker.lifecycle="ephemeral-job"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/tmp \
+    TRAIN_BUILD_VERSION=${BUILD_VERSION}
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 poker \
+    && useradd --system --uid 65532 --gid 65532 --no-create-home poker
+
+COPY requirements.train.txt /tmp/requirements.train.txt
+RUN python -m pip install --requirement /tmp/requirements.train.txt \
+    && rm /tmp/requirements.train.txt
+
+COPY --chown=65532:65532 pipeline/ ./pipeline/
+COPY --chown=65532:65532 scripts/snowflake_train.py ./scripts/snowflake_train.py
+
+USER 65532:65532
+
+ENTRYPOINT ["python", "scripts/snowflake_train.py"]

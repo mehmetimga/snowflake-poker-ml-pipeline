@@ -25,6 +25,8 @@ RENDERED_DIR = Path(__file__).resolve().parent / "rendered"
 SERVICE_CATALOG = Path(__file__).resolve().parent / "services.yaml"
 
 DEFAULT_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-pipeline:dev"
+DEFAULT_ADMIN_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-admin:dev"
+DEFAULT_TRAIN_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-train:dev"
 DEFAULT_RISK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-risk:dev"
 DEFAULT_FLINK_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-flink:dev"
 DEFAULT_ADAPTER_IMAGE_PATH = "/POKER_ML_DEMO/SPCS/POKER_ML_REPO/poker-adapter:dev"
@@ -473,12 +475,16 @@ def render_specs(
     image_path: str,
     kafka_bootstrap_servers: str | None,
     *,
+    admin_image_path: str = DEFAULT_ADMIN_IMAGE_PATH,
+    train_image_path: str = DEFAULT_TRAIN_IMAGE_PATH,
     risk_image_path: str = DEFAULT_RISK_IMAGE_PATH,
     flink_image_path: str = DEFAULT_FLINK_IMAGE_PATH,
     adapter_image_path: str = DEFAULT_ADAPTER_IMAGE_PATH,
     sink_image_path: str = DEFAULT_SINK_IMAGE_PATH,
     triton_image_path: str = DEFAULT_TRITON_IMAGE_PATH,
     build_version: str = "dev",
+    admin_build_version: str | None = None,
+    train_build_version: str | None = None,
     risk_build_version: str | None = None,
     flink_build_version: str | None = None,
     adapter_build_version: str | None = None,
@@ -495,7 +501,9 @@ def render_specs(
     flink_pair_savepoint_path: str = "",
 ) -> None:
     image_paths = {
-        "application": image_path,
+        "legacy realtime": image_path,
+        "admin": admin_image_path,
+        "training": train_image_path,
         "risk": risk_image_path,
         "flink": flink_image_path,
         "adapter": adapter_image_path,
@@ -508,12 +516,16 @@ def render_specs(
                 f"{label} image path must look like "
                 "/DATABASE/SCHEMA/REPOSITORY/image:tag"
             )
+    admin_build_version = admin_build_version or build_version
+    train_build_version = train_build_version or build_version
     risk_build_version = risk_build_version or build_version
     flink_build_version = flink_build_version or build_version
     adapter_build_version = adapter_build_version or build_version
     sink_build_version = sink_build_version or build_version
     for label, candidate in {
         "build version": build_version,
+        "admin build version": admin_build_version,
+        "training build version": train_build_version,
         "risk build version": risk_build_version,
         "Flink build version": flink_build_version,
         "adapter build version": adapter_build_version,
@@ -558,11 +570,15 @@ def render_specs(
             )
     replacements = {
         "__IMAGE_PATH__": image_path,
+        "__ADMIN_IMAGE_PATH__": admin_image_path,
+        "__TRAIN_IMAGE_PATH__": train_image_path,
         "__RISK_IMAGE_PATH__": risk_image_path,
         "__FLINK_IMAGE_PATH__": flink_image_path,
         "__ADAPTER_IMAGE_PATH__": adapter_image_path,
         "__SINK_IMAGE_PATH__": sink_image_path,
         "__TRITON_IMAGE_PATH__": triton_image_path,
+        "__ADMIN_BUILD_VERSION__": admin_build_version,
+        "__TRAIN_BUILD_VERSION__": train_build_version,
         "__RISK_BUILD_VERSION__": risk_build_version,
         "__FLINK_BUILD_VERSION__": flink_build_version,
         "__ADAPTER_BUILD_VERSION__": adapter_build_version,
@@ -877,6 +893,14 @@ def main() -> None:
         "--image-path", default=os.environ.get("SPCS_IMAGE_PATH", DEFAULT_IMAGE_PATH)
     )
     render.add_argument(
+        "--admin-image-path",
+        default=os.environ.get("SPCS_ADMIN_IMAGE_PATH", DEFAULT_ADMIN_IMAGE_PATH),
+    )
+    render.add_argument(
+        "--train-image-path",
+        default=os.environ.get("SPCS_TRAIN_IMAGE_PATH", DEFAULT_TRAIN_IMAGE_PATH),
+    )
+    render.add_argument(
         "--kafka-bootstrap-servers",
         default=os.environ.get("KAFKA_BOOTSTRAP_SERVERS"),
     )
@@ -902,6 +926,14 @@ def main() -> None:
     )
     render.add_argument(
         "--build-version", default=os.environ.get("SPCS_BUILD_VERSION", "dev")
+    )
+    render.add_argument(
+        "--admin-build-version",
+        default=os.environ.get("SPCS_ADMIN_BUILD_VERSION"),
+    )
+    render.add_argument(
+        "--train-build-version",
+        default=os.environ.get("SPCS_TRAIN_BUILD_VERSION"),
     )
     render.add_argument(
         "--risk-build-version", default=os.environ.get("SPCS_RISK_BUILD_VERSION")
@@ -1004,12 +1036,16 @@ def main() -> None:
         render_specs(
             args.image_path,
             kafka_bootstrap_servers,
+            admin_image_path=args.admin_image_path,
+            train_image_path=args.train_image_path,
             risk_image_path=args.risk_image_path,
             flink_image_path=args.flink_image_path,
             adapter_image_path=args.adapter_image_path,
             sink_image_path=args.sink_image_path,
             triton_image_path=args.triton_image_path,
             build_version=args.build_version,
+            admin_build_version=args.admin_build_version,
+            train_build_version=args.train_build_version,
             risk_build_version=args.risk_build_version,
             flink_build_version=args.flink_build_version,
             adapter_build_version=args.adapter_build_version,

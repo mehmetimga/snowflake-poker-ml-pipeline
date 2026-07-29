@@ -1,0 +1,13 @@
+numpy==1.26.4
+pandas==2.2.2
+pyarrow==15.0.2
+pydantic==2.7.4
+pydantic-settings==2.3.4
+python-dotenv==1.0.1
+snowflake-connector-python[pandas,secure-local-storage]==3.10.0
+onnxruntime==1.18.0
+qdrant-client==1.12.2
+networkx==3.3
+pyvis==0.3.2
+streamlit==1.36.0
+plotly==5.22.0
