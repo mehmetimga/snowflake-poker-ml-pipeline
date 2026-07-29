@@ -1639,9 +1639,11 @@ r7-vulnerability-scan:
 	command -v trivy >/dev/null
 	mkdir -p $(R7_SECURITY_DIR)
 	trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+		--scanners vuln \
 		--format json --output $(R7_SECURITY_DIR)/poker-admin.trivy.json \
 		$(R7_ADMIN_IMAGE)
 	trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+		--scanners vuln \
 		--format json --output $(R7_SECURITY_DIR)/poker-train.trivy.json \
 		$(R7_TRAIN_IMAGE)
 

@@ -92,6 +92,24 @@ do not stop this gate; release review can impose a stricter policy later.
 These reports are build evidence. They must be generated from the exact local
 images that will be tagged and pushed.
 
+### First scan and remediation
+
+The first scan of committed revision `87b56b24a406` failed closed on
+2026-07-29. Admin had 20 fixable HIGH records across six dependency families:
+Snowflake connector, Arrow, Pillow, cryptography, pyOpenSSL, and setuptools
+vendored tooling. Because the target is fail-fast, training was not scanned
+after the admin failure.
+
+The remediation updates the SPCS-only locks to Snowflake connector 4.7.1,
+fixed Arrow releases compatible with each role, Pillow 12.3.0, cryptography
+49.0.0, pyOpenSSL 26.3.0, setuptools 83.0.0, and Streamlit 1.60.0. The
+containers do not use `secure-local-storage`: SPCS authenticates with its
+service token, so a local credential cache adds dependencies and attack
+surface without serving the runtime.
+
+The audit pins this minimum accepted set. Any later version change must repeat
+package tests, image smokes, SBOM generation, and both vulnerability scans.
+
 ## Snowflake rollout
 
 The rollout sequence is deliberately separate from local implementation:

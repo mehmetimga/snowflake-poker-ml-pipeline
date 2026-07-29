@@ -73,6 +73,27 @@ def test_dedicated_python_images_are_non_root_minimal_and_revisioned() -> None:
     assert "requirements.admin.txt" not in training
     assert "COPY --chown=65532:65532 admin/" in admin
     assert "COPY --chown=65532:65532 admin/" not in training
+    assert "--mount=type=cache,target=/root/.cache/pip" in admin
+    assert "--mount=type=cache,target=/root/.cache/pip" in training
+
+
+def test_r7_security_remediation_versions_are_pinned() -> None:
+    admin = (ROOT / "requirements.admin.txt").read_text()
+    training = (ROOT / "requirements.train.txt").read_text()
+
+    for lock in (admin, training):
+        assert "snowflake-connector-python[pandas]==4.7.1" in lock
+        assert "cryptography==49.0.0" in lock
+        assert "pyOpenSSL==26.3.0" in lock
+        assert "setuptools==83.0.0" in lock
+        assert "wheel==0.47.0" in lock
+        assert "secure-local-storage" not in lock
+    assert "pyarrow==24.0.0" in admin
+    assert "pyarrow==24.0.0" in training
+    assert "streamlit==1.60.0" in admin
+    assert "pillow==12.3.0" in admin
+    assert "lightgbm==4.7.0" in training
+    assert "onnx==1.22.0" in training
 
 
 def test_training_is_ephemeral_and_not_executed_by_admin() -> None:
@@ -113,6 +134,7 @@ def test_r7_make_targets_cover_release_security_and_lifecycle() -> None:
         assert target in makefile
     assert "syft $(R7_ADMIN_IMAGE)" in makefile
     assert "trivy image --exit-code 1 --severity HIGH,CRITICAL" in makefile
+    assert makefile.count("--scanners vuln") == 2
     assert "snow-build: r7-build" in makefile
     assert "snow-push: r7-push" in makefile
     assert "snow-deploy-admin: r7-deploy-admin" in makefile

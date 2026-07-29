@@ -44,6 +44,28 @@ FORBIDDEN_TRAIN_DEPENDENCIES = {
     "torch",
     "torch-geometric",
 }
+REQUIRED_SECURE_DEPENDENCIES = {
+    "requirements.admin.txt": {
+        "cryptography": "49.0.0",
+        "pillow": "12.3.0",
+        "pyarrow": "24.0.0",
+        "pyopenssl": "26.3.0",
+        "setuptools": "83.0.0",
+        "snowflake-connector-python": "4.7.1",
+        "streamlit": "1.60.0",
+        "wheel": "0.47.0",
+    },
+    "requirements.train.txt": {
+        "cryptography": "49.0.0",
+        "lightgbm": "4.7.0",
+        "onnx": "1.22.0",
+        "pyarrow": "24.0.0",
+        "pyopenssl": "26.3.0",
+        "setuptools": "83.0.0",
+        "snowflake-connector-python": "4.7.1",
+        "wheel": "0.47.0",
+    },
+}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -62,6 +84,18 @@ def _requirements(path: Path) -> set[str]:
         name = line.split("==", 1)[0].split("[", 1)[0].lower()
         names.add(name)
     return names
+
+
+def _pinned_requirements(path: Path) -> dict[str, str]:
+    pinned: dict[str, str] = {}
+    for raw in path.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        package, separator, version = line.partition("==")
+        if separator:
+            pinned[package.split("[", 1)[0].lower()] = version
+    return pinned
 
 
 def _last_user(dockerfile: str) -> str | None:
@@ -189,6 +223,18 @@ def audit_image_roles(
     forbidden_train = sorted(train_dependencies & FORBIDDEN_TRAIN_DEPENDENCIES)
     if forbidden_train:
         errors.append(f"training image includes unrelated dependencies: {forbidden_train}")
+    for requirements_name, required in REQUIRED_SECURE_DEPENDENCIES.items():
+        requirements_path = root / requirements_name
+        pinned = _pinned_requirements(requirements_path)
+        for package, version in required.items():
+            if pinned.get(package) != version:
+                errors.append(
+                    f"{requirements_name}: {package} must be pinned to {version}"
+                )
+        if "secure-local-storage" in requirements_path.read_text().lower():
+            errors.append(
+                f"{requirements_name}: SPCS must not include local credential caching"
+            )
 
     retrain_page = (root / "admin/pages/5_Retrain.py").read_text()
     if "subprocess" in retrain_page or "scripts/train.py" in retrain_page:

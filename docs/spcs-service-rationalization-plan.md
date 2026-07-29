@@ -645,10 +645,11 @@ Status: local implementation complete; image and SPCS rollout pending.
 - [x] Add fail-closed role ownership, lifecycle, spec, dependency, non-root,
   immutable-build, and Make-target checks.
 - [x] Add local package, render, and catalog gates.
-- [ ] Build both dedicated images from a committed revision and pass their
-  non-root role-specific smoke tests.
-- [ ] Generate CycloneDX SBOMs and pass the fixable high/critical
-  vulnerability gate.
+- [x] Build both dedicated images from committed revision `87b56b24a406` and
+  pass their non-root role-specific smoke tests.
+- [x] Generate CycloneDX SBOMs for both committed images.
+- [ ] Rebuild with the fixed 2026 dependency set and pass the fixable
+  high/critical vulnerability gate.
 - [ ] Push the clean-commit images to the Snowflake image repository.
 - [ ] Deploy and verify the on-demand admin image.
 - [ ] Execute one bounded training job, verify model artifact upload, and
@@ -662,6 +663,13 @@ procedure are in
 explicit rollback path, not a normal R7 deployment path. Removing that command
 or dropping the service belongs to the separately approved physical-retirement
 decision.
+
+The first Trivy gate on 2026-07-29 failed closed before the training scan. It
+found 20 fixable HIGH records in the admin image, concentrated in the old
+Snowflake connector, Arrow, Pillow, cryptography, pyOpenSSL, and vendored build
+tooling. R7 now pins the current fixed dependency set, removes the unnecessary
+`secure-local-storage` extra from SPCS images, and protects those versions in
+the role audit. The remediation rebuild and repeat scan remain pending.
 
 ## 11. Service catalog
 

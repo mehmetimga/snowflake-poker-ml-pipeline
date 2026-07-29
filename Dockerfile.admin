@@ -10,7 +10,7 @@ LABEL org.opencontainers.image.title="poker-admin" \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/tmp
 
 WORKDIR /app
@@ -22,7 +22,8 @@ RUN apt-get update \
     && useradd --system --uid 65532 --gid 65532 --no-create-home poker
 
 COPY requirements.admin.txt /tmp/requirements.admin.txt
-RUN python -m pip install --requirement /tmp/requirements.admin.txt \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --requirement /tmp/requirements.admin.txt \
     && rm /tmp/requirements.admin.txt
 
 COPY --chown=65532:65532 pipeline/ ./pipeline/
