@@ -110,6 +110,24 @@ surface without serving the runtime.
 The audit pins this minimum accepted set. Any later version change must repeat
 package tests, image smokes, SBOM generation, and both vulnerability scans.
 
+### Accepted local release candidate
+
+Committed revision `6542230378de` passed the local R7 release gates on
+2026-07-29:
+
+- `poker-admin:6542230378de` has local image ID
+  `sha256:c70f7b3bd1104cf6b3620c8e0989525ff00e3e758966131a70447255d6032be8`;
+- `poker-train:6542230378de` has local image ID
+  `sha256:56acf281809b3d7f196e209bec9333d7b328bd5b80cff6e9e2b823fb137ab3d2`;
+- both images carry revision label `6542230378de`, run as
+  `65532:65532`, and passed their role-specific smoke tests; and
+- both CycloneDX SBOMs were generated and both Trivy reports contain zero
+  fixable `HIGH` or `CRITICAL` findings under the release policy.
+
+The files under `build/r7/security/` are local generated evidence and are not
+a substitute for rebuilding or scanning the exact registry artifacts before
+deployment.
+
 ## Snowflake rollout
 
 The rollout sequence is deliberately separate from local implementation:

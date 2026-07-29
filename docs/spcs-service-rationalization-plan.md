@@ -627,7 +627,7 @@ on-demand.
 
 ### R7 — Separate generic image roles and batch lifecycle
 
-Status: local implementation complete; image and SPCS rollout pending.
+Status: local release candidate accepted; registry and SPCS rollout pending.
 
 - [x] Stop using the generic legacy `poker-pipeline` image for admin and
   training.
@@ -648,7 +648,7 @@ Status: local implementation complete; image and SPCS rollout pending.
 - [x] Build both dedicated images from committed revision `87b56b24a406` and
   pass their non-root role-specific smoke tests.
 - [x] Generate CycloneDX SBOMs for both committed images.
-- [ ] Rebuild with the fixed 2026 dependency set and pass the fixable
+- [x] Rebuild with the fixed 2026 dependency set and pass the fixable
   high/critical vulnerability gate.
 - [ ] Push the clean-commit images to the Snowflake image repository.
 - [ ] Deploy and verify the on-demand admin image.
@@ -669,7 +669,9 @@ found 20 fixable HIGH records in the admin image, concentrated in the old
 Snowflake connector, Arrow, Pillow, cryptography, pyOpenSSL, and vendored build
 tooling. R7 now pins the current fixed dependency set, removes the unnecessary
 `secure-local-storage` extra from SPCS images, and protects those versions in
-the role audit. The remediation rebuild and repeat scan remain pending.
+the role audit. Committed revision `6542230378de` passed both non-root smoke
+tests, generated both CycloneDX SBOMs, and produced zero fixable HIGH/CRITICAL
+findings in both Trivy reports on 2026-07-29.
 
 ## 11. Service catalog
 
@@ -749,18 +751,17 @@ the cleanup action restoring the previous limit.
 - [x] every in-repository runtime image has a governed role and lifecycle.
 - [x] admin and training no longer consume the generic legacy image.
 - [x] training is isolated as an ephemeral job.
-- [ ] committed admin and training images pass non-root runtime, SBOM, and
+- [x] committed admin and training images pass non-root runtime, SBOM, and
   vulnerability gates.
 
 ## 14. Recommended next slice
 
-1. Commit and push the R7 role/lifecycle contract after `make phase-r7-check`
-   and the full Python suite pass.
-2. Build the dedicated admin and training images from that clean commit and
-   run `make r7-image-smoke`.
-3. Run `make r7-security-scan`, preserving the SBOM and vulnerability reports
-   as release evidence.
-4. Push immutable SHA-tagged images only after the release gate passes.
+1. Commit the accepted local release evidence and push revisions
+   `87b56b24a406`, `6542230378de`, and the evidence-only documentation commit.
+2. Re-run `make r7-release-check` from the pushed clean revision.
+3. Push immutable SHA-tagged images only after confirming the image revision
+   labels and registry destination.
+4. Scan or attest the exact registry artifacts before deployment.
 5. Deploy `POKER_ADMIN`, submit one bounded `POKER_TRAIN_JOB`, verify the
    build identities and artifacts, and confirm that the training job exits.
 6. Keep `POKER_REALTIME` suspended; physical deletion still requires a
