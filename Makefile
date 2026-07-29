@@ -1299,6 +1299,9 @@ R5_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-admin:$(R5_SINK_IMAGE_TAG)
 R5_SINK_ALLOWED_TENANTS ?= demo
 R5_SINK_GROUP_ID ?= poker-snowflake-sink-synthetic-v1
 R7_IMAGE_TAG ?= $(C1_IMAGE_TAG)
+# Freeze one identity for the complete build invocation, even if Git state
+# changes while a long dependency layer is being built.
+R7_IMAGE_TAG := $(R7_IMAGE_TAG)
 R7_ADMIN_IMAGE ?= poker-admin:$(R7_IMAGE_TAG)
 R7_TRAIN_IMAGE ?= poker-train:$(R7_IMAGE_TAG)
 R7_REMOTE_ADMIN_IMAGE ?= $(SNOW_REPO_URL)/poker-admin:$(R7_IMAGE_TAG)

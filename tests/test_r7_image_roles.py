@@ -63,6 +63,9 @@ def test_dedicated_python_images_are_non_root_minimal_and_revisioned() -> None:
         assert 'org.opencontainers.image.revision="${BUILD_VERSION}"' in dockerfile
         assert "USER 65532:65532" in dockerfile
         assert ":latest" not in dockerfile
+        assert dockerfile.index("python -m pip install") < dockerfile.index(
+            'org.opencontainers.image.revision="${BUILD_VERSION}"'
+        )
 
     assert "requirements.admin.txt" in admin
     assert "requirements.train.txt" not in admin
@@ -118,3 +121,4 @@ def test_r7_make_targets_cover_release_security_and_lifecycle() -> None:
     assert "snow-legacy-realtime-push:" in makefile
     assert "R5_ADMIN_IMAGE ?= poker-admin:" in makefile
     assert "-f Dockerfile.admin -t $(R5_ADMIN_IMAGE) ." in makefile
+    assert "R7_IMAGE_TAG := $(R7_IMAGE_TAG)" in makefile

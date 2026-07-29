@@ -2,10 +2,8 @@
 
 FROM python:3.11-slim@sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045
 
-ARG BUILD_VERSION=dev
 LABEL org.opencontainers.image.title="poker-admin" \
       org.opencontainers.image.description="Read-only poker risk review administration UI" \
-      org.opencontainers.image.revision="${BUILD_VERSION}" \
       io.aicampions.poker.role="admin" \
       io.aicampions.poker.lifecycle="on-demand-service"
 
@@ -13,8 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
-    HOME=/tmp \
-    ADMIN_BUILD_VERSION=${BUILD_VERSION}
+    HOME=/tmp
 
 WORKDIR /app
 
@@ -30,6 +27,10 @@ RUN python -m pip install --requirement /tmp/requirements.admin.txt \
 
 COPY --chown=65532:65532 pipeline/ ./pipeline/
 COPY --chown=65532:65532 admin/ ./admin/
+
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.revision="${BUILD_VERSION}"
+ENV ADMIN_BUILD_VERSION=${BUILD_VERSION}
 
 USER 65532:65532
 

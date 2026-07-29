@@ -116,6 +116,15 @@ def audit_image_roles(
             )
         if expected_user is None and "runtime_user_exception" not in raw:
             errors.append(f"{repository}: non-root user or explicit exception required")
+        if repository in {"poker-admin", "poker-train"}:
+            revision_position = dockerfile.find(
+                'org.opencontainers.image.revision="${BUILD_VERSION}"'
+            )
+            dependency_position = dockerfile.find("python -m pip install")
+            if revision_position < dependency_position:
+                errors.append(
+                    f"{repository}: build revision must not invalidate dependencies"
+                )
 
         specs = list(raw.get("specs", [])) + list(raw.get("job_specs", []))
         if not specs:
@@ -210,6 +219,9 @@ def audit_image_roles(
         ),
         "R7 training image is dedicated": (
             "R7_TRAIN_IMAGE ?= poker-train:$(R7_IMAGE_TAG)"
+        ),
+        "R7 image identity is frozen per invocation": (
+            "R7_IMAGE_TAG := $(R7_IMAGE_TAG)"
         ),
     }
     for label, contract in required_make_contracts.items():
