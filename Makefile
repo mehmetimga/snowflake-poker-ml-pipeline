@@ -9,7 +9,7 @@
 .PHONY: f5-package-test phase-f5-check canonical-scoring-topics
 .PHONY: multitable-alert-replay-java-build multitable-alert-replay-java multitable-alert-replay-local multitable-alert-spcs-test multitable-alert-spcs-topics multitable-alert-spcs-seed-context multitable-alert-spcs-replay multitable-alert-spcs-verify multitable-alert-replay-spcs
 .PHONY: r5-sink-test r5-sink-render r5-sink-build r5-sink-image-smoke r5-sink-release-check r5-sink-push r5-sink-bootstrap r5-sink-deploy r5-sink-verify r5-admin-build r5-admin-image-smoke r5-admin-push r5-admin-deploy phase-r5-check
-.PHONY: r6-test r6-preflight r6-legacy-replay r6-parity-verify r6-bounded-e2e r6-suspension-start r6-suspension-check r6-suspension-final-check r6-rollback phase-r6-check
+.PHONY: r6-test r6-preflight r6-legacy-replay r6-parity-verify r6-bounded-e2e r6-suspension-start r6-suspension-check r6-suspension-final-check r6-rollback r6-observation-recover r6-recovery-rollback phase-r6-check
 
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 PIP ?= $(shell [ -x .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
@@ -61,6 +61,9 @@ R6_SUSPENSION_START_REPORT ?= $(R6_RUN_DIR)/suspension-start-report.json
 R6_SUSPENSION_CHECK_REPORT ?= $(R6_RUN_DIR)/suspension-check-$(shell date -u +%Y%m%dT%H%M%SZ).json
 R6_SUSPENSION_FINAL_REPORT ?= $(R6_RUN_DIR)/suspension-final-report.json
 R6_ROLLBACK_REPORT ?= $(R6_RUN_DIR)/rollback-report.json
+R6_DURABLE_DIR ?= evidence/r6-realtime-retirement-20260724
+R6_RECOVERY_REPORT ?= $(R6_DURABLE_DIR)/observation-recovery-report.json
+R6_RECOVERY_ROLLBACK_REPORT ?= $(R6_DURABLE_DIR)/rollback-report.json
 PAIR_DATASET_DIR ?= data/datasets/pair-v1
 PAIR_DATASET_FLAGS ?=
 PAIR_LABEL_FLAGS ?=
@@ -255,6 +258,8 @@ help:
 	@echo "  r6-suspension-check Check canonical health during/after the observation window"
 	@echo "  r6-suspension-final-check Seal the required post-24-hour health evidence"
 	@echo "  r6-rollback Resume and verify the exact retained legacy service and offsets"
+	@echo "  r6-observation-recover Recover purged R6 evidence from authoritative live state"
+	@echo "  r6-recovery-rollback Run guarded rollback from the durable recovery report"
 	@echo "  cdc-sim-up   Start local PostgreSQL, Kafka, and Debezium containers"
 	@echo "  cdc-sim-migrate Apply idempotent schema updates to a retained local volume"
 	@echo "  cdc-sim-e2e  Run the PostgreSQL -> Debezium -> Kafka -> Go smoke test"
@@ -1546,11 +1551,23 @@ r6-rollback:
 		--check-report $(R6_SUSPENSION_FINAL_REPORT) \
 		--report $(R6_ROLLBACK_REPORT)
 
+r6-observation-recover:
+	WAREHOUSE_BACKEND=snowflake \
+		$(PY) scripts/recover_r6_realtime_observation.py capture \
+		--report $(R6_RECOVERY_REPORT)
+
+r6-recovery-rollback:
+	WAREHOUSE_BACKEND=snowflake \
+		$(PY) scripts/recover_r6_realtime_observation.py rollback \
+		--recovery-report $(R6_RECOVERY_REPORT) \
+		--report $(R6_RECOVERY_ROLLBACK_REPORT)
+
 phase-r6-check: r6-test
 	$(PY) scripts/audit_r6_realtime_dependencies.py --help >/dev/null
 	$(PY) scripts/replay_r6_legacy.py --help >/dev/null
 	$(PY) scripts/verify_r6_realtime_parity.py --help >/dev/null
 	$(PY) scripts/manage_r6_realtime_suspension.py --help >/dev/null
+	$(PY) scripts/recover_r6_realtime_observation.py --help >/dev/null
 
 c2-adapter-package-test:
 	$(PY) -m pytest -q tests/test_c2_adapter_packaging.py \

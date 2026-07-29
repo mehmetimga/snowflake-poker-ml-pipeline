@@ -30,6 +30,10 @@ from scripts.manage_r6_realtime_suspension import (
     _ready,
     _validate_start_report,
 )
+from scripts.recover_r6_realtime_observation import (
+    EXPECTED_SPEC_DIGEST,
+    evaluate_recovery,
+)
 
 
 def _payload() -> dict:
@@ -532,6 +536,72 @@ def test_canonical_snapshot_uses_snowflake_safe_count_alias(
     assert all("AS rows" not in query for query in queries)
 
 
+def test_recovered_observation_requires_continuous_suspension_and_health() -> None:
+    snapshot = {
+        "services": {
+            LEGACY_SERVICE: {
+                "status": "SUSPENDED",
+                "spec_digest": EXPECTED_SPEC_DIGEST,
+                "containers": [],
+            },
+            "POKER_SINK": {
+                "status": "RUNNING",
+                "containers": [
+                    {"status": "READY"},
+                    {"status": "READY"},
+                ],
+            },
+            "POKER_ADMIN": {
+                "status": "RUNNING",
+                "containers": [{"status": "READY"}],
+            },
+        },
+        "sink_lag": {"total_lag": 0},
+        "canonical": {
+            "admin_rows": 14,
+            "sink_dead_letter_rows": 139,
+        },
+        "legacy_kafka": {
+            "active_dependencies": [],
+            "legacy_group": {
+                "offsets": [
+                    {
+                        "topic": LEGACY_HANDS_TOPIC,
+                        "partition": 0,
+                        "committed": 99,
+                        "end": 99,
+                    }
+                ],
+                "total_lag": 0,
+            },
+        },
+    }
+    lifecycle = {
+        "status": "SUSPENDED",
+        "spec_digest": EXPECTED_SPEC_DIGEST,
+        "updated_on": "2026-07-24T09:07:08Z",
+        "suspended_on": "2026-07-24T09:07:08Z",
+        "resumed_on": "2026-07-24T07:05:53Z",
+    }
+
+    blockers, elapsed = evaluate_recovery(
+        snapshot=snapshot,
+        lifecycle=lifecycle,
+        observed_at=datetime(2026, 7, 29, 8, tzinfo=timezone.utc),
+    )
+
+    assert blockers == []
+    assert elapsed is not None and elapsed > 24
+
+    lifecycle["resumed_on"] = "2026-07-25T09:07:08Z"
+    blockers, _elapsed = evaluate_recovery(
+        snapshot=snapshot,
+        lifecycle=lifecycle,
+        observed_at=datetime(2026, 7, 29, 8, tzinfo=timezone.utc),
+    )
+    assert "POKER_REALTIME was resumed after the observed suspension" in blockers
+
+
 def test_r6_operational_entrypoints_are_packaged() -> None:
     root = Path(__file__).resolve().parent.parent
     makefile = (root / "Makefile").read_text()
@@ -544,6 +614,8 @@ def test_r6_operational_entrypoints_are_packaged() -> None:
         "r6-suspension-check:",
         "r6-suspension-final-check:",
         "r6-rollback:",
+        "r6-observation-recover:",
+        "r6-recovery-rollback:",
         "phase-r6-check:",
     ):
         assert target in makefile
@@ -552,6 +624,7 @@ def test_r6_operational_entrypoints_are_packaged() -> None:
         "scripts/replay_r6_legacy.py",
         "scripts/verify_r6_realtime_parity.py",
         "scripts/manage_r6_realtime_suspension.py",
+        "scripts/recover_r6_realtime_observation.py",
         "docs/poker-realtime-retirement.md",
     ):
         assert (root / relative).is_file()

@@ -551,16 +551,18 @@ Live evidence, 2026-07-24:
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: in progress; live preflight and bounded replacement parity passed.
-The controlled 24-hour suspension is the next gate.
+Status: in progress; live parity passed and the uninterrupted suspension has
+exceeded 24 hours. Current post-window health passed; durable recovery evidence
+and the rollback drill are pending.
 
 1. [x] Dual-run legacy and canonical paths on the same bounded synthetic dataset.
 2. [x] Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
    latency.
 3. [x] Confirm no active producer or consumer depends only on `hands.raw` or
    `alerts.out`.
-4. [ ] Suspend `POKER_REALTIME` for 24 hours in the POC.
-5. [ ] Verify admin freshness and canonical lag.
+4. [x] Suspend `POKER_REALTIME` for 24 hours in the POC.
+5. [ ] Seal the passed post-window admin, DLQ, dependency, and canonical-lag
+   evidence in the durable recovery report.
 6. [ ] Test rollback using the exact immutable legacy image/spec and committed
    Kafka offsets.
 7. [ ] Obtain explicit approval, then drop `POKER_REALTIME`.
@@ -581,8 +583,19 @@ group committed offset 99 with zero lag. Exact legacy persistence was 16 hands,
 96 players, 247 actions, 96 features, and 96 rule rows. The canonical D7
 acceptance remained 16 hands, 96 contexts, 240 pair features, 16 scores, 176
 evidence rows, 16 decisions, 14 alerts, zero target dead letters, and zero sink
-lag. See the immutable reports under
-`/private/tmp/poker-r6-realtime-retirement/`.
+lag. The original immutable reports were written under
+`/private/tmp/poker-r6-realtime-retirement/` before that temporary directory
+was purged.
+
+The `/private/tmp` reports were subsequently purged. Snowflake still showed the
+same July 24 suspension timestamp and original spec on July 29, proving that
+the service remained suspended for more than 24 hours. The live post-window
+audit found both canonical services ready, 14 D7 admin rows, the historical
+dead-letter total unchanged at 139, zero canonical lag, no active legacy
+dependency, and `hands.raw[0]` committed/end offset 99. R6 now uses
+`r6-observation-recover` to preserve this authoritative recovery evidence under
+`evidence/r6-realtime-retirement-20260724/` without claiming hashes for the
+deleted files.
 
 Target persistent count after R6 and `POKER_SINK`:
 

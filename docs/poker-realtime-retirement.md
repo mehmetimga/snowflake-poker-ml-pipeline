@@ -1,7 +1,7 @@
 # POKER_REALTIME retirement runbook
 
-Status: live preflight and bounded parity passed; controlled 24-hour suspension
-is the next gate
+Status: the suspension exceeded 24 hours and live post-window health passed;
+durable recovery evidence and the rollback drill are pending
 
 Last reviewed: 2026-07-24
 
@@ -67,6 +67,19 @@ It contains:
 Every live command refuses to overwrite an existing report. Use a new
 `R6_RUN_DIR` for a new attempt so failed and accepted evidence cannot be
 silently replaced.
+
+The original July 24 evidence was written under `/private/tmp` and was purged
+before the final check. Never use an operating-system temporary directory for
+retained evidence. The recovery workflow writes to:
+
+```text
+evidence/r6-realtime-retirement-20260724/
+```
+
+It explicitly records that the deleted files and their byte hashes cannot be
+reconstructed. It accepts the observation only from Snowflake's unchanged
+service lifecycle timestamps/spec plus current Snowflake and Kafka health; it
+does not fabricate replacement preflight, parity, or start reports.
 
 ## Local gate
 
@@ -212,6 +225,30 @@ The rollback passes only when:
 After the drill, the service may be suspended again for cost control only under
 an explicit operational decision.
 
+### Recovery workflow for the purged July 24 reports
+
+Run from a clean, pushed controller commit:
+
+```bash
+make r6-observation-recover
+make r6-recovery-rollback
+```
+
+The first command is read-only against Snowflake and Kafka. It requires:
+
+- `POKER_REALTIME` to remain suspended with its original spec digest;
+- Snowflake `suspended_on` to be at least 24 hours old, later than
+  `resumed_on`, and equal to the last service update;
+- `POKER_SINK` and `POKER_ADMIN` to be ready;
+- the 14 accepted D7 admin rows and unchanged dead-letter total;
+- zero canonical sink lag; and
+- no active legacy dependency, with `hands.raw[0]` still at committed/end
+  offset 99.
+
+The second command resumes the retained service and passes only when its
+original image/spec are ready, `realtime-processor` is active and caught up
+from offset 99, and canonical admin/DLQ/lag health remains unchanged.
+
 ## Accepted live evidence
 
 On 2026-07-24:
@@ -230,6 +267,12 @@ On 2026-07-24:
 - the single legacy thresholded alert and 14 canonical policy alerts were
   recorded as different output contracts, not compared as numerically equal
   scores.
+
+On 2026-07-29, Snowflake still reported `POKER_REALTIME` suspended with the
+unchanged July 24 suspension timestamp and original spec digest. Live
+post-window inspection also found both canonical services ready, 14 D7 admin
+rows, the dead-letter total unchanged at 139, zero lag on every canonical
+partition, no active legacy dependency, and legacy committed/end offset 99.
 
 ## Final retirement boundary
 
