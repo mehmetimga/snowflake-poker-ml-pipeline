@@ -1,8 +1,7 @@
 # POKER_REALTIME retirement runbook
 
 Status: the 120-hour suspension recovery and exact rollback drill passed;
-`POKER_REALTIME` is retained and running pending an explicit retention/drop
-decision
+`POKER_REALTIME` is retained and re-suspended pending separate drop approval
 
 Last reviewed: 2026-07-24
 
@@ -280,6 +279,14 @@ blockers. The rollback then restored the exact original image digest
 ready with zero restarts, `realtime-processor` became stable at committed/end
 offset 99 with zero lag, and canonical admin, dead-letter, and sink-lag health
 remained unchanged.
+
+After the successful rollback drill, explicit operational approval was given
+to re-suspend while retaining the service. Snowflake recorded the new
+suspension at `2026-07-29T10:12:30.461Z`. The post-suspension check passed with
+the legacy group empty at committed/end offset 99, both canonical services
+ready, 14 D7 admin alerts, dead letters unchanged at 139, and zero canonical
+sink lag. The service object, exact spec, image, offsets, and rollback evidence
+remain available; no drop occurred.
 
 ## Final retirement boundary
 

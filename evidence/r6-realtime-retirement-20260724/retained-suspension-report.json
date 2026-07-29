@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_type": "poker_realtime_retirement",
+  "phase": "retained_suspension",
+  "status": "passed",
+  "controller_commit": "bd5743e0ccd003470ab1990cac26084f4d9934cd",
+  "captured_at": "2026-07-29T10:14:14.226916Z",
+  "service_lifecycle": {
+    "created_on": "2026-07-18T22:35:18.852000Z",
+    "resumed_on": "2026-07-29T09:33:16.283000Z",
+    "suspended_on": "2026-07-29T10:12:30.461000Z",
+    "updated_on": "2026-07-29T10:12:30.461000Z"
+  },
+  "rollback_report": {
+    "path": "evidence/r6-realtime-retirement-20260724/rollback-report.json",
+    "sha256": "97d8f16dee8eeaa5202aa17daa8c200fd5200051c7c9acd158b1dbabeee1926f"
+  },
+  "retained_service": {
+    "name": "POKER_REALTIME",
+    "status": "SUSPENDED",
+    "current_instances": 0,
+    "target_instances": 1,
+    "spec_digest": "2941d7339e54e0105e9254c1999cdd07c6d7171dda63879b0eb7f01e2d89249d"
+  },
+  "legacy_kafka": {
+    "group_id": "realtime-processor",
+    "state": "EMPTY",
+    "members": 0,
+    "topic": "hands.raw",
+    "partition": 0,
+    "committed": 99,
+    "end": 99,
+    "lag": 0,
+    "active_dependencies": 0
+  },
+  "canonical": {
+    "poker_sink_status": "RUNNING",
+    "poker_sink_ready_containers": 2,
+    "poker_admin_status": "RUNNING",
+    "poker_admin_ready_containers": 1,
+    "admin_rows": 14,
+    "sink_dead_letter_rows": 139,
+    "sink_total_lag": 0
+  }
+}

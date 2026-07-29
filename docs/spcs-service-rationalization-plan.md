@@ -551,10 +551,10 @@ Live evidence, 2026-07-24:
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: retirement gates passed; the durable recovery report proved 120.4
-hours of uninterrupted suspension and the exact rollback drill passed.
-`POKER_REALTIME` is retained and running pending explicit retention/drop
-approval.
+Status: operational retirement gates passed. The durable recovery report
+proved 120.4 hours of uninterrupted suspension, the exact rollback drill
+passed, and `POKER_REALTIME` was re-suspended and retained. Physical drop still
+requires separate explicit approval.
 
 1. [x] Dual-run legacy and canonical paths on the same bounded synthetic dataset.
 2. [x] Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
@@ -567,7 +567,8 @@ approval.
 6. [x] Test rollback using the exact immutable legacy image/spec and committed
    Kafka offsets.
 7. [ ] Obtain explicit approval, then drop `POKER_REALTIME`.
-8. [ ] Retain its evidence and rollback manifest for the agreed retention window.
+8. [x] Retain its service object, evidence, and rollback manifest for the agreed
+   retention window.
 
 The executable gates, evidence chain, comparison semantics, suspension
 monitoring, and destructive-action boundary are defined in
@@ -604,6 +605,14 @@ guarded rollback then restored the original image digest
 with zero restarts, and a stable `realtime-processor` member at committed/end
 offset 99 with zero lag. Canonical admin remained at 14 accepted D7 alerts,
 dead letters remained at 139, and canonical sink lag remained zero.
+
+The retained service was then re-suspended under explicit operational
+approval. Snowflake recorded `suspended_on=2026-07-29T10:12:30.461Z`; the
+post-suspension audit found zero running legacy instances, an empty consumer
+group at committed/end offset 99, both canonical services ready, 14 D7 admin
+rows, 139 unchanged dead letters, and zero canonical sink lag. The retained
+suspension is recorded in
+`evidence/r6-realtime-retirement-20260724/retained-suspension-report.json`.
 
 Target persistent count after R6 and `POKER_SINK`:
 
