@@ -551,9 +551,10 @@ Live evidence, 2026-07-24:
 
 ### R6 — Retire `POKER_REALTIME`
 
-Status: in progress; live parity passed and the uninterrupted suspension has
-exceeded 24 hours. Current post-window health passed; durable recovery evidence
-and the rollback drill are pending.
+Status: retirement gates passed; the durable recovery report proved 120.4
+hours of uninterrupted suspension and the exact rollback drill passed.
+`POKER_REALTIME` is retained and running pending explicit retention/drop
+approval.
 
 1. [x] Dual-run legacy and canonical paths on the same bounded synthetic dataset.
 2. [x] Compare inputs, features, scores, decisions, persisted rows, DLQs, lag, and
@@ -561,9 +562,9 @@ and the rollback drill are pending.
 3. [x] Confirm no active producer or consumer depends only on `hands.raw` or
    `alerts.out`.
 4. [x] Suspend `POKER_REALTIME` for 24 hours in the POC.
-5. [ ] Seal the passed post-window admin, DLQ, dependency, and canonical-lag
+5. [x] Seal the passed post-window admin, DLQ, dependency, and canonical-lag
    evidence in the durable recovery report.
-6. [ ] Test rollback using the exact immutable legacy image/spec and committed
+6. [x] Test rollback using the exact immutable legacy image/spec and committed
    Kafka offsets.
 7. [ ] Obtain explicit approval, then drop `POKER_REALTIME`.
 8. [ ] Retain its evidence and rollback manifest for the agreed retention window.
@@ -596,6 +597,13 @@ dependency, and `hands.raw[0]` committed/end offset 99. R6 now uses
 `r6-observation-recover` to preserve this authoritative recovery evidence under
 `evidence/r6-realtime-retirement-20260724/` without claiming hashes for the
 deleted files.
+
+The durable report recorded 120.4 suspension hours with no blockers. The
+guarded rollback then restored the original image digest
+`sha256:79d875...fd3a` and spec digest `2941d733...249d`, one ready container
+with zero restarts, and a stable `realtime-processor` member at committed/end
+offset 99 with zero lag. Canonical admin remained at 14 accepted D7 alerts,
+dead letters remained at 139, and canonical sink lag remained zero.
 
 Target persistent count after R6 and `POKER_SINK`:
 

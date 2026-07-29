@@ -1,7 +1,8 @@
 # POKER_REALTIME retirement runbook
 
-Status: the suspension exceeded 24 hours and live post-window health passed;
-durable recovery evidence and the rollback drill are pending
+Status: the 120-hour suspension recovery and exact rollback drill passed;
+`POKER_REALTIME` is retained and running pending an explicit retention/drop
+decision
 
 Last reviewed: 2026-07-24
 
@@ -273,6 +274,12 @@ unchanged July 24 suspension timestamp and original spec digest. Live
 post-window inspection also found both canonical services ready, 14 D7 admin
 rows, the dead-letter total unchanged at 139, zero lag on every canonical
 partition, no active legacy dependency, and legacy committed/end offset 99.
+The durable recovery report passed with 120.4 observed suspension hours and no
+blockers. The rollback then restored the exact original image digest
+`sha256:79d875...fd3a` and spec digest `2941d733...249d`; the container became
+ready with zero restarts, `realtime-processor` became stable at committed/end
+offset 99 with zero lag, and canonical admin, dead-letter, and sink-lag health
+remained unchanged.
 
 ## Final retirement boundary
 

@@ -1,0 +1,303 @@
+{
+  "blockers": [],
+  "controller_commit": "3394326ae4e75b05a10f8d6c91e6616d4588a7b9",
+  "current": {
+    "canonical": {
+      "admin_latest_ingested_at": "2026-07-23 23:59:21.514000-07:00",
+      "admin_rows": 14,
+      "dataset_id": "multitable-alert-acceptance-v1",
+      "sink_dead_letter_latest_ingested_at": "2026-07-23 19:07:25.065000-07:00",
+      "sink_dead_letter_rows": 139
+    },
+    "captured_at": "2026-07-29T09:30:23.937352Z",
+    "legacy_kafka": {
+      "active_dependencies": [],
+      "groups_with_legacy_offsets": [
+        {
+          "active": false,
+          "group_id": "realtime-processor",
+          "members": 0,
+          "offsets": [
+            {
+              "committed": 99,
+              "end": 99,
+              "lag": 0,
+              "partition": 0,
+              "topic": "hands.raw"
+            }
+          ],
+          "state": "EMPTY",
+          "total_lag": 0
+        }
+      ],
+      "legacy_group": {
+        "active": false,
+        "group_id": "realtime-processor",
+        "members": 0,
+        "offsets": [
+          {
+            "committed": 99,
+            "end": 99,
+            "lag": 0,
+            "partition": 0,
+            "topic": "hands.raw"
+          }
+        ],
+        "state": "EMPTY",
+        "total_lag": 0
+      }
+    },
+    "services": {
+      "POKER_ADMIN": {
+        "containers": [
+          {
+            "container_name": "admin",
+            "image_digest": "sha256:9911c6b455e2d64a7338da136cf14ec7023568bf2a034c2cc7b0ad316ae8de23",
+            "image_name": "clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo/poker-pipeline:0ae4a9b00930",
+            "last_exit_code": null,
+            "restart_count": 0,
+            "status": "READY"
+          }
+        ],
+        "current_instances": 1,
+        "spec_digest": "c13529fc1b54b1fb8d137e59dace91e991b3b5ac34dad31b7c78ff22cc93211f",
+        "status": "RUNNING",
+        "target_instances": 1
+      },
+      "POKER_REALTIME": {
+        "containers": [],
+        "current_instances": 0,
+        "spec_digest": "2941d7339e54e0105e9254c1999cdd07c6d7171dda63879b0eb7f01e2d89249d",
+        "status": "SUSPENDED",
+        "target_instances": 1
+      },
+      "POKER_SINK": {
+        "containers": [
+          {
+            "container_name": "sink",
+            "image_digest": "sha256:65d7f6f8a92e361ac89078bfb8e6becdc2f513a06a328ceddd76deb44c306cf5",
+            "image_name": "clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo/poker-sink:904903c5e49d",
+            "last_exit_code": 1,
+            "restart_count": 2,
+            "status": "READY"
+          },
+          {
+            "container_name": "snowflake-writer",
+            "image_digest": "sha256:65d7f6f8a92e361ac89078bfb8e6becdc2f513a06a328ceddd76deb44c306cf5",
+            "image_name": "clbsdfj-bq59861.registry.snowflakecomputing.com/poker_ml_demo/spcs/poker_ml_repo/poker-sink:904903c5e49d",
+            "last_exit_code": null,
+            "restart_count": 0,
+            "status": "READY"
+          }
+        ],
+        "current_instances": 1,
+        "spec_digest": "d6c44c6bbf0e46ff8db73ea85595abfc0858c86c412da38eed24f47de2b8f842",
+        "status": "RUNNING",
+        "target_instances": 1
+      }
+    },
+    "sink_lag": {
+      "partitions": [
+        {
+          "committed": 155,
+          "end": 155,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.hand-player-context.v2"
+        },
+        {
+          "committed": 124,
+          "end": 124,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.hand-player-context.v2"
+        },
+        {
+          "committed": 105,
+          "end": 105,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.hand-player-context.v2"
+        },
+        {
+          "committed": 28,
+          "end": 28,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.hands.raw.v1"
+        },
+        {
+          "committed": 10,
+          "end": 10,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.hands.raw.v1"
+        },
+        {
+          "committed": 28,
+          "end": 28,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.hands.raw.v1"
+        },
+        {
+          "committed": 145,
+          "end": 145,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.pair-features.context-v2.v1"
+        },
+        {
+          "committed": 190,
+          "end": 190,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.pair-features.context-v2.v1"
+        },
+        {
+          "committed": 160,
+          "end": 160,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.pair-features.context-v2.v1"
+        },
+        {
+          "committed": null,
+          "end": 0,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.pipeline.dead-letter.v1"
+        },
+        {
+          "committed": 139,
+          "end": 139,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.pipeline.dead-letter.v1"
+        },
+        {
+          "committed": null,
+          "end": 0,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.pipeline.dead-letter.v1"
+        },
+        {
+          "committed": 6,
+          "end": 6,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.review-decisions.v1"
+        },
+        {
+          "committed": 5,
+          "end": 5,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.review-decisions.v1"
+        },
+        {
+          "committed": 9,
+          "end": 9,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.review-decisions.v1"
+        },
+        {
+          "committed": 3,
+          "end": 3,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.risk-alerts.v1"
+        },
+        {
+          "committed": 4,
+          "end": 4,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.risk-alerts.v1"
+        },
+        {
+          "committed": 7,
+          "end": 7,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.risk-alerts.v1"
+        },
+        {
+          "committed": 6,
+          "end": 6,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.risk-scores.v1"
+        },
+        {
+          "committed": 5,
+          "end": 5,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.risk-scores.v1"
+        },
+        {
+          "committed": 9,
+          "end": 9,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.risk-scores.v1"
+        },
+        {
+          "committed": 99,
+          "end": 99,
+          "lag": 0,
+          "partition": 0,
+          "topic": "poker.synthetic.rule-evidence.v1"
+        },
+        {
+          "committed": 61,
+          "end": 61,
+          "lag": 0,
+          "partition": 1,
+          "topic": "poker.synthetic.rule-evidence.v1"
+        },
+        {
+          "committed": 81,
+          "end": 81,
+          "lag": 0,
+          "partition": 2,
+          "topic": "poker.synthetic.rule-evidence.v1"
+        }
+      ],
+      "total_lag": 0
+    }
+  },
+  "expected_contract": {
+    "admin_rows": 14,
+    "dataset_id": "multitable-alert-acceptance-v1",
+    "image_digest": "sha256:79d87545891735cdc057915beaaa7a6288c83142bcf91859d29cac65f176fd3a",
+    "legacy_offset": 99,
+    "legacy_partition": 0,
+    "legacy_topic": "hands.raw",
+    "sink_dead_letter_rows": 139,
+    "spec_digest": "2941d7339e54e0105e9254c1999cdd07c6d7171dda63879b0eb7f01e2d89249d"
+  },
+  "limitations": [
+    "the deleted byte-for-byte preflight/parity/start reports cannot be reconstructed",
+    "this report does not claim hashes for deleted evidence"
+  ],
+  "minimum_suspension_hours": 24.0,
+  "observed_at": "2026-07-29T09:30:19.544120Z",
+  "observed_suspension_hours": 120.38608864444444,
+  "phase": "suspension_observation_recovery",
+  "recovery_reason": "original immutable reports were purged from /private/tmp; Snowflake lifecycle metadata and current Snowflake/Kafka state are used as the authoritative recovery evidence",
+  "run_type": "poker_realtime_retirement",
+  "schema_version": 1,
+  "service_lifecycle": {
+    "created_on": "2026-07-18T22:35:18.852000Z",
+    "resumed_on": "2026-07-24T07:05:53.356000Z",
+    "spec_digest": "2941d7339e54e0105e9254c1999cdd07c6d7171dda63879b0eb7f01e2d89249d",
+    "status": "SUSPENDED",
+    "suspended_on": "2026-07-24T09:07:09.625000Z",
+    "updated_on": "2026-07-24T09:07:09.625000Z"
+  },
+  "status": "passed"
+}
