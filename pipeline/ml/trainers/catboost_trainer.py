@@ -6,7 +6,12 @@ import numpy as np
 from catboost import CatBoostClassifier
 
 
-def train_catboost(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> CatBoostClassifier:
+def train_catboost(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+) -> CatBoostClassifier:
     model = CatBoostClassifier(
         iterations=300,
         depth=6,
@@ -17,6 +22,7 @@ def train_catboost(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, 
         auto_class_weights="Balanced",
         random_seed=42,
         verbose=False,
+        allow_writing_files=False,
     )
     model.fit(X_train, y_train, eval_set=(X_val, y_val), verbose=False)
     return model
